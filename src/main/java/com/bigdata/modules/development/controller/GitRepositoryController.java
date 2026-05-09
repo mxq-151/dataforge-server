@@ -4,6 +4,7 @@ import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.dto.CreateFileRequest;
 import com.bigdata.modules.development.dto.CreateFolderRequest;
 import com.bigdata.modules.development.service.DevProjectService;
+import com.bigdata.modules.development.vo.FileContentVO;
 import com.bigdata.modules.development.vo.GitCommitInfo;
 import com.bigdata.modules.development.vo.GitFileInfo;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,11 +34,11 @@ public class GitRepositoryController {
     }
 
     @GetMapping("/{projectId}/file")
-    public Result<Map<String, Object>> readFileContent(
+    public Result<FileContentVO> readFileContent(
             @PathVariable Long projectId,
             @RequestParam String filePath,
             @RequestParam(required = false, defaultValue = "main") String branch) {
-        Map<String, Object> content = devProjectService.readFileContent(projectId, filePath, branch);
+        FileContentVO content = devProjectService.readFileContent(projectId, filePath, branch);
         return Result.success(content);
     }
 
@@ -53,14 +54,11 @@ public class GitRepositoryController {
     @PutMapping("/{projectId}/file")
     public Result<Map<String, Object>> updateFile(
             @PathVariable Long projectId,
-            @RequestParam String filePath,
-            @RequestBody Map<String, String> body) {
+            @RequestBody CreateFileRequest request) {
 
-        String content = body.get("content");
-        String message = body.get("message");
-
+        request.setProjectId(projectId);
         Map<String, Object> result = devProjectService.updateFile(
-                projectId, filePath, content, "System", "system@bigdata-platform.com", message);
+                request, "System", "system@bigdata-platform.com");
         return Result.success(result);
     }
 

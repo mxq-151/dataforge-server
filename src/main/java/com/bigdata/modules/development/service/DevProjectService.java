@@ -4,13 +4,16 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.modules.development.dto.CreateFileRequest;
 import com.bigdata.modules.development.dto.CreateFolderRequest;
+import com.bigdata.modules.development.entity.DevFileMeta;
 import com.bigdata.modules.development.entity.DevProject;
 import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.development.util.FileUtils;
 import com.bigdata.modules.development.util.GitPathUtils;
+import com.bigdata.modules.development.vo.FileContentVO;
 import com.bigdata.modules.development.vo.GitAuthor;
 import com.bigdata.modules.development.vo.GitCommitInfo;
 import com.bigdata.modules.development.vo.GitFileInfo;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,12 +33,16 @@ public class DevProjectService {
 
     private final DevProjectMapper devProjectMapper;
     private final GitRepositoryService gitRepositoryService;
+    private final DevFileMetaService devFileMetaService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired
     public DevProjectService(DevProjectMapper devProjectMapper,
-                             GitRepositoryService gitRepositoryService) {
+                             GitRepositoryService gitRepositoryService,
+                             DevFileMetaService devFileMetaService) {
         this.devProjectMapper = devProjectMapper;
         this.gitRepositoryService = gitRepositoryService;
+        this.devFileMetaService = devFileMetaService;
     }
 
     public Page<DevProject> getProjectList(int current, int size, String projectName, String projectCode, Integer status) {
@@ -106,16 +113,49 @@ public class DevProjectService {
         }
     }
 
-    public Map<String, Object> readFileContent(Long projectId, String filePath, String branch) {
+    public FileContentVO readFileContent(Long projectId, String filePath, String branch) {
         try {
             ensureRepositoryExists(projectId);
             String content = gitRepositoryService.readFileContent(projectId, filePath, branch);
 
-            return Map.of(
-                    "path", filePath,
-                    "content", content,
-                    "size", content != null ? content.getBytes().length : 0
-            );
+            FileContentVO vo = new FileContentVO();
+            vo.setProjectId(projectId);
+            vo.setFilePath(filePath);
+            vo.setContent(content);
+            vo.setSize(content != null ? content.getBytes().length : 0);
+
+            String fileName = filePath;
+            if (filePath.contains("/")) {
+                fileName = filePath.substring(filePath.lastIndexOf("/") + 1);
+            }
+            vo.setName(fileName);
+
+            if (filePath.contains("/")) {
+                vo.setParentPath(filePath.substring(0, filePath.lastIndexOf("/")));
+            }
+
+            DevFileMeta meta = devFileMetaService.getByProjectAndFilePath(projectId, filePath);
+            if (meta != null) {
+                vo.setDatasources(parseJsonList(meta.getDatasources()));
+                vo.setRemark(meta.getRemark());
+                vo.setEngine(meta.getEngine());
+                vo.setRunParams(parseJsonMap(meta.getRunParams()));
+                vo.setComputeResources(parseJsonMap(meta.getComputeResources()));
+
+                if (meta.getJarDependencyCatalogs() != null && !meta.getJarDependencyCatalogs().isEmpty()) {
+                    try {
+                        List<String> catalogs = objectMapper.readValue(
+                                meta.getJarDependencyCatalogs(),
+                                objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)
+                        );
+                        vo.setJarDependencyCatalogs(catalogs);
+                    } catch (Exception e) {
+                        log.warn("反序列化依赖包分类失败", e);
+                    }
+                }
+            }
+
+            return vo;
         } catch (Exception e) {
             log.error("读取文件内容失败: projectId={}, filePath={}", projectId, filePath, e);
             throw new GitOperationException("读取文件内容失败: " + e.getMessage(), e);
@@ -136,6 +176,17 @@ public class DevProjectService {
                     request.getContent(),
                     gitAuthor,
                     "Create file: " + request.getName()
+            );
+
+            devFileMetaService.saveFileMeta(
+                    request.getProjectId(),
+                    filePath,
+                    request.getDatasources(),
+                    request.getJarDependencyCatalogs(),
+                    request.getRemark(),
+                    request.getEngine(),
+                    request.getRunParams(),
+                    request.getComputeResources()
             );
 
             return Map.of(
@@ -170,6 +221,47 @@ public class DevProjectService {
             );
         } catch (Exception e) {
             log.error("更新文件失败: projectId={}, filePath={}", projectId, filePath, e);
+            throw new GitOperationException("更新文件失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> updateFile(CreateFileRequest request, String author, String email) {
+        try {
+            ensureRepositoryExists(request.getProjectId());
+
+            String filePath = request.getFilePath();
+            if (filePath == null || filePath.isEmpty()) {
+                filePath = buildFilePath(request.getParentPath(), request.getName());
+            }
+
+            GitAuthor gitAuthor = new GitAuthor(author, email);
+            gitRepositoryService.writeFileContent(
+                    request.getProjectId(),
+                    filePath,
+                    request.getContent(),
+                    gitAuthor,
+                    request.getMessage() != null ? request.getMessage() : ("Update: " + filePath)
+            );
+
+            devFileMetaService.saveFileMeta(
+                    request.getProjectId(),
+                    filePath,
+                    request.getDatasources(),
+                    request.getJarDependencyCatalogs(),
+                    request.getRemark(),
+                    request.getEngine(),
+                    request.getRunParams(),
+                    request.getComputeResources()
+            );
+
+            return Map.of(
+                    "success", true,
+                    "message", "文件更新成功",
+                    "path", filePath
+            );
+        } catch (Exception e) {
+            log.error("更新文件失败", e);
             throw new GitOperationException("更新文件失败: " + e.getMessage(), e);
         }
     }
@@ -375,6 +467,32 @@ public class DevProjectService {
 
         public GitOperationException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    private List<String> parseJsonList(String json) {
+        if (json == null || json.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+        } catch (Exception e) {
+            log.warn("反序列化JSON列表失败", e);
+            return List.of();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseJsonMap(String json) {
+        if (json == null || json.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, Map.class);
+        } catch (Exception e) {
+            log.warn("反序列化JSON Map失败", e);
+            return Map.of();
         }
     }
 }

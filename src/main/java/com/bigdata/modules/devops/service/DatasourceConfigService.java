@@ -69,6 +69,16 @@ public class DatasourceConfigService {
         return datasourceConfigMapper.selectById(id);
     }
 
+    public DatasourceConfig getDatasourceByName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return null;
+        }
+        LambdaQueryWrapper<DatasourceConfig> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(DatasourceConfig::getDatasourceName, name.trim());
+        wrapper.last("LIMIT 1");
+        return datasourceConfigMapper.selectOne(wrapper);
+    }
+
     public void saveDatasource(DatasourceConfig config) {
         config.setConnectionStatus(0);
         datasourceConfigMapper.insert(config);
