@@ -8,11 +8,9 @@ import java.util.List;
 
 public enum DocType {
 
-    BUSINESS_TERM("business_term", "业务术语"),
-    PROCESS_DOC("process_doc", "流程文档"),
-    DEPLOY_DOC("deploy_doc", "部署文档"),
-    LINEAGE_DOC("lineage_doc", "血缘文档"),
-    OTHER("other", "其他");
+    BUSINESS_KNOWLEDGE("business_knowledge", "业务知识"),
+    CLUSTER_OPS("cluster_ops", "集群运维"),
+    DEV_STANDARD("dev_standard", "开发规范");
 
     @EnumValue
     @JsonValue

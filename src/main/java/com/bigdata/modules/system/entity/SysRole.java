@@ -8,6 +8,7 @@ public class SysRole extends BaseEntity {
 
     private String roleName;
     private String roleCode;
+    private String roleType;
     private String description;
     private Integer status;
 
@@ -25,6 +26,14 @@ public class SysRole extends BaseEntity {
 
     public void setRoleCode(String roleCode) {
         this.roleCode = roleCode;
+    }
+
+    public String getRoleType() {
+        return roleType;
+    }
+
+    public void setRoleType(String roleType) {
+        this.roleType = roleType;
     }
 
     public String getDescription() {

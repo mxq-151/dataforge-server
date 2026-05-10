@@ -9,7 +9,10 @@ public class TablePermissionVO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private Long id;
-    private Long tableMetadataId;
+    private List<Long> tableMetadataIds;
+    private String datasourceName;
+    private String databaseName;
+    private List<String> tableNames;
     private String permissionName;
     private Integer permissionScope;
     private Integer canSelect;
@@ -33,12 +36,36 @@ public class TablePermissionVO implements Serializable {
         this.id = id;
     }
 
-    public Long getTableMetadataId() {
-        return tableMetadataId;
+    public List<Long> getTableMetadataIds() {
+        return tableMetadataIds;
     }
 
-    public void setTableMetadataId(Long tableMetadataId) {
-        this.tableMetadataId = tableMetadataId;
+    public void setTableMetadataIds(List<Long> tableMetadataIds) {
+        this.tableMetadataIds = tableMetadataIds;
+    }
+
+    public String getDatasourceName() {
+        return datasourceName;
+    }
+
+    public void setDatasourceName(String datasourceName) {
+        this.datasourceName = datasourceName;
+    }
+
+    public String getDatabaseName() {
+        return databaseName;
+    }
+
+    public void setDatabaseName(String databaseName) {
+        this.databaseName = databaseName;
+    }
+
+    public List<String> getTableNames() {
+        return tableNames;
+    }
+
+    public void setTableNames(List<String> tableNames) {
+        this.tableNames = tableNames;
     }
 
     public String getPermissionName() {

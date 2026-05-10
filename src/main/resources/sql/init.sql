@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS sys_role (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     role_name VARCHAR(50) NOT NULL COMMENT '角色名称',
     role_code VARCHAR(50) NOT NULL COMMENT '角色编码',
+    role_type VARCHAR(30) NOT NULL DEFAULT 'VIEWER' COMMENT '角色类型(SUPER_ADMIN/OPS/DEVELOPER/ANALYST/VIEWER)',
     description VARCHAR(255) COMMENT '角色描述',
     status TINYINT NOT NULL DEFAULT 1 COMMENT '状态(0-禁用 1-启用)',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -155,12 +156,41 @@ INSERT INTO sys_user (username, password, real_name, status) VALUES
 ('admin', '357f3724ff339b2a1602c390d59498fd', '超级管理员', 1);
 
 -- 初始角色
-INSERT INTO sys_role (role_name, role_code, description, status) VALUES
-('超级管理员', 'admin', '系统超级管理员,拥有所有权限', 1),
-('运维人员', 'ops', '运维管理人员,负责系统配置和监控', 1),
-('开发人员', 'developer', '数据开发工程师,负责SQL开发和任务提交', 1),
-('分析师', 'analyst', '数据分析人员,负责数据探查和分析', 1),
-('普通用户', 'viewer', '普通用户,拥有只读权限', 1);
+INSERT INTO sys_role (role_name, role_code, role_type, description, status) VALUES
+('超级管理员', 'admin', 'SUPER_ADMIN', '系统超级管理员,拥有所有权限', 1),
+('运维人员', 'ops', 'OPS', '运维管理人员,负责系统配置和监控', 1),
+('开发人员', 'developer', 'DEVELOPER', '数据开发工程师,负责SQL开发和任务提交', 1),
+('分析师', 'analyst', 'ANALYST', '数据分析人员,负责数据探查和分析', 1),
+('普通用户', 'viewer', 'VIEWER', '普通用户,拥有只读权限', 1);
 
 -- 管理员分配角色
 INSERT INTO sys_user_role (user_id, role_id) VALUES (1, 1);
+
+-- 库表CRUD权限表
+CREATE TABLE IF NOT EXISTS sys_table_permission (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    permission_name VARCHAR(100) NOT NULL COMMENT '权限名称',
+    permission_scope TINYINT NOT NULL DEFAULT 1 COMMENT '权限范围(1-整表 2-指定字段 3-指定行 4-字段+行级组合)',
+    can_select TINYINT NOT NULL DEFAULT 1 COMMENT '查询权限(0-否 1-是)',
+    can_insert TINYINT NOT NULL DEFAULT 0 COMMENT '插入权限(0-否 1-是)',
+    can_update TINYINT NOT NULL DEFAULT 0 COMMENT '更新权限(0-否 1-是)',
+    can_delete TINYINT NOT NULL DEFAULT 0 COMMENT '删除权限(0-否 1-是)',
+    can_export TINYINT NOT NULL DEFAULT 0 COMMENT '导出权限(0-否 1-是)',
+    row_filter_sql TEXT DEFAULT NULL COMMENT '行级过滤SQL条件(WHERE子句)',
+    data_masking_rule VARCHAR(500) DEFAULT NULL COMMENT '数据脱敏规则(JSON格式)',
+    description VARCHAR(500) DEFAULT NULL COMMENT '描述',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='库表CRUD权限表';
+
+-- 权限-表关联表（多对多）
+CREATE TABLE IF NOT EXISTS sys_permission_table (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    table_permission_id BIGINT NOT NULL COMMENT '库表权限ID',
+    table_metadata_id BIGINT NOT NULL COMMENT '库表元数据ID',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    UNIQUE KEY uk_perm_table (table_permission_id, table_metadata_id),
+    KEY idx_table_permission_id (table_permission_id),
+    KEY idx_table_metadata_id (table_metadata_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='权限-表关联表';

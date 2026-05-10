@@ -1,8 +1,10 @@
 package com.bigdata.modules.system.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.common.entity.BaseEntity;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @TableName("sys_user")
 public class SysUser extends BaseEntity {
@@ -15,6 +17,12 @@ public class SysUser extends BaseEntity {
     private String avatar;
     private Integer status;
     private LocalDateTime lastLoginTime;
+
+    @TableField(exist = false)
+    private List<String> roles;
+
+    @TableField(exist = false)
+    private List<Long> roleIds;
 
     public String getUsername() {
         return username;
@@ -78,5 +86,21 @@ public class SysUser extends BaseEntity {
 
     public void setLastLoginTime(LocalDateTime lastLoginTime) {
         this.lastLoginTime = lastLoginTime;
+    }
+
+    public List<String> getRoles() {
+        return roles;
+    }
+
+    public void setRoles(List<String> roles) {
+        this.roles = roles;
+    }
+
+    public List<Long> getRoleIds() {
+        return roleIds;
+    }
+
+    public void setRoleIds(List<Long> roleIds) {
+        this.roleIds = roleIds;
     }
 }

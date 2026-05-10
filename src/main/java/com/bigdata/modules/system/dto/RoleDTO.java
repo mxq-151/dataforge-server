@@ -16,6 +16,9 @@ public class RoleDTO {
     @Size(max = 50, message = "角色编码不能超过50字符")
     private String roleCode;
 
+    @NotBlank(message = "角色类型不能为空")
+    private String roleType;
+
     @Size(max = 255, message = "角色描述不能超过255字符")
     private String description;
 
@@ -46,6 +49,14 @@ public class RoleDTO {
 
     public void setRoleCode(String roleCode) {
         this.roleCode = roleCode;
+    }
+
+    public String getRoleType() {
+        return roleType;
+    }
+
+    public void setRoleType(String roleType) {
+        this.roleType = roleType;
     }
 
     public String getDescription() {

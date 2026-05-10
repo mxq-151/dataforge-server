@@ -2,6 +2,10 @@ package com.bigdata.modules.system.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
+import com.bigdata.modules.metadata.entity.TableMetadata;
+import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
 import com.bigdata.modules.system.entity.*;
 import com.bigdata.modules.system.mapper.*;
 import com.bigdata.modules.system.vo.FilePermissionVO;
@@ -13,8 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -46,6 +49,15 @@ public class PermissionService {
 
     @Autowired
     private SysRoleMapper roleMapper;
+
+    @Autowired
+    private TableMetadataMapper tableMetadataMapper;
+
+    @Autowired
+    private DatasourceConfigMapper datasourceConfigMapper;
+
+    @Autowired
+    private SysPermissionTableMapper permissionTableMapper;
 
     public Page<MenuPermissionVO> getMenuPermissionList(int current, int size, String menuName) {
         Page<SysMenuPermission> page = new Page<>(current, size);
@@ -164,7 +176,7 @@ public class PermissionService {
         return toTablePermissionVOPage(entityPage);
     }
 
-    public TablePermissionVO saveTablePermission(SysTablePermission permission, List<Long> roleIds) {
+    public TablePermissionVO saveTablePermission(SysTablePermission permission, List<Long> roleIds, List<Long> tableMetadataIds) {
         if (permission.getCanSelect() == null) permission.setCanSelect(1);
         if (permission.getCanInsert() == null) permission.setCanInsert(0);
         if (permission.getCanUpdate() == null) permission.setCanUpdate(0);
@@ -172,19 +184,23 @@ public class PermissionService {
         if (permission.getCanExport() == null) permission.setCanExport(0);
         tablePermissionMapper.insert(permission);
         saveTablePermissionRoles(permission.getId(), roleIds);
-        return toTablePermissionVO(permission, roleIds);
+        savePermissionTables(permission.getId(), tableMetadataIds);
+        return toTablePermissionVO(permission, roleIds, tableMetadataIds);
     }
 
-    public TablePermissionVO updateTablePermission(SysTablePermission permission, List<Long> roleIds) {
+    public TablePermissionVO updateTablePermission(SysTablePermission permission, List<Long> roleIds, List<Long> tableMetadataIds) {
         tablePermissionMapper.updateById(permission);
         roleTablePermissionMapper.deleteByPermissionId(permission.getId());
         saveTablePermissionRoles(permission.getId(), roleIds);
-        return toTablePermissionVO(permission, roleIds);
+        permissionTableMapper.deleteByPermissionId(permission.getId());
+        savePermissionTables(permission.getId(), tableMetadataIds);
+        return toTablePermissionVO(permission, roleIds, tableMetadataIds);
     }
 
     public void deleteTablePermission(Long id) {
-        tablePermissionMapper.deleteById(id);
+        permissionTableMapper.deleteByPermissionId(id);
         roleTablePermissionMapper.deleteByPermissionId(id);
+        tablePermissionMapper.deleteById(id);
     }
 
     @Transactional
@@ -295,7 +311,7 @@ public class PermissionService {
         return voPage;
     }
 
-    private TablePermissionVO toTablePermissionVO(SysTablePermission entity, List<Long> roleIds) {
+    private TablePermissionVO toTablePermissionVO(SysTablePermission entity, List<Long> roleIds, List<Long> tableMetadataIds) {
         Map<Long, String> roleNameMap = getAllRoleNameMap();
         TablePermissionVO vo = new TablePermissionVO();
         BeanUtils.copyProperties(entity, vo);
@@ -303,13 +319,57 @@ public class PermissionService {
         vo.setRoleNames(vo.getRoleIds().stream()
                 .map(roleId -> roleNameMap.getOrDefault(roleId, "未知"))
                 .collect(Collectors.toList()));
+
+        if (tableMetadataIds != null && !tableMetadataIds.isEmpty()) {
+            vo.setTableMetadataIds(tableMetadataIds);
+            fillTableInfo(vo, tableMetadataIds);
+        } else {
+            vo.setTableMetadataIds(List.of());
+            vo.setTableNames(List.of());
+        }
         return vo;
     }
 
     private Page<TablePermissionVO> toTablePermissionVOPage(Page<SysTablePermission> entityPage) {
         Map<Long, String> roleNameMap = getAllRoleNameMap();
+
+        List<SysTablePermission> records = entityPage.getRecords();
+
+        Set<Long> allTableMetadataIds = new HashSet<>();
+        Map<Long, List<Long>> permissionTableMap = new HashMap<>();
+        for (SysTablePermission entity : records) {
+            List<Long> tIds = permissionTableMapper.selectTableMetadataIdsByPermissionId(entity.getId());
+            permissionTableMap.put(entity.getId(), tIds);
+            if (tIds != null) {
+                allTableMetadataIds.addAll(tIds);
+            }
+        }
+
+        Map<Long, TableMetadata> tableMetadataMap;
+        if (!allTableMetadataIds.isEmpty()) {
+            List<TableMetadata> tables = tableMetadataMapper.selectBatchIds(allTableMetadataIds);
+            tableMetadataMap = tables.stream()
+                    .collect(Collectors.toMap(TableMetadata::getId, t -> t));
+        } else {
+            tableMetadataMap = new HashMap<>();
+        }
+
+        Set<Long> datasourceIds = tableMetadataMap.values().stream()
+                .map(TableMetadata::getDatasourceId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Map<Long, DatasourceConfig> datasourceMap;
+        if (!datasourceIds.isEmpty()) {
+            List<DatasourceConfig> datasources = datasourceConfigMapper.selectBatchIds(datasourceIds);
+            datasourceMap = datasources.stream()
+                    .collect(Collectors.toMap(DatasourceConfig::getId, d -> d));
+        } else {
+            datasourceMap = new HashMap<>();
+        }
+
         Page<TablePermissionVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
-        voPage.setRecords(entityPage.getRecords().stream().map(entity -> {
+        voPage.setRecords(records.stream().map(entity -> {
             TablePermissionVO vo = new TablePermissionVO();
             BeanUtils.copyProperties(entity, vo);
             List<Long> roleIds = roleTablePermissionMapper.selectRoleIdsByPermissionId(entity.getId());
@@ -317,9 +377,70 @@ public class PermissionService {
             vo.setRoleNames(roleIds.stream()
                     .map(rId -> roleNameMap.getOrDefault(rId, "未知"))
                     .collect(Collectors.toList()));
+
+            List<Long> tIds = permissionTableMap.getOrDefault(entity.getId(), List.of());
+            vo.setTableMetadataIds(tIds);
+
+            if (!tIds.isEmpty()) {
+                List<String> tableNames = new ArrayList<>();
+                String dbName = null;
+                Long dsId = null;
+                for (Long tid : tIds) {
+                    TableMetadata tm = tableMetadataMap.get(tid);
+                    if (tm != null) {
+                        tableNames.add(tm.getTableName());
+                        if (dbName == null) {
+                            dbName = tm.getDatabaseName();
+                            dsId = tm.getDatasourceId();
+                        }
+                    }
+                }
+                vo.setTableNames(tableNames);
+                vo.setDatabaseName(dbName);
+
+                if (dsId != null) {
+                    DatasourceConfig ds = datasourceMap.get(dsId);
+                    if (ds != null) {
+                        vo.setDatasourceName(ds.getDatasourceName());
+                    }
+                }
+            } else {
+                vo.setTableNames(List.of());
+            }
             return vo;
         }).collect(Collectors.toList()));
         return voPage;
+    }
+
+    private void fillTableInfo(TablePermissionVO vo, List<Long> tableMetadataIds) {
+        if (tableMetadataIds == null || tableMetadataIds.isEmpty()) return;
+
+        List<TableMetadata> tables = tableMetadataMapper.selectBatchIds(tableMetadataIds);
+        if (tables == null || tables.isEmpty()) return;
+
+        List<String> tableNames = tables.stream()
+                .map(TableMetadata::getTableName)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        vo.setTableNames(tableNames);
+
+        if (!tables.isEmpty()) {
+            vo.setDatabaseName(tables.get(0).getDatabaseName());
+            Long dsId = tables.get(0).getDatasourceId();
+            if (dsId != null) {
+                DatasourceConfig ds = datasourceConfigMapper.selectById(dsId);
+                if (ds != null) {
+                    vo.setDatasourceName(ds.getDatasourceName());
+                }
+            }
+        }
+    }
+
+    private void savePermissionTables(Long permissionId, List<Long> tableMetadataIds) {
+        if (tableMetadataIds == null || tableMetadataIds.isEmpty()) return;
+        for (Long tableMetadataId : tableMetadataIds) {
+            permissionTableMapper.insertPermissionTable(permissionId, tableMetadataId, LocalDateTime.now());
+        }
     }
 
     private void saveMenuPermissionRoles(Long permissionId, List<Long> roleIds) {

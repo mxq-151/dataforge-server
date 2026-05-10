@@ -24,8 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -98,7 +97,48 @@ public class SysUserService implements UserDetailsService {
             wrapper.eq(SysUser::getStatus, status);
         }
         wrapper.orderByDesc(SysUser::getCreateTime);
-        return sysUserMapper.selectPage(page, wrapper);
+        Page<SysUser> userPage = sysUserMapper.selectPage(page, wrapper);
+
+        List<SysUser> users = userPage.getRecords();
+        if (!CollectionUtils.isEmpty(users)) {
+            List<Long> userIds = users.stream().map(SysUser::getId).collect(Collectors.toList());
+
+            List<SysUserRole> userRoles = sysUserRoleMapper.selectByUserIds(userIds);
+            Map<Long, List<Long>> userRoleIdsMap = userRoles.stream()
+                    .collect(Collectors.groupingBy(
+                            SysUserRole::getUserId,
+                            Collectors.mapping(SysUserRole::getRoleId, Collectors.toList())
+                    ));
+
+            Set<Long> allRoleIds = userRoles.stream()
+                    .map(SysUserRole::getRoleId)
+                    .collect(Collectors.toSet());
+
+            Map<Long, SysRole> roleMap;
+            if (!allRoleIds.isEmpty()) {
+                List<SysRole> allRoles = sysRoleMapper.selectBatchIds(allRoleIds);
+                roleMap = allRoles.stream()
+                        .collect(Collectors.toMap(SysRole::getId, r -> r));
+            } else {
+                roleMap = new HashMap<>();
+            }
+
+            for (SysUser user : users) {
+                List<Long> roleIds = userRoleIdsMap.getOrDefault(user.getId(), List.of());
+                user.setRoleIds(roleIds);
+
+                List<String> roleNames = roleIds.stream()
+                        .map(roleId -> {
+                            SysRole role = roleMap.get(roleId);
+                            return role != null ? role.getRoleName() : "";
+                        })
+                        .filter(name -> !name.isEmpty())
+                        .collect(Collectors.toList());
+                user.setRoles(roleNames);
+            }
+        }
+
+        return userPage;
     }
 
     public SysUser getUserById(Long id) {

@@ -1,6 +1,7 @@
 package com.bigdata.modules.system.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 
 import java.util.List;
@@ -12,8 +13,8 @@ public class TablePermissionDTO {
     @NotBlank(message = "权限名称不能为空")
     private String permissionName;
 
-    @NotNull(message = "表元数据ID不能为空")
-    private Long tableMetadataId;
+    @NotEmpty(message = "表元数据ID不能为空")
+    private List<Long> tableMetadataIds;
 
     private Integer permissionScope;
     private Integer canSelect;
@@ -42,12 +43,12 @@ public class TablePermissionDTO {
         this.permissionName = permissionName;
     }
 
-    public Long getTableMetadataId() {
-        return tableMetadataId;
+    public List<Long> getTableMetadataIds() {
+        return tableMetadataIds;
     }
 
-    public void setTableMetadataId(Long tableMetadataId) {
-        this.tableMetadataId = tableMetadataId;
+    public void setTableMetadataIds(List<Long> tableMetadataIds) {
+        this.tableMetadataIds = tableMetadataIds;
     }
 
     public Integer getPermissionScope() {

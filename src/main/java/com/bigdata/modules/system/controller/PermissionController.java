@@ -145,16 +145,37 @@ public class PermissionController {
     @PostMapping("/table")
     public Result<TablePermissionVO> saveTable(@Valid @RequestBody TablePermissionDTO dto) {
         SysTablePermission permission = new SysTablePermission();
-        BeanUtils.copyProperties(dto, permission);
-        TablePermissionVO vo = permissionService.saveTablePermission(permission, dto.getRoleIds());
+        permission.setPermissionName(dto.getPermissionName());
+        permission.setPermissionScope(dto.getPermissionScope());
+        permission.setCanSelect(dto.getCanSelect() != null ? dto.getCanSelect() : 1);
+        permission.setCanInsert(dto.getCanInsert() != null ? dto.getCanInsert() : 0);
+        permission.setCanUpdate(dto.getCanUpdate() != null ? dto.getCanUpdate() : 0);
+        permission.setCanDelete(dto.getCanDelete() != null ? dto.getCanDelete() : 0);
+        permission.setCanExport(dto.getCanExport() != null ? dto.getCanExport() : 0);
+        permission.setRowFilterSql(dto.getRowFilterSql());
+        permission.setDataMaskingRule(dto.getDataMaskingRule());
+        permission.setDescription(dto.getDescription());
+
+        TablePermissionVO vo = permissionService.saveTablePermission(permission, dto.getRoleIds(), dto.getTableMetadataIds());
         return Result.success(vo);
     }
 
     @PutMapping("/table")
     public Result<TablePermissionVO> updateTable(@Valid @RequestBody TablePermissionDTO dto) {
         SysTablePermission permission = new SysTablePermission();
-        BeanUtils.copyProperties(dto, permission);
-        TablePermissionVO vo = permissionService.updateTablePermission(permission, dto.getRoleIds());
+        permission.setId(dto.getId());
+        permission.setPermissionName(dto.getPermissionName());
+        permission.setPermissionScope(dto.getPermissionScope());
+        permission.setCanSelect(dto.getCanSelect() != null ? dto.getCanSelect() : 1);
+        permission.setCanInsert(dto.getCanInsert() != null ? dto.getCanInsert() : 0);
+        permission.setCanUpdate(dto.getCanUpdate() != null ? dto.getCanUpdate() : 0);
+        permission.setCanDelete(dto.getCanDelete() != null ? dto.getCanDelete() : 0);
+        permission.setCanExport(dto.getCanExport() != null ? dto.getCanExport() : 0);
+        permission.setRowFilterSql(dto.getRowFilterSql());
+        permission.setDataMaskingRule(dto.getDataMaskingRule());
+        permission.setDescription(dto.getDescription());
+
+        TablePermissionVO vo = permissionService.updateTablePermission(permission, dto.getRoleIds(), dto.getTableMetadataIds());
         return Result.success(vo);
     }
 

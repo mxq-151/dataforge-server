@@ -1,15 +1,11 @@
 package com.bigdata.modules.system.entity;
 
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.common.entity.BaseEntity;
-
-import java.util.List;
 
 @TableName("sys_table_permission")
 public class SysTablePermission extends BaseEntity {
 
-    private Long tableMetadataId;
     private String permissionName;
     private Integer permissionScope;
     private Integer canSelect;
@@ -20,14 +16,6 @@ public class SysTablePermission extends BaseEntity {
     private String rowFilterSql;
     private String dataMaskingRule;
     private String description;
-
-    public Long getTableMetadataId() {
-        return tableMetadataId;
-    }
-
-    public void setTableMetadataId(Long tableMetadataId) {
-        this.tableMetadataId = tableMetadataId;
-    }
 
     public String getPermissionName() {
         return permissionName;

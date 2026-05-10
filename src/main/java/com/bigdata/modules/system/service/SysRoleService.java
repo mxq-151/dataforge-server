@@ -68,6 +68,7 @@ public class SysRoleService {
         SysRole role = new SysRole();
         role.setRoleName(dto.getRoleName());
         role.setRoleCode(dto.getRoleCode());
+        role.setRoleType(dto.getRoleType());
         role.setDescription(dto.getDescription());
         role.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
         
@@ -95,6 +96,9 @@ public class SysRoleService {
 
         if (dto.getRoleName() != null) {
             role.setRoleName(dto.getRoleName());
+        }
+        if (dto.getRoleType() != null) {
+            role.setRoleType(dto.getRoleType());
         }
         if (dto.getDescription() != null) {
             role.setDescription(dto.getDescription());
