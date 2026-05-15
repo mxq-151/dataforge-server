@@ -2,8 +2,10 @@ package com.bigdata.modules.development.controller;
 
 import com.bigdata.common.exception.BusinessException;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bigdata.modules.development.dto.DevJarDependencyDTO;
 import com.bigdata.modules.development.entity.DevJarDependency;
 import com.bigdata.modules.development.service.DevJarDependencyService;
+import com.bigdata.modules.development.vo.DevJarDependencyVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ class DevJarDependencyControllerTest {
     private DevJarDependencyController devJarDependencyController;
 
     private DevJarDependency mockJar;
+    private DevJarDependencyDTO mockDto;
 
     @BeforeEach
     void setUp() {
@@ -43,6 +46,19 @@ class DevJarDependencyControllerTest {
         mockJar.setCategory("Spark核心库");
         mockJar.setStatus(1);
         mockJar.setDescription("Spark SQL核心库");
+
+        mockDto = new DevJarDependencyDTO();
+        mockDto.setId(1L);
+        mockDto.setJarName("spark-sql_2.12");
+        mockDto.setGroupId("org.apache.spark");
+        mockDto.setArtifactId("spark-sql_2.12");
+        mockDto.setVersion("3.5.0");
+        mockDto.setScope("compile");
+        mockDto.setSource("system");
+        mockDto.setJarPath("/opt/jars/spark-sql_2.12-3.5.0.jar");
+        mockDto.setCategory("Spark核心库");
+        mockDto.setStatus(1);
+        mockDto.setDescription("Spark SQL核心库");
     }
 
     @Test
@@ -120,7 +136,7 @@ class DevJarDependencyControllerTest {
 
         assertNotNull(result);
         assertEquals(200, result.getCode());
-        List<DevJarDependency> data = result.getData();
+        List<DevJarDependencyVO> data = result.getData();
         assertNotNull(data);
         assertEquals(1, data.size());
         assertEquals("spark-sql_2.12", data.get(0).getJarName());
@@ -135,7 +151,7 @@ class DevJarDependencyControllerTest {
 
         assertNotNull(result);
         assertEquals(200, result.getCode());
-        DevJarDependency jar = result.getData();
+        DevJarDependencyVO jar = result.getData();
         assertNotNull(jar);
         assertEquals(1L, jar.getId());
         assertEquals("spark-sql_2.12", jar.getJarName());
@@ -146,7 +162,7 @@ class DevJarDependencyControllerTest {
     @Test
     @DisplayName("新增依赖包 - 调用service保存")
     void testSave() {
-        var result = devJarDependencyController.save(mockJar);
+        var result = devJarDependencyController.save(mockDto);
 
         assertNotNull(result);
         assertEquals(200, result.getCode());
@@ -156,7 +172,7 @@ class DevJarDependencyControllerTest {
     @Test
     @DisplayName("更新依赖包 - 调用service更新")
     void testUpdate() {
-        var result = devJarDependencyController.update(mockJar);
+        var result = devJarDependencyController.update(mockDto);
 
         assertNotNull(result);
         assertEquals(200, result.getCode());

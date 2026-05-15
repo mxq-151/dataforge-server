@@ -4,14 +4,13 @@ import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
 import com.bigdata.modules.development.service.execution.CodeExecutionResult;
 import com.bigdata.modules.development.service.execution.CodeExecutionService;
-import com.bigdata.modules.development.service.execution.EngineType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
-import java.util.List;
+
 
 @RestController
 @RequestMapping("/development/execution")
@@ -51,32 +50,6 @@ public class CodeExecutionController {
         }
     }
 
-    @GetMapping("/engines")
-    public Result<List<EngineType>> getAvailableEngines() {
-        try {
-            List<EngineType> engines = codeExecutionService.getAvailableEngines();
-            log.info("🔧 获取可用引擎列表: {} 个", engines.size());
-            return Result.success(engines);
-        } catch (Exception e) {
-            log.error("❌ 获取引擎列表失败", e);
-            return Result.error("获取引擎列表失败: " + e.getMessage());
-        }
-    }
-
-    @GetMapping("/support")
-    public Result<Boolean> checkSupport(
-            @RequestParam String engineCode,
-            @RequestParam String codeType) {
-        try {
-            boolean supported = codeExecutionService.isExecutionSupported(engineCode, codeType);
-            log.info("🔍 检查执行支持: engine={}, type={}, supported={}",
-                    engineCode, codeType, supported);
-            return Result.success(supported);
-        } catch (Exception e) {
-            log.error("❌ 检查执行支持失败", e);
-            return Result.error("检查支持失败: " + e.getMessage());
-        }
-    }
 
     private void validateExecuteRequest(CodeExecutionRequest request) {
         if (request.getCodeContent() == null || request.getCodeContent().trim().isEmpty()) {

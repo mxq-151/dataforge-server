@@ -6,12 +6,14 @@ import com.bigdata.modules.knowledge.dto.KnowledgeDocumentDTO;
 import com.bigdata.modules.knowledge.entity.KnowledgeDocument;
 import com.bigdata.modules.knowledge.enums.DocType;
 import com.bigdata.modules.knowledge.service.KnowledgeDocumentService;
+import com.bigdata.modules.knowledge.vo.KnowledgeDocumentVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/knowledge/document")
@@ -21,19 +23,21 @@ public class KnowledgeDocumentController {
     private KnowledgeDocumentService knowledgeDocumentService;
 
     @GetMapping("/list")
-    public Result<Page<KnowledgeDocument>> getList(
+    public Result<Page<KnowledgeDocumentVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) DocType docType) {
-        Page<KnowledgeDocument> result = knowledgeDocumentService.getDocumentList(current, size, keyword, docType);
-        return Result.success(result);
+        Page<KnowledgeDocument> page = knowledgeDocumentService.getDocumentList(current, size, keyword, docType);
+        Page<KnowledgeDocumentVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
+        return Result.success(voPage);
     }
 
     @GetMapping("/{id}")
-    public Result<KnowledgeDocument> getById(@PathVariable Long id) {
+    public Result<KnowledgeDocumentVO> getById(@PathVariable Long id) {
         KnowledgeDocument doc = knowledgeDocumentService.getDocumentById(id);
-        return Result.success(doc);
+        return Result.success(toVO(doc));
     }
 
     @PostMapping
@@ -79,5 +83,11 @@ public class KnowledgeDocumentController {
     @GetMapping("/types")
     public Result<List<DocType>> getDocTypes() {
         return Result.success(DocType.allTypes());
+    }
+
+    private KnowledgeDocumentVO toVO(KnowledgeDocument entity) {
+        KnowledgeDocumentVO vo = new KnowledgeDocumentVO();
+        BeanUtils.copyProperties(entity, vo);
+        return vo;
     }
 }

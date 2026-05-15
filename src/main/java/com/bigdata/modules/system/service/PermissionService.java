@@ -23,11 +23,6 @@ import java.util.stream.Collectors;
 @Service
 public class PermissionService {
 
-    @Autowired
-    private SysMenuPermissionMapper menuPermissionMapper;
-
-    @Autowired
-    private SysButtonPermissionMapper buttonPermissionMapper;
 
     @Autowired
     private SysFilePermissionMapper filePermissionMapper;
@@ -37,9 +32,6 @@ public class PermissionService {
 
     @Autowired
     private SysUserRoleMapper userRoleMapper;
-
-    @Autowired
-    private SysRoleMenuPermissionMapper roleMenuPermissionMapper;
 
     @Autowired
     private SysRoleFilePermissionMapper roleFilePermissionMapper;
@@ -59,88 +51,6 @@ public class PermissionService {
     @Autowired
     private SysPermissionTableMapper permissionTableMapper;
 
-    public Page<MenuPermissionVO> getMenuPermissionList(int current, int size, String menuName) {
-        Page<SysMenuPermission> page = new Page<>(current, size);
-        LambdaQueryWrapper<SysMenuPermission> wrapper = new LambdaQueryWrapper<>();
-        if (menuName != null && !menuName.isEmpty()) {
-            wrapper.like(SysMenuPermission::getMenuName, menuName);
-        }
-        wrapper.orderByAsc(SysMenuPermission::getSortOrder);
-        Page<SysMenuPermission> entityPage = menuPermissionMapper.selectPage(page, wrapper);
-        return toMenuPermissionVOPage(entityPage);
-    }
-
-    public List<SysMenuPermission> getAllMenuPermissions() {
-        LambdaQueryWrapper<SysMenuPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SysMenuPermission::getStatus, 1);
-        wrapper.orderByAsc(SysMenuPermission::getSortOrder);
-        return menuPermissionMapper.selectList(wrapper);
-    }
-
-    public List<SysMenuPermission> getMenuTree() {
-        List<SysMenuPermission> allMenus = getAllMenuPermissions();
-        return buildMenuTree(allMenus, 0L);
-    }
-
-    private List<SysMenuPermission> buildMenuTree(List<SysMenuPermission> menus, Long parentId) {
-        return menus.stream()
-                .filter(m -> m.getParentId().equals(parentId))
-                .peek(m -> m.setChildren(buildMenuTree(menus, m.getId())))
-                .toList();
-    }
-
-    public MenuPermissionVO saveMenuPermission(SysMenuPermission permission, List<Long> roleIds) {
-        if (permission.getStatus() == null) {
-            permission.setStatus(1);
-        }
-        if (permission.getVisible() == null) {
-            permission.setVisible(1);
-        }
-        menuPermissionMapper.insert(permission);
-        saveMenuPermissionRoles(permission.getId(), roleIds);
-        return toMenuPermissionVO(permission, roleIds);
-    }
-
-    public MenuPermissionVO updateMenuPermission(SysMenuPermission permission, List<Long> roleIds) {
-        menuPermissionMapper.updateById(permission);
-        roleMenuPermissionMapper.deleteByPermissionId(permission.getId());
-        saveMenuPermissionRoles(permission.getId(), roleIds);
-        return toMenuPermissionVO(permission, roleIds);
-    }
-
-    public void deleteMenuPermission(Long id) {
-        menuPermissionMapper.deleteById(id);
-        roleMenuPermissionMapper.deleteByPermissionId(id);
-    }
-
-    public Page<SysButtonPermission> getButtonPermissionList(int current, int size, Long menuPermissionId) {
-        Page<SysButtonPermission> page = new Page<>(current, size);
-        LambdaQueryWrapper<SysButtonPermission> wrapper = new LambdaQueryWrapper<>();
-        if (menuPermissionId != null) {
-            wrapper.eq(SysButtonPermission::getMenuPermissionId, menuPermissionId);
-        }
-        wrapper.orderByAsc(SysButtonPermission::getSortOrder);
-        return buttonPermissionMapper.selectPage(page, wrapper);
-    }
-
-    public List<SysButtonPermission> getButtonPermissionsByMenuId(Long menuPermissionId) {
-        LambdaQueryWrapper<SysButtonPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SysButtonPermission::getMenuPermissionId, menuPermissionId);
-        wrapper.orderByAsc(SysButtonPermission::getSortOrder);
-        return buttonPermissionMapper.selectList(wrapper);
-    }
-
-    public void saveButtonPermission(SysButtonPermission permission) {
-        buttonPermissionMapper.insert(permission);
-    }
-
-    public void updateButtonPermission(SysButtonPermission permission) {
-        buttonPermissionMapper.updateById(permission);
-    }
-
-    public void deleteButtonPermission(Long id) {
-        buttonPermissionMapper.deleteById(id);
-    }
 
     public Page<FilePermissionVO> getFilePermissionList(int current, int size, Long roleId) {
         Page<SysFilePermission> page = new Page<>(current, size);
@@ -204,7 +114,7 @@ public class PermissionService {
     }
 
     @Transactional
-    public void assignRolePermissions(Long roleId, List<Long> menuPermissionIds, List<Long> buttonPermissionIds,
+    public void assignRolePermissions(Long roleId, List<Long> menuPermissionIds,
                                        List<Long> filePermissionIds, List<Long> tablePermissionIds) {
         deleteRoleAllPermissions(roleId);
         if (menuPermissionIds != null && !menuPermissionIds.isEmpty()) {
@@ -212,11 +122,7 @@ public class PermissionService {
                 userRoleMapper.insertRoleMenuPermission(roleId, menuPermId, LocalDateTime.now());
             }
         }
-        if (buttonPermissionIds != null && !buttonPermissionIds.isEmpty()) {
-            for (Long btnPermId : buttonPermissionIds) {
-                userRoleMapper.insertRoleButtonPermission(roleId, btnPermId, LocalDateTime.now());
-            }
-        }
+
         if (filePermissionIds != null && !filePermissionIds.isEmpty()) {
             for (Long filePermId : filePermissionIds) {
                 userRoleMapper.insertRoleFilePermission(roleId, filePermId, LocalDateTime.now());
@@ -231,17 +137,12 @@ public class PermissionService {
 
     private void deleteRoleAllPermissions(Long roleId) {
         userRoleMapper.deleteRoleMenuPermissions(roleId);
-        userRoleMapper.deleteRoleButtonPermissions(roleId);
         userRoleMapper.deleteRoleFilePermissions(roleId);
         userRoleMapper.deleteRoleTablePermissions(roleId);
     }
 
     public List<Long> getMenuPermissionIdsByRoleId(Long roleId) {
         return userRoleMapper.selectMenuPermissionIdsByRoleId(roleId);
-    }
-
-    public List<Long> getButtonPermissionIdsByRoleId(Long roleId) {
-        return userRoleMapper.selectButtonPermissionIdsByRoleId(roleId);
     }
 
     public List<Long> getFilePermissionIdsByRoleId(Long roleId) {
@@ -266,22 +167,6 @@ public class PermissionService {
                 .map(roleId -> roleNameMap.getOrDefault(roleId, "未知"))
                 .collect(Collectors.toList()));
         return vo;
-    }
-
-    private Page<MenuPermissionVO> toMenuPermissionVOPage(Page<SysMenuPermission> entityPage) {
-        Map<Long, String> roleNameMap = getAllRoleNameMap();
-        Page<MenuPermissionVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
-        voPage.setRecords(entityPage.getRecords().stream().map(entity -> {
-            MenuPermissionVO vo = new MenuPermissionVO();
-            BeanUtils.copyProperties(entity, vo);
-            List<Long> roleIds = roleMenuPermissionMapper.selectRoleIdsByPermissionId(entity.getId());
-            vo.setRoleIds(roleIds);
-            vo.setRoleNames(roleIds.stream()
-                    .map(roleId -> roleNameMap.getOrDefault(roleId, "未知"))
-                    .collect(Collectors.toList()));
-            return vo;
-        }).collect(Collectors.toList()));
-        return voPage;
     }
 
     private FilePermissionVO toFilePermissionVO(SysFilePermission entity, List<Long> roleIds) {
@@ -443,16 +328,6 @@ public class PermissionService {
         }
     }
 
-    private void saveMenuPermissionRoles(Long permissionId, List<Long> roleIds) {
-        if (roleIds == null || roleIds.isEmpty()) return;
-        for (Long roleId : roleIds) {
-            SysRoleMenuPermission rp = new SysRoleMenuPermission();
-            rp.setRoleId(roleId);
-            rp.setMenuPermissionId(permissionId);
-            rp.setCreateTime(LocalDateTime.now());
-            roleMenuPermissionMapper.insert(rp);
-        }
-    }
 
     private void saveFilePermissionRoles(Long permissionId, List<Long> roleIds) {
         if (roleIds == null || roleIds.isEmpty()) return;

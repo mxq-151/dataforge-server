@@ -9,6 +9,9 @@ public class MenuPermissionDTO {
 
     private Long id;
 
+    @NotBlank(message = "权限名称不能为空")
+    private String permissionName;
+
     @NotBlank(message = "菜单名称不能为空")
     @Size(max = 100, message = "菜单名称不能超过100字符")
     private String menuName;
@@ -17,14 +20,18 @@ public class MenuPermissionDTO {
     @Size(max = 100, message = "菜单编码不能超过100字符")
     private String menuCode;
 
-    private Long parentId;
-    private String path;
-    private String component;
-    private String icon;
-    private Integer sortOrder;
+
     private Integer visible;
     private Integer status;
     private List<Long> roleIds;
+
+     public String getPermissionName() {
+        return permissionName;
+    }
+
+    public void setPermissionName(String permissionName) {
+        this.permissionName = permissionName;
+    }
 
     public Long getId() {
         return id;
@@ -48,46 +55,6 @@ public class MenuPermissionDTO {
 
     public void setMenuCode(String menuCode) {
         this.menuCode = menuCode;
-    }
-
-    public Long getParentId() {
-        return parentId;
-    }
-
-    public void setParentId(Long parentId) {
-        this.parentId = parentId;
-    }
-
-    public String getPath() {
-        return path;
-    }
-
-    public void setPath(String path) {
-        this.path = path;
-    }
-
-    public String getComponent() {
-        return component;
-    }
-
-    public void setComponent(String component) {
-        this.component = component;
-    }
-
-    public String getIcon() {
-        return icon;
-    }
-
-    public void setIcon(String icon) {
-        this.icon = icon;
-    }
-
-    public Integer getSortOrder() {
-        return sortOrder;
-    }
-
-    public void setSortOrder(Integer sortOrder) {
-        this.sortOrder = sortOrder;
     }
 
     public Integer getVisible() {

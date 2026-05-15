@@ -8,9 +8,9 @@ import com.bigdata.modules.devops.mapper.StorageConfigMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
+import com.bigdata.modules.devops.vo.StorageConnectionTestVO;
+
 import java.util.List;
-import java.util.Map;
 
 @Service
 public class StorageConfigService {
@@ -62,12 +62,12 @@ public class StorageConfigService {
         storageConfigMapper.deleteById(id);
     }
 
-    public Map<String, Object> testConnection(Long id) {
+    public StorageConnectionTestVO testConnection(Long id) {
         StorageConfig config = storageConfigMapper.selectById(id);
         if (config == null) {
             throw new BusinessException("存储配置不存在");
         }
-        boolean success=this.fileExplorerService.testConnection(config.getStorageType(), id);
+        boolean success = this.fileExplorerService.testConnection(config.getStorageType(), id);
 
         String message = "";
         long startTime = System.currentTimeMillis();
@@ -90,8 +90,6 @@ public class StorageConfigService {
             message = "连接异常: " + e.getMessage();
         }
 
-        long costTime = System.currentTimeMillis() - startTime;
-        
         if (success) {
             config.setStatus(1);
         } else {
@@ -99,11 +97,7 @@ public class StorageConfigService {
         }
         storageConfigMapper.updateById(config);
 
-        return Map.of(
-                "success", success,
-                "message", message,
-                "costTime", costTime + "ms"
-        );
+        return new StorageConnectionTestVO(success, message, config.getStorageType());
     }
 
     public List<String> getStorageTypes() {

@@ -320,20 +320,6 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- JGit (Git Java实现) -->
-        <dependency>
-            <groupId>org.eclipse.jgit</groupId>
-            <artifactId>org.eclipse.jgit</artifactId>
-            <version>7.5.0.202512021534-r</version>
-        </dependency>
-
-        <!-- JGit SSH支持 -->
-        <dependency>
-            <groupId>org.eclipse.jgit</groupId>
-            <artifactId>org.eclipse.jgit.ssh.apache</artifactId>
-            <version>7.5.0.202512021534-r</version>
-        </dependency>
-
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

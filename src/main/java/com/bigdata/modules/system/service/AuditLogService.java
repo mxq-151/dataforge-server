@@ -4,13 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.modules.system.entity.OperationAuditLog;
 import com.bigdata.modules.system.mapper.OperationAuditLogMapper;
+import com.bigdata.modules.system.vo.AuditStatisticsVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 
 @Service
 public class AuditLogService {
@@ -103,7 +103,7 @@ public class AuditLogService {
                 .toList();
     }
 
-    public Map<String, Object> getStatistics(LocalDateTime startTime, LocalDateTime endTime) {
+    public AuditStatisticsVO getStatistics(LocalDateTime startTime, LocalDateTime endTime) {
         LambdaQueryWrapper<OperationAuditLog> wrapper = new LambdaQueryWrapper<>();
         if (startTime != null) {
             wrapper.ge(OperationAuditLog::getOperationTime, startTime);
@@ -118,11 +118,10 @@ public class AuditLogService {
         sensitiveWrapper.eq(OperationAuditLog::getIsSensitive, 1);
         long sensitiveCount = auditLogMapper.selectCount(sensitiveWrapper);
 
-        return Map.of(
-                "total", total,
-                "sensitiveCount", sensitiveCount,
-                "normalCount", total - sensitiveCount
-        );
+        AuditStatisticsVO vo = new AuditStatisticsVO();
+        vo.setTotalOperations(total);
+        vo.setSensitiveOperations(sensitiveCount);
+        return vo;
     }
 
     private String getClientIp(HttpServletRequest request) {

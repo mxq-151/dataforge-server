@@ -20,7 +20,6 @@ public class MenuPermissionVO implements Serializable {
     private Integer status;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
-    private List<MenuPermissionVO> children;
     private List<Long> roleIds;
     private List<String> roleNames;
 
@@ -118,14 +117,6 @@ public class MenuPermissionVO implements Serializable {
 
     public void setUpdateTime(LocalDateTime updateTime) {
         this.updateTime = updateTime;
-    }
-
-    public List<MenuPermissionVO> getChildren() {
-        return children;
-    }
-
-    public void setChildren(List<MenuPermissionVO> children) {
-        this.children = children;
     }
 
     public List<Long> getRoleIds() {

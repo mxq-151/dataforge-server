@@ -7,12 +7,14 @@ import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.devops.vo.ConnectionTestResult;
+import com.bigdata.modules.devops.vo.DatasourceConfigVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/devops/datasource")
@@ -22,25 +24,28 @@ public class DatasourceConfigController {
     private DatasourceConfigService datasourceConfigService;
 
     @GetMapping("/list")
-    public Result<Page<DatasourceConfig>> getList(
+    public Result<Page<DatasourceConfigVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String datasourceName,
             @RequestParam(required = false) DatasourceType datasourceType) {
-        Page<DatasourceConfig> result = datasourceConfigService.getDatasourceList(current, size, datasourceName, datasourceType);
-        return Result.success(result);
+        Page<DatasourceConfig> page = datasourceConfigService.getDatasourceList(current, size, datasourceName, datasourceType);
+        Page<DatasourceConfigVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
+        return Result.success(voPage);
     }
 
     @GetMapping("/all")
-    public Result<List<DatasourceConfig>> getAllDatasources() {
+    public Result<List<DatasourceConfigVO>> getAllDatasources() {
         List<DatasourceConfig> list = datasourceConfigService.getAllDatasources();
-        return Result.success(list);
+        List<DatasourceConfigVO> voList = list.stream().map(this::toVO).collect(Collectors.toList());
+        return Result.success(voList);
     }
 
     @GetMapping("/{id}")
-    public Result<DatasourceConfig> getById(@PathVariable Long id) {
+    public Result<DatasourceConfigVO> getById(@PathVariable Long id) {
         DatasourceConfig config = datasourceConfigService.getDatasourceById(id);
-        return Result.success(config);
+        return Result.success(toVO(config));
     }
 
     @PostMapping
@@ -80,5 +85,11 @@ public class DatasourceConfigController {
     @GetMapping("/types")
     public Result<List<DatasourceType>> getDatasourceTypes() {
         return Result.success(DatasourceType.allTypes());
+    }
+
+    private DatasourceConfigVO toVO(DatasourceConfig entity) {
+        DatasourceConfigVO vo = new DatasourceConfigVO();
+        BeanUtils.copyProperties(entity, vo);
+        return vo;
     }
 }

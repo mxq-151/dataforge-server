@@ -9,6 +9,7 @@ import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.MetadataSyncLog;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
+import com.bigdata.modules.metadata.vo.MetadataSyncResultVO;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,10 +41,10 @@ public class MetadataSyncService {
     private TableMetadataMapper tableMetadataMapper;
 
     @Transactional
-    public Map<String, Object> syncDatasourceMetadata(Long datasourceId) {
+    public MetadataSyncResultVO syncDatasourceMetadata(Long datasourceId) {
         DatasourceConfig dsConfig = datasourceConfigMapper.selectById(datasourceId);
         if (dsConfig == null) {
-            return Map.of("success", false, "message", "数据源不存在");
+            return new MetadataSyncResultVO(false, "数据源不存在", 0, 0, 0);
         }
 
         MetadataSyncLog syncLog = metadataSyncLogService.createSyncLog(datasourceId, "full", 1L);
@@ -81,13 +82,7 @@ public class MetadataSyncService {
             dsConfig.setConnectionStatus(1);
             datasourceConfigMapper.updateById(dsConfig);
 
-            return Map.of(
-                    "success", true,
-                    "message", "同步成功",
-                    "databaseCount", databases.size(),
-                    "tableCount", tables.size(),
-                    "columnCount", totalColumns
-            );
+            return new MetadataSyncResultVO(true, "同步成功", databases.size(), tables.size(), totalColumns);
         } catch (Exception e) {
             log.error("元数据同步失败: datasourceId={}, error={}", datasourceId, e.getMessage(), e);
             metadataSyncLogService.failSyncLog(syncLog.getId(), e.getMessage());
@@ -95,7 +90,7 @@ public class MetadataSyncService {
             dsConfig.setConnectionStatus(2);
             datasourceConfigMapper.updateById(dsConfig);
 
-            return Map.of("success", false, "message", "同步失败: " + e.getMessage());
+            return new MetadataSyncResultVO(false, "同步失败: " + e.getMessage(), 0, 0, 0);
         } finally {
             if (connection != null) {
                 try { connection.close(); } catch (SQLException ignored) {}

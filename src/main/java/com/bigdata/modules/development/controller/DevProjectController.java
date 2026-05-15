@@ -2,17 +2,24 @@ package com.bigdata.modules.development.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
+import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.development.dto.DevProjectDTO;
+import com.bigdata.modules.development.dto.ProgramParamsDTO;
 import com.bigdata.modules.development.entity.DevProject;
+import com.bigdata.modules.development.entity.ProgramParams;
 import com.bigdata.modules.development.service.DevProjectService;
-import com.bigdata.modules.development.vo.FolderTreeNode;
-import com.bigdata.modules.development.vo.GitFileInfo;
+import com.bigdata.modules.development.service.ProgramParamsService;
+import com.bigdata.modules.development.vo.DevProjectVO;
+import com.bigdata.modules.development.vo.ProgramParamsVO;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
@@ -22,21 +29,28 @@ public class DevProjectController {
     @Autowired
     private DevProjectService devProjectService;
 
+    @Autowired
+    private ProgramParamsService programParamsService;
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
     @GetMapping("/list")
-    public Result<Page<DevProject>> getList(
+    public Result<Page<DevProjectVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String projectName,
             @RequestParam(required = false) String projectCode,
             @RequestParam(required = false) Integer status) {
-        Page<DevProject> result = devProjectService.getProjectList(current, size, projectName, projectCode, status);
-        return Result.success(result);
+        Page<DevProject> page = devProjectService.getProjectList(current, size, projectName, projectCode, status);
+        Page<DevProjectVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
+        return Result.success(voPage);
     }
 
     @GetMapping("/{id}")
-    public Result<DevProject> getById(@PathVariable Long id) {
+    public Result<DevProjectVO> getById(@PathVariable Long id) {
         DevProject project = devProjectService.getProjectById(id);
-        return Result.success(project);
+        return Result.success(toVO(project));
     }
 
     @PostMapping
@@ -69,81 +83,102 @@ public class DevProjectController {
         }
     }
 
-    @GetMapping("/{id}/folders")
-    public Result<List<FolderTreeNode>> getFolderList(@PathVariable Long id) {
+    @GetMapping("/{projectId}/params")
+    public Result<List<ProgramParamsVO>> listProgramParams(@PathVariable Long projectId) {
+        List<ProgramParams> list = programParamsService.listByProjectId(projectId);
+        List<ProgramParamsVO> voList = list.stream().map(this::toParamsVO).collect(Collectors.toList());
+        return Result.success(voList);
+    }
+
+    @GetMapping("/{projectId}/params/{filePath:.+}")
+    public Result<ProgramParamsVO> getProgramParams(
+            @PathVariable Long projectId,
+            @PathVariable String filePath) {
+        ProgramParams params = programParamsService.getByProjectIdAndFilePath(projectId, filePath);
+        if (params == null) {
+            throw new BusinessException("未找到对应的程序参数记录");
+        }
+        return Result.success(toParamsVO(params));
+    }
+
+    @PostMapping("/{projectId}/params")
+    public Result<Void> saveProgramParams(
+            @PathVariable Long projectId,
+            @Valid @RequestBody ProgramParamsDTO dto) {
         try {
-            List<GitFileInfo> allFolders = new ArrayList<>();
-            collectAllFolders(id, null, allFolders);
-
-            List<FolderTreeNode> folderTree = buildFolderTree(allFolders);
-            return Result.success(folderTree);
+            dto.setProjectId(projectId);
+            programParamsService.save(dto);
+            return Result.success();
+        } catch (BusinessException e) {
+            return Result.error(e.getMessage());
         } catch (Exception e) {
-            return Result.error("获取文件夹列表失败: " + e.getMessage());
+            return Result.error("保存程序参数失败: " + e.getMessage());
         }
     }
 
-    private void collectAllFolders(Long projectId, String parentPath, List<GitFileInfo> allFolders) throws Exception {
-        List<GitFileInfo> currentLevel = devProjectService.getFileTree(projectId, parentPath, "main");
-        List<GitFileInfo> folders = currentLevel.stream()
-                .filter(GitFileInfo::isFolder)
-                .collect(Collectors.toList());
-
-        for (GitFileInfo folder : folders) {
-            allFolders.add(folder);
-            collectAllFolders(projectId, folder.path(), allFolders);
+    @PutMapping("/{projectId}/params/{filePath:.+}")
+    public Result<Void> updateProgramParams(
+            @PathVariable Long projectId,
+            @PathVariable String filePath,
+            @Valid @RequestBody ProgramParamsDTO dto) {
+        try {
+            dto.setProjectId(projectId);
+            dto.setFilePath(filePath);
+            programParamsService.update(dto);
+            return Result.success();
+        } catch (BusinessException e) {
+            return Result.error(e.getMessage());
+        } catch (Exception e) {
+            return Result.error("更新程序参数失败: " + e.getMessage());
         }
     }
 
-    private List<FolderTreeNode> buildFolderTree(List<GitFileInfo> folders) {
-        if (folders == null || folders.isEmpty()) {
-            return Collections.emptyList();
+    @DeleteMapping("/{projectId}/params/{filePath:.+}")
+    public Result<Void> deleteProgramParams(
+            @PathVariable Long projectId,
+            @PathVariable String filePath) {
+        try {
+            programParamsService.delete(projectId, filePath);
+            return Result.success();
+        } catch (BusinessException e) {
+            return Result.error(e.getMessage());
+        } catch (Exception e) {
+            return Result.error("删除程序参数失败: " + e.getMessage());
         }
+    }
 
-        Map<String, FolderTreeNode> nodeMap = new LinkedHashMap<>();
+    private DevProjectVO toVO(DevProject entity) {
+        DevProjectVO vo = new DevProjectVO();
+        BeanUtils.copyProperties(entity, vo);
+        return vo;
+    }
 
-        for (GitFileInfo folder : folders) {
-            String path = folder.path() != null ? folder.path() : "";
-            String name = folder.name() != null ? folder.name() : "unknown";
+    private ProgramParamsVO toParamsVO(ProgramParams entity) {
+        ProgramParamsVO vo = new ProgramParamsVO();
+        vo.setProjectId(entity.getProjectId());
+        vo.setFilePath(entity.getFilePath());
+        vo.setEngine(entity.getEngine());
+        vo.setRemark(entity.getRemark());
+        vo.setCreateTime(entity.getCreateTime());
+        vo.setUpdateTime(entity.getUpdateTime());
 
-            FolderTreeNode node = FolderTreeNode.of(name, path);
-            nodeMap.put(path, node);
-        }
-
-        Set<String> rootPaths = new LinkedHashSet<>();
-        
-        for (GitFileInfo folder : folders) {
-            String path = folder.path() != null ? folder.path() : "";
-
-            if (!path.contains("/")) {
-                rootPaths.add(path);
-            } else {
-                String parentPath = path.substring(0, path.lastIndexOf('/'));
-                
-                if (nodeMap.containsKey(parentPath)) {
-                    FolderTreeNode parentNode = nodeMap.get(parentPath);
-                    FolderTreeNode childNode = nodeMap.get(path);
-                    
-                    FolderTreeNode updatedParent = new FolderTreeNode(
-                            parentNode.name(),
-                            parentNode.path(),
-                            appendChild(parentNode.children(), childNode)
-                    );
-                    nodeMap.put(parentPath, updatedParent);
-                } else {
-                    rootPaths.add(path);
-                }
+        try {
+            if (entity.getDatasources() != null && !entity.getDatasources().isEmpty()) {
+                vo.setDatasources(objectMapper.readValue(entity.getDatasources(), new TypeReference<List<String>>() {}));
             }
+            if (entity.getJarDependencyCatalogs() != null && !entity.getJarDependencyCatalogs().isEmpty()) {
+                vo.setJarDependencyCatalogs(objectMapper.readValue(entity.getJarDependencyCatalogs(), new TypeReference<List<String>>() {}));
+            }
+            if (entity.getRunParams() != null && !entity.getRunParams().isEmpty()) {
+                vo.setRunParams(objectMapper.readValue(entity.getRunParams(), new TypeReference<java.util.Map<String, Object>>() {}));
+            }
+            if (entity.getComputeResources() != null && !entity.getComputeResources().isEmpty()) {
+                vo.setComputeResources(objectMapper.readValue(entity.getComputeResources(), new TypeReference<java.util.Map<String, Object>>() {}));
+            }
+        } catch (JsonProcessingException e) {
+            throw new BusinessException("JSON反序列化失败: " + e.getMessage());
         }
 
-        return rootPaths.stream()
-                .map(nodeMap::get)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
-    }
-
-    private List<FolderTreeNode> appendChild(List<FolderTreeNode> children, FolderTreeNode child) {
-        List<FolderTreeNode> newChildren = new ArrayList<>(children);
-        newChildren.add(child);
-        return newChildren;
+        return vo;
     }
 }

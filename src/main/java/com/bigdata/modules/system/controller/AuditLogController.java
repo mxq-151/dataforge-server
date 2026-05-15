@@ -4,13 +4,16 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.entity.OperationAuditLog;
 import com.bigdata.modules.system.service.AuditLogService;
+import com.bigdata.modules.system.vo.AuditStatisticsVO;
+import com.bigdata.modules.system.vo.OperationAuditLogVO;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/system/audit")
@@ -20,7 +23,7 @@ public class AuditLogController {
     private AuditLogService auditLogService;
 
     @GetMapping("/list")
-    public Result<Page<OperationAuditLog>> getList(
+    public Result<Page<OperationAuditLogVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) String module,
@@ -29,16 +32,18 @@ public class AuditLogController {
             @RequestParam(required = false) Integer isSensitive,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
-        Page<OperationAuditLog> result = auditLogService.getAuditLogList(
+        Page<OperationAuditLog> page = auditLogService.getAuditLogList(
                 current, size, module, operation, username, isSensitive, startTime, endTime
         );
-        return Result.success(result);
+        Page<OperationAuditLogVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
+        return Result.success(voPage);
     }
 
     @GetMapping("/{id}")
-    public Result<OperationAuditLog> getById(@PathVariable Long id) {
+    public Result<OperationAuditLogVO> getById(@PathVariable Long id) {
         OperationAuditLog log = auditLogService.getAuditLogById(id);
-        return Result.success(log);
+        return Result.success(toVO(log));
     }
 
     @GetMapping("/modules")
@@ -54,10 +59,16 @@ public class AuditLogController {
     }
 
     @GetMapping("/statistics")
-    public Result<Map<String, Object>> getStatistics(
+    public Result<AuditStatisticsVO> getStatistics(
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
-        Map<String, Object> statistics = auditLogService.getStatistics(startTime, endTime);
+        AuditStatisticsVO statistics = auditLogService.getStatistics(startTime, endTime);
         return Result.success(statistics);
+    }
+
+    private OperationAuditLogVO toVO(OperationAuditLog entity) {
+        OperationAuditLogVO vo = new OperationAuditLogVO();
+        BeanUtils.copyProperties(entity, vo);
+        return vo;
     }
 }

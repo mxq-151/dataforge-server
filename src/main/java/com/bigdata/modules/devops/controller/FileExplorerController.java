@@ -2,6 +2,8 @@ package com.bigdata.modules.devops.controller;
 
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.service.FileExplorerService;
+import com.bigdata.modules.devops.vo.FileInfoVO;
+import com.bigdata.modules.devops.vo.StorageConnectionTestVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -12,6 +14,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/file/explorer")
@@ -21,12 +24,13 @@ public class FileExplorerController {
     private FileExplorerService fileExplorerService;
 
     @GetMapping("/list")
-    public Result<List<Map<String, Object>>> listFiles(
+    public Result<List<FileInfoVO>> listFiles(
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam(defaultValue = "/") String path,
             @RequestParam(required = false) Long configId) {
         List<Map<String, Object>> fileList = fileExplorerService.listFiles(storageType, path, configId);
-        return Result.success(fileList);
+        List<FileInfoVO> voList = fileList.stream().map(FileInfoVO::fromMap).collect(Collectors.toList());
+        return Result.success(voList);
     }
 
     @PostMapping("/directory")
@@ -171,14 +175,15 @@ public class FileExplorerController {
     }
 
     @GetMapping("/test-connection")
-    public Result<Map<String, Object>> testConnection(
+    public Result<StorageConnectionTestVO> testConnection(
             @RequestParam String storageType,
             @RequestParam(required = false) Long configId) {
         boolean success = fileExplorerService.testConnection(storageType, configId);
-        return Result.success(Map.of(
-                "success", success,
-                "message", success ? "连接成功" : "连接失败",
-                "storageType", storageType
-        ));
+        StorageConnectionTestVO vo = new StorageConnectionTestVO(
+                success,
+                success ? "连接成功" : "连接失败",
+                storageType
+        );
+        return Result.success(vo);
     }
 }

@@ -34,9 +34,6 @@ public interface SysUserRoleMapper extends BaseMapper<SysUserRole> {
     @Insert("INSERT INTO sys_role_menu_permission(role_id, menu_permission_id, create_time) VALUES(#{roleId}, #{permissionId}, #{createTime})")
     void insertRoleMenuPermission(@Param("roleId") Long roleId, @Param("permissionId") Long permissionId, @Param("createTime") LocalDateTime createTime);
 
-    @Insert("INSERT INTO sys_role_button_permission(role_id, button_permission_id, create_time) VALUES(#{roleId}, #{permissionId}, #{createTime})")
-    void insertRoleButtonPermission(@Param("roleId") Long roleId, @Param("permissionId") Long permissionId, @Param("createTime") LocalDateTime createTime);
-
     @Insert("INSERT INTO sys_role_file_permission(role_id, file_permission_id, create_time) VALUES(#{roleId}, #{permissionId}, #{createTime})")
     void insertRoleFilePermission(@Param("roleId") Long roleId, @Param("permissionId") Long permissionId, @Param("createTime") LocalDateTime createTime);
 
@@ -46,9 +43,6 @@ public interface SysUserRoleMapper extends BaseMapper<SysUserRole> {
     @Delete("DELETE FROM sys_role_menu_permission WHERE role_id = #{roleId}")
     int deleteRoleMenuPermissions(@Param("roleId") Long roleId);
 
-    @Delete("DELETE FROM sys_role_button_permission WHERE role_id = #{roleId}")
-    int deleteRoleButtonPermissions(@Param("roleId") Long roleId);
-
     @Delete("DELETE FROM sys_role_file_permission WHERE role_id = #{roleId}")
     int deleteRoleFilePermissions(@Param("roleId") Long roleId);
 
@@ -57,9 +51,6 @@ public interface SysUserRoleMapper extends BaseMapper<SysUserRole> {
 
     @Select("SELECT menu_permission_id FROM sys_role_menu_permission WHERE role_id = #{roleId}")
     List<Long> selectMenuPermissionIdsByRoleId(@Param("roleId") Long roleId);
-
-    @Select("SELECT button_permission_id FROM sys_role_button_permission WHERE role_id = #{roleId}")
-    List<Long> selectButtonPermissionIdsByRoleId(@Param("roleId") Long roleId);
 
     @Select("SELECT file_permission_id FROM sys_role_file_permission WHERE role_id = #{roleId}")
     List<Long> selectFilePermissionIdsByRoleId(@Param("roleId") Long roleId);
