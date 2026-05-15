@@ -1,7 +1,6 @@
 package com.bigdata.common.config;
 
 import com.bigdata.modules.knowledge.converter.StringToDocTypeConverter;
-import com.bigdata.modules.knowledge.enums.DocType;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;

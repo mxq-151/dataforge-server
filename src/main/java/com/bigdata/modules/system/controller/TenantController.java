@@ -10,6 +10,7 @@ import com.bigdata.modules.system.vo.TenantVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,6 +24,7 @@ public class TenantController {
     private SysTenantService sysTenantService;
 
     @GetMapping("/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Page<TenantVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
@@ -35,6 +37,7 @@ public class TenantController {
     }
 
     @GetMapping("/all")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<TenantVO>> getAllTenants() {
         List<SysTenant> tenants = sysTenantService.getAllTenants();
         List<TenantVO> voList = tenants.stream().map(this::toVO).collect(Collectors.toList());
@@ -54,36 +57,42 @@ public class TenantController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Valid @RequestBody TenantDTO dto) {
         sysTenantService.saveTenant(dto);
         return Result.success();
     }
 
     @PutMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@Valid @RequestBody TenantDTO dto) {
         sysTenantService.updateTenant(dto);
         return Result.success();
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         sysTenantService.deleteTenant(id);
         return Result.success();
     }
 
     @PutMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
         sysTenantService.changeStatus(id, status);
         return Result.success();
     }
 
     @PostMapping("/{tenantId}/bind-user/{userId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> bindUser(@PathVariable Long tenantId, @PathVariable Long userId) {
         sysTenantService.bindUser(tenantId, userId);
         return Result.success();
     }
 
     @DeleteMapping("/{tenantId}/unbind-user/{userId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> unbindUser(@PathVariable Long tenantId, @PathVariable Long userId) {
         sysTenantService.unbindUser(tenantId, userId);
         return Result.success();

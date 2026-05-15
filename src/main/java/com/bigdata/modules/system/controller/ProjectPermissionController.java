@@ -13,6 +13,7 @@ import com.bigdata.modules.system.vo.ProjectPermissionVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -32,6 +33,7 @@ public class ProjectPermissionController {
     private DevProjectMapper devProjectMapper;
 
     @GetMapping("/role/{roleId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<ProjectPermissionVO>> getPermissionsByRoleId(@PathVariable Long roleId) {
         List<SysRoleProjectPermission> permissions = sysRoleProjectPermissionService.getPermissionsByRoleId(roleId);
         List<ProjectPermissionVO> voList = toVOList(permissions);
@@ -39,6 +41,7 @@ public class ProjectPermissionController {
     }
 
     @GetMapping("/project/{projectId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<ProjectPermissionVO>> getPermissionsByProjectId(@PathVariable Long projectId) {
         List<SysRoleProjectPermission> permissions = sysRoleProjectPermissionService.getPermissionsByProjectId(projectId);
         List<ProjectPermissionVO> voList = toVOList(permissions);
@@ -55,12 +58,14 @@ public class ProjectPermissionController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> assignPermission(@Valid @RequestBody ProjectPermissionDTO dto) {
         sysRoleProjectPermissionService.assignPermission(dto.getRoleId(), dto.getProjectId(), dto.getPermissionType());
         return Result.success();
     }
 
     @PostMapping("/batch")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> batchAssignPermissions(@Valid @RequestBody BatchProjectPermissionDTO dto) {
         List<SysRoleProjectPermissionService.ProjectPermissionItem> items = dto.getItems().stream()
                 .map(item -> {
@@ -75,18 +80,21 @@ public class ProjectPermissionController {
     }
 
     @DeleteMapping("/{roleId}/{projectId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> removePermission(@PathVariable Long roleId, @PathVariable Long projectId) {
         sysRoleProjectPermissionService.removePermission(roleId, projectId);
         return Result.success();
     }
 
     @DeleteMapping("/role/{roleId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> removePermissionsByRoleId(@PathVariable Long roleId) {
         sysRoleProjectPermissionService.removePermissionsByRoleId(roleId);
         return Result.success();
     }
 
     @DeleteMapping("/project/{projectId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> removePermissionsByProjectId(@PathVariable Long projectId) {
         sysRoleProjectPermissionService.removePermissionsByProjectId(projectId);
         return Result.success();

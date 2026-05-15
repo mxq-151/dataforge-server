@@ -14,6 +14,7 @@ import com.bigdata.modules.system.vo.TablePermissionVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 
@@ -26,6 +27,7 @@ public class PermissionController {
 
 
     @GetMapping("/file/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Page<FilePermissionVO>> getFileList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size) {
@@ -34,6 +36,7 @@ public class PermissionController {
     }
 
     @PostMapping("/file")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<FilePermissionVO> saveFile(@Valid @RequestBody FilePermissionDTO dto) {
         SysFilePermission permission = new SysFilePermission();
         BeanUtils.copyProperties(dto, permission);
@@ -42,6 +45,7 @@ public class PermissionController {
     }
 
     @PutMapping("/file")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<FilePermissionVO> updateFile(@Valid @RequestBody FilePermissionDTO dto) {
         SysFilePermission permission = new SysFilePermission();
         BeanUtils.copyProperties(dto, permission);
@@ -50,12 +54,14 @@ public class PermissionController {
     }
 
     @DeleteMapping("/file/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> deleteFile(@PathVariable Long id) {
         permissionService.deleteFilePermission(id);
         return Result.success();
     }
 
     @GetMapping("/table/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Page<TablePermissionVO>> getTableList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size) {
@@ -64,9 +70,13 @@ public class PermissionController {
     }
 
     @PostMapping("/table")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<TablePermissionVO> saveTable(@Valid @RequestBody TablePermissionDTO dto) {
         SysTablePermission permission = new SysTablePermission();
         permission.setPermissionName(dto.getPermissionName());
+        permission.setDatasourceName(dto.getDatasourceName());
+        permission.setDatabaseName(dto.getDatabaseName());
+        permission.setTableNames(dto.getTableNames() != null ? String.join(",", dto.getTableNames()) : null);
         permission.setPermissionScope(dto.getPermissionScope());
         permission.setCanSelect(dto.getCanSelect() != null ? dto.getCanSelect() : 1);
         permission.setCanInsert(dto.getCanInsert() != null ? dto.getCanInsert() : 0);
@@ -77,15 +87,19 @@ public class PermissionController {
         permission.setDataMaskingRule(dto.getDataMaskingRule());
         permission.setDescription(dto.getDescription());
 
-        TablePermissionVO vo = permissionService.saveTablePermission(permission, dto.getRoleIds(), dto.getTableMetadataIds());
+        TablePermissionVO vo = permissionService.saveTablePermission(permission, dto.getRoleIds());
         return Result.success(vo);
     }
 
     @PutMapping("/table")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<TablePermissionVO> updateTable(@Valid @RequestBody TablePermissionDTO dto) {
         SysTablePermission permission = new SysTablePermission();
         permission.setId(dto.getId());
         permission.setPermissionName(dto.getPermissionName());
+        permission.setDatasourceName(dto.getDatasourceName());
+        permission.setDatabaseName(dto.getDatabaseName());
+        permission.setTableNames(dto.getTableNames() != null ? String.join(",", dto.getTableNames()) : null);
         permission.setPermissionScope(dto.getPermissionScope());
         permission.setCanSelect(dto.getCanSelect() != null ? dto.getCanSelect() : 1);
         permission.setCanInsert(dto.getCanInsert() != null ? dto.getCanInsert() : 0);
@@ -96,17 +110,19 @@ public class PermissionController {
         permission.setDataMaskingRule(dto.getDataMaskingRule());
         permission.setDescription(dto.getDescription());
 
-        TablePermissionVO vo = permissionService.updateTablePermission(permission, dto.getRoleIds(), dto.getTableMetadataIds());
+        TablePermissionVO vo = permissionService.updateTablePermission(permission, dto.getRoleIds());
         return Result.success(vo);
     }
 
     @DeleteMapping("/table/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> deleteTable(@PathVariable Long id) {
         permissionService.deleteTablePermission(id);
         return Result.success();
     }
 
     @GetMapping("/role/{roleId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<RolePermissionsVO> getRolePermissions(@PathVariable Long roleId) {
         RolePermissionsVO vo = new RolePermissionsVO();
         vo.setMenuPermissionIds(permissionService.getMenuPermissionIdsByRoleId(roleId));
@@ -116,6 +132,7 @@ public class PermissionController {
     }
 
     @PostMapping("/role/{roleId}/assign")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> assignRolePermissions(
             @PathVariable Long roleId,
             @Valid @RequestBody AssignPermissionDTO dto) {

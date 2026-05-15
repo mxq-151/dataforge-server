@@ -9,6 +9,7 @@ import com.bigdata.modules.system.vo.MenuRoleBindVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,6 +31,7 @@ public class MenuRoleBindController {
     }
 
     @PostMapping("/bind")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> bind(@Valid @RequestBody List<MenuRoleBindDTO> dto) {
         for(MenuRoleBindDTO dt:dto)
         {
@@ -40,6 +42,7 @@ public class MenuRoleBindController {
     }
 
     @DeleteMapping("/delete")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<MenuPermissionVO>> delete(
             @RequestParam(required = false) Long id) {
         this.menuRoleBindService.deleteByPermissionId(id);

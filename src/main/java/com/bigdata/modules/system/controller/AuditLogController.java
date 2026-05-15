@@ -9,6 +9,7 @@ import com.bigdata.modules.system.vo.OperationAuditLogVO;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -23,6 +24,7 @@ public class AuditLogController {
     private AuditLogService auditLogService;
 
     @GetMapping("/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Page<OperationAuditLogVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
@@ -41,6 +43,7 @@ public class AuditLogController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<OperationAuditLogVO> getById(@PathVariable Long id) {
         OperationAuditLog log = auditLogService.getAuditLogById(id);
         return Result.success(toVO(log));
@@ -59,6 +62,7 @@ public class AuditLogController {
     }
 
     @GetMapping("/statistics")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<AuditStatisticsVO> getStatistics(
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {

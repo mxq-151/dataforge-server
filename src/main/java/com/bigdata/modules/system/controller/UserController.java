@@ -17,6 +17,7 @@ import com.bigdata.modules.system.vo.UserInfoVO;
 import jakarta.validation.Valid;
 import jakarta.validation.groups.Default;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
@@ -43,6 +44,7 @@ public class UserController {
     private SysRoleProjectPermissionService sysRoleProjectPermissionService;
 
     @GetMapping("/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Page<SysUserVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
@@ -56,6 +58,7 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN') or #id == authentication.principal.userId")
     public Result<UserInfoVO> getById(@PathVariable Long id) {
         SysUser user = sysUserService.getUserById(id);
         List<Long> roleIds = sysUserService.getUserRoleIds(id);
@@ -64,24 +67,28 @@ public class UserController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Validated(UserDTO.Create.class) @RequestBody UserDTO dto) {
         sysUserService.saveUser(dto);
         return Result.success();
     }
 
     @PutMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@Validated({UserDTO.Update.class, Default.class}) @RequestBody UserDTO dto) {
         sysUserService.updateUser(dto);
         return Result.success();
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         sysUserService.deleteUser(id);
         return Result.success();
     }
 
     @PutMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
         sysUserService.changeStatus(id, status);
         return Result.success();
@@ -95,6 +102,7 @@ public class UserController {
     }
 
     @PutMapping("/{id}/reset-password")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> resetPassword(@PathVariable Long id) {
         sysUserService.resetPassword(id);
         return Result.success();

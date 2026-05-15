@@ -11,6 +11,7 @@ import com.bigdata.modules.devops.vo.DatasourceConfigVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -43,6 +44,7 @@ public class DatasourceConfigController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Valid @RequestBody DatasourceConfigDTO dto) {
         DatasourceConfig config = new DatasourceConfig();
         BeanUtils.copyProperties(dto, config);
@@ -51,6 +53,7 @@ public class DatasourceConfigController {
     }
 
     @PutMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@Valid @RequestBody DatasourceConfigDTO dto) {
         DatasourceConfig config = new DatasourceConfig();
         BeanUtils.copyProperties(dto, config);
@@ -59,6 +62,7 @@ public class DatasourceConfigController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         datasourceConfigService.deleteDatasource(id);
         return Result.success();

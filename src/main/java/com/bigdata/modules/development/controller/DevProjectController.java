@@ -1,8 +1,9 @@
 package com.bigdata.modules.development.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.bigdata.common.vo.Result;
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.common.security.DataAccessPermissionService;
+import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.dto.DevProjectDTO;
 import com.bigdata.modules.development.dto.ProgramParamsDTO;
 import com.bigdata.modules.development.entity.DevProject;
@@ -17,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -31,6 +33,9 @@ public class DevProjectController {
 
     @Autowired
     private ProgramParamsService programParamsService;
+
+    @Autowired
+    private DataAccessPermissionService dataAccessPermissionService;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -49,11 +54,13 @@ public class DevProjectController {
 
     @GetMapping("/{id}")
     public Result<DevProjectVO> getById(@PathVariable Long id) {
+        dataAccessPermissionService.checkProjectPermission(id, DataAccessPermissionService.PROJECT_PERMISSION_READ);
         DevProject project = devProjectService.getProjectById(id);
         return Result.success(toVO(project));
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Valid @RequestBody DevProjectDTO dto) {
         try {
             DevProject project = new DevProject();
@@ -67,6 +74,9 @@ public class DevProjectController {
 
     @PutMapping
     public Result<Void> update(@Valid @RequestBody DevProjectDTO dto) {
+        if (dto.getId() != null) {
+            dataAccessPermissionService.checkProjectPermission(dto.getId(), DataAccessPermissionService.PROJECT_PERMISSION_EDIT);
+        }
         DevProject project = new DevProject();
         BeanUtils.copyProperties(dto, project);
         devProjectService.updateProject(project);
@@ -74,7 +84,9 @@ public class DevProjectController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
+        dataAccessPermissionService.checkProjectPermission(id, DataAccessPermissionService.PROJECT_PERMISSION_DELETE);
         try {
             devProjectService.deleteProject(id);
             return Result.success();
@@ -85,6 +97,7 @@ public class DevProjectController {
 
     @GetMapping("/{projectId}/params")
     public Result<List<ProgramParamsVO>> listProgramParams(@PathVariable Long projectId) {
+        dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_READ);
         List<ProgramParams> list = programParamsService.listByProjectId(projectId);
         List<ProgramParamsVO> voList = list.stream().map(this::toParamsVO).collect(Collectors.toList());
         return Result.success(voList);
@@ -94,6 +107,7 @@ public class DevProjectController {
     public Result<ProgramParamsVO> getProgramParams(
             @PathVariable Long projectId,
             @PathVariable String filePath) {
+        dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_READ);
         ProgramParams params = programParamsService.getByProjectIdAndFilePath(projectId, filePath);
         if (params == null) {
             throw new BusinessException("未找到对应的程序参数记录");
@@ -105,6 +119,7 @@ public class DevProjectController {
     public Result<Void> saveProgramParams(
             @PathVariable Long projectId,
             @Valid @RequestBody ProgramParamsDTO dto) {
+        dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_EDIT);
         try {
             dto.setProjectId(projectId);
             programParamsService.save(dto);
@@ -121,6 +136,7 @@ public class DevProjectController {
             @PathVariable Long projectId,
             @PathVariable String filePath,
             @Valid @RequestBody ProgramParamsDTO dto) {
+        dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_EDIT);
         try {
             dto.setProjectId(projectId);
             dto.setFilePath(filePath);
@@ -137,6 +153,7 @@ public class DevProjectController {
     public Result<Void> deleteProgramParams(
             @PathVariable Long projectId,
             @PathVariable String filePath) {
+        dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_DELETE);
         try {
             programParamsService.delete(projectId, filePath);
             return Result.success();

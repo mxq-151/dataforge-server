@@ -10,6 +10,7 @@ import com.bigdata.modules.devops.vo.StorageConnectionTestVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -42,6 +43,7 @@ public class StorageConfigController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Valid @RequestBody StorageConfigDTO dto) {
         StorageConfig config = new StorageConfig();
         BeanUtils.copyProperties(dto, config);
@@ -50,6 +52,7 @@ public class StorageConfigController {
     }
 
     @PutMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@Valid @RequestBody StorageConfigDTO dto) {
         StorageConfig config = new StorageConfig();
         BeanUtils.copyProperties(dto, config);
@@ -58,6 +61,7 @@ public class StorageConfigController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         storageConfigService.deleteStorage(id);
         return Result.success();

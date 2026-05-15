@@ -1,6 +1,7 @@
 package com.bigdata.common.security;
 
 import com.bigdata.modules.system.service.SysUserService;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -43,8 +44,34 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json;charset=UTF-8");
+                            java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+                            result.put("code", 401);
+                            result.put("message", "未登录或登录已过期");
+                            result.put("data", null);
+                            response.getWriter().write(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result));
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType("application/json;charset=UTF-8");
+                            java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
+                            result.put("code", 403);
+                            result.put("message", "无权访问该资源");
+                            result.put("data", null);
+                            response.getWriter().write(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(result));
+                        })
+                )
                 .authorizeHttpRequests(auth -> auth
-                        .anyRequest().permitAll()
+                        .requestMatchers("/system/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/devops/datasource/types").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/devops/storage/types").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/file/explorer/storage-types").permitAll()
+                        .requestMatchers("/doc.html", "/webjars/**", "/v3/api-docs/**", "/swagger-resources/**").permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

@@ -13,12 +13,20 @@ public interface SysRoleFilePermissionMapper extends BaseMapper<SysRoleFilePermi
     List<Long> selectRoleIdsByPermissionId(@Param("permissionId") Long permissionId);
 
     @Select("<script>" +
-            "SELECT file_permission_id AS permissionId, role_id AS roleId FROM sys_role_file_permission WHERE file_permission_id IN " +
+            "SELECT file_permission_id AS filePermissionId, role_id AS roleId FROM sys_role_file_permission WHERE file_permission_id IN " +
             "<foreach item='permId' collection='permissionIds' open='(' separator=',' close=')'>" +
             "#{permId}" +
             "</foreach>" +
             "</script>")
     List<SysRoleFilePermission> selectByPermissionIds(@Param("permissionIds") List<Long> permissionIds);
+
+    @Select("<script>" +
+            "SELECT file_permission_id AS filePermissionId, role_id AS roleId FROM sys_role_file_permission WHERE role_id IN " +
+            "<foreach item='roleId' collection='roleIds' open='(' separator=',' close=')'>" +
+            "#{roleId}" +
+            "</foreach>" +
+            "</script>")
+    List<SysRoleFilePermission> selectByRoleIds(@Param("roleIds") List<Long> roleIds);
 
     @Delete("DELETE FROM sys_role_file_permission WHERE file_permission_id = #{permissionId}")
     int deleteByPermissionId(@Param("permissionId") Long permissionId);

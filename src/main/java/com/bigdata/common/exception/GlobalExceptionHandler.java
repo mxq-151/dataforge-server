@@ -4,6 +4,8 @@ import com.bigdata.common.vo.Result;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -20,7 +22,28 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.OK)
     public Result<Void> handleBusinessException(BusinessException e) {
         logger.error("业务异常: {}", e.getMessage());
+        int code = e.getCode();
+        if (code == 403) {
+            return Result.error(403, e.getMessage());
+        }
+        if (code == 401) {
+            return Result.error(401, e.getMessage());
+        }
         return Result.error(e.getCode(), e.getMessage());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Result<Void> handleAccessDeniedException(AccessDeniedException e) {
+        logger.warn("访问被拒绝: {}", e.getMessage());
+        return Result.error(403, "无权访问该资源");
+    }
+
+    @ExceptionHandler(InsufficientAuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Result<Void> handleInsufficientAuthenticationException(InsufficientAuthenticationException e) {
+        logger.warn("认证不足: {}", e.getMessage());
+        return Result.error(401, "未登录或登录已过期");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

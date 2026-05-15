@@ -9,6 +9,7 @@ import com.bigdata.modules.development.vo.DevJarDependencyVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,6 +37,7 @@ public class DevJarDependencyController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Valid @RequestBody DevJarDependencyDTO dto) {
         DevJarDependency jar = new DevJarDependency();
         BeanUtils.copyProperties(dto, jar);
@@ -44,6 +46,7 @@ public class DevJarDependencyController {
     }
 
     @PutMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@Valid @RequestBody DevJarDependencyDTO dto) {
         DevJarDependency jar = new DevJarDependency();
         BeanUtils.copyProperties(dto, jar);
@@ -52,6 +55,7 @@ public class DevJarDependencyController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         devJarDependencyService.deleteJar(id);
         return Result.success();

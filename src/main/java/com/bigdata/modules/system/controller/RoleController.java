@@ -12,6 +12,7 @@ import com.bigdata.modules.system.vo.SysUserVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,6 +26,7 @@ public class RoleController {
     private SysRoleService sysRoleService;
 
     @GetMapping("/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Page<SysRoleVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
@@ -36,6 +38,7 @@ public class RoleController {
     }
 
     @GetMapping("/all")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<SysRoleVO>> getAllRoles() {
         List<SysRole> roles = sysRoleService.getAllRoles();
         List<SysRoleVO> voList = roles.stream().map(this::toRoleVO).collect(Collectors.toList());
@@ -43,6 +46,7 @@ public class RoleController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<RoleDetailVO> getById(@PathVariable Long id) {
         SysRole role = sysRoleService.getRoleById(id);
         List<Long> userIds = sysRoleService.getUserIdsByRoleId(id);
@@ -51,24 +55,28 @@ public class RoleController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Valid @RequestBody RoleDTO dto) {
         sysRoleService.saveRole(dto);
         return Result.success();
     }
 
     @PutMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@Valid @RequestBody RoleDTO dto) {
         sysRoleService.updateRole(dto);
         return Result.success();
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         sysRoleService.deleteRole(id);
         return Result.success();
     }
 
     @PutMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
         sysRoleService.changeStatus(id, status);
         return Result.success();

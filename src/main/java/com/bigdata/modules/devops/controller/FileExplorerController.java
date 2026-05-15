@@ -1,5 +1,6 @@
 package com.bigdata.modules.devops.controller;
 
+import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.service.FileExplorerService;
 import com.bigdata.modules.devops.vo.FileInfoVO;
@@ -8,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -23,11 +25,15 @@ public class FileExplorerController {
     @Autowired
     private FileExplorerService fileExplorerService;
 
+    @Autowired
+    private DataAccessPermissionService dataAccessPermissionService;
+
     @GetMapping("/list")
     public Result<List<FileInfoVO>> listFiles(
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam(defaultValue = "/") String path,
             @RequestParam(required = false) Long configId) {
+        dataAccessPermissionService.checkFileReadPermission(path, configId);
         List<Map<String, Object>> fileList = fileExplorerService.listFiles(storageType, path, configId);
         List<FileInfoVO> voList = fileList.stream().map(FileInfoVO::fromMap).collect(Collectors.toList());
         return Result.success(voList);
@@ -39,6 +45,7 @@ public class FileExplorerController {
             @RequestParam(defaultValue = "/") String parentPath,
             @RequestParam String name,
             @RequestParam(required = false) Long configId) {
+        dataAccessPermissionService.checkFileWritePermission(parentPath, configId);
         fileExplorerService.createDirectory(storageType, parentPath, name, configId);
         return Result.success();
     }
@@ -48,6 +55,7 @@ public class FileExplorerController {
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam String path,
             @RequestParam(required = false) Long configId) {
+        dataAccessPermissionService.checkFileWritePermission(path, configId);
         fileExplorerService.deleteFile(storageType, path, configId);
         return Result.success();
     }
@@ -58,6 +66,7 @@ public class FileExplorerController {
             @RequestParam String path,
             @RequestParam String newName,
             @RequestParam(required = false) Long configId) {
+        dataAccessPermissionService.checkFileWritePermission(path, configId);
         fileExplorerService.renameFile(storageType, path, newName, configId);
         return Result.success();
     }
@@ -68,6 +77,7 @@ public class FileExplorerController {
             @RequestParam(defaultValue = "/") String path,
             @RequestParam(required = false) Long configId,
             @RequestParam("file") MultipartFile file) {
+        dataAccessPermissionService.checkFileWritePermission(path, configId);
         try {
             String fileName = file.getOriginalFilename();
             if (fileName == null || fileName.isEmpty()) {
@@ -91,6 +101,7 @@ public class FileExplorerController {
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam String path,
             @RequestParam(required = false) Long configId) {
+        dataAccessPermissionService.checkFileReadPermission(path, configId);
         try {
             InputStream inputStream = fileExplorerService.readFile(storageType, path, configId);
             byte[] content = inputStream.readAllBytes();
@@ -150,6 +161,7 @@ public class FileExplorerController {
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam String path,
             @RequestParam(required = false) Long configId) {
+        dataAccessPermissionService.checkFileReadPermission(path, configId);
         try (InputStream inputStream = fileExplorerService.readFile(storageType, path, configId)) {
             byte[] content = inputStream.readAllBytes();
 

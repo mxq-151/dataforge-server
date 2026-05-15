@@ -11,9 +11,12 @@ public class TablePermissionDTO {
     @NotBlank(message = "权限名称不能为空")
     private String permissionName;
 
-    @NotEmpty(message = "表元数据ID不能为空")
-    private List<Long> tableMetadataIds;
-
+    @NotEmpty(message = "数据源不能为空")
+    private String datasourceName;
+    @NotEmpty(message = "库名不能为空")
+    private String databaseName;
+    @NotEmpty(message = "表名不能为空")
+    private List<String> tableNames;
     private Integer permissionScope;
     private Integer canSelect;
     private Integer canInsert;
@@ -41,12 +44,28 @@ public class TablePermissionDTO {
         this.permissionName = permissionName;
     }
 
-    public List<Long> getTableMetadataIds() {
-        return tableMetadataIds;
+    public String getDatasourceName() {
+        return datasourceName;
     }
 
-    public void setTableMetadataIds(List<Long> tableMetadataIds) {
-        this.tableMetadataIds = tableMetadataIds;
+    public void setDatasourceName(String datasourceName) {
+        this.datasourceName = datasourceName;
+    }
+
+    public String getDatabaseName() {
+        return databaseName;
+    }
+
+    public void setDatabaseName(String databaseName) {
+        this.databaseName = databaseName;
+    }
+
+    public List<String> getTableNames() {
+        return tableNames;
+    }
+
+    public void setTableNames(List<String> tableNames) {
+        this.tableNames = tableNames;
     }
 
     public Integer getPermissionScope() {

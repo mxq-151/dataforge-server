@@ -7,6 +7,9 @@ import com.bigdata.common.entity.BaseEntity;
 public class SysTablePermission extends BaseEntity {
 
     private String permissionName;
+    private String datasourceName;
+    private String databaseName;
+    private String tableNames;
     private Integer permissionScope;
     private Integer canSelect;
     private Integer canInsert;
@@ -23,6 +26,30 @@ public class SysTablePermission extends BaseEntity {
 
     public void setPermissionName(String permissionName) {
         this.permissionName = permissionName;
+    }
+
+    public String getDatasourceName() {
+        return datasourceName;
+    }
+
+    public void setDatasourceName(String datasourceName) {
+        this.datasourceName = datasourceName;
+    }
+
+    public String getDatabaseName() {
+        return databaseName;
+    }
+
+    public void setDatabaseName(String databaseName) {
+        this.databaseName = databaseName;
+    }
+
+    public String getTableNames() {
+        return tableNames;
+    }
+
+    public void setTableNames(String tableNames) {
+        this.tableNames = tableNames;
     }
 
     public Integer getPermissionScope() {
