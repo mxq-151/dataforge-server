@@ -8,7 +8,6 @@ import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.devops.vo.ConnectionTestResult;
-import com.bigdata.modules.metadata.vo.SqlQueryResultVO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -194,84 +193,5 @@ public class DatasourceConfigService {
                 conn.disconnect();
             }
         }
-    }
-
-    public SqlQueryResultVO executeSqlQuery(Long datasourceId, String databaseName, String sql, Integer limit) {
-        long startTime = System.currentTimeMillis();
-        java.sql.Connection connection = null;
-        java.sql.Statement stmt = null;
-        java.sql.ResultSet rs = null;
-
-        SqlQueryResultVO result = new SqlQueryResultVO();
-
-        try {
-            connection = getConnection(datasourceId, databaseName);
-            stmt = connection.createStatement();
-
-            boolean isQuery = stmt.execute(sql);
-            List<String> columns = new java.util.ArrayList<>();
-            List<List<Object>> rows = new java.util.ArrayList<>();
-            int rowCount = 0;
-
-            if (isQuery) {
-                rs = stmt.getResultSet();
-                java.sql.ResultSetMetaData metaData = rs.getMetaData();
-                int columnCount = metaData.getColumnCount();
-
-                for (int i = 1; i <= columnCount; i++) {
-                    columns.add(metaData.getColumnLabel(i));
-                }
-
-                while (rs.next() && rowCount < limit) {
-                    List<Object> row = new java.util.ArrayList<>();
-                    for (int i = 1; i <= columnCount; i++) {
-                        Object value = rs.getObject(i);
-                        row.add(value);
-                    }
-                    rows.add(row);
-                    rowCount++;
-                }
-            } else {
-                int updateCount = stmt.getUpdateCount();
-                columns.add("affected_rows");
-                rows.add(List.of(updateCount));
-                rowCount = updateCount;
-            }
-
-            result.setSuccess(true);
-            result.setSqlType(detectSqlType(sql));
-            result.setColumns(columns);
-            result.setRows(rows);
-            result.setRowCount(rowCount);
-            result.setExecutionTimeMs(System.currentTimeMillis() - startTime);
-        } catch (Exception e) {
-            result.setSuccess(false);
-            result.setErrorMessage(e.getMessage());
-            result.setExecutionTimeMs(System.currentTimeMillis() - startTime);
-            result.setColumns(List.of());
-            result.setRows(List.of());
-            result.setRowCount(0);
-        } finally {
-            try { if (rs != null) rs.close(); } catch (Exception ignored) {}
-            try { if (stmt != null) stmt.close(); } catch (Exception ignored) {}
-            try { if (connection != null) connection.close(); } catch (Exception ignored) {}
-        }
-
-        return result;
-    }
-
-    private String detectSqlType(String sql) {
-        String upper = sql.toUpperCase().trim();
-        if (upper.startsWith("SELECT")) return "SELECT";
-        if (upper.startsWith("SHOW")) return "SHOW";
-        if (upper.startsWith("DESCRIBE") || upper.startsWith("DESC")) return "DESCRIBE";
-        if (upper.startsWith("EXPLAIN")) return "EXPLAIN";
-        if (upper.startsWith("CREATE")) return "CREATE";
-        if (upper.startsWith("ALTER")) return "ALTER";
-        if (upper.startsWith("DROP")) return "DROP";
-        if (upper.startsWith("INSERT")) return "INSERT";
-        if (upper.startsWith("UPDATE")) return "UPDATE";
-        if (upper.startsWith("DELETE")) return "DELETE";
-        return "UNKNOWN";
     }
 }

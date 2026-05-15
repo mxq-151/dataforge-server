@@ -70,6 +70,10 @@ public class MenuRoleBindService {
                     vo.setStatus(menu.getStatus());
                     vo.setRoleId(srp.getRoleId());
                     SysRole sr=this.sysRoleMapper.selectById(srp.getRoleId());
+                    if(sr==null)
+                    {
+                        continue;
+                    }
                     vo.setRoleCode(sr.getRoleCode());
                     vo.setRoleName(sr.getRoleName());
                     result.add(vo);

@@ -4,12 +4,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
-import com.bigdata.modules.development.entity.DevProject;
 import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.system.dto.ChangePasswordDTO;
 import com.bigdata.modules.system.dto.UserDTO;
-import com.bigdata.modules.system.entity.SysMenuPermission;
-import com.bigdata.modules.system.entity.SysRoleProjectPermission;
 import com.bigdata.modules.system.entity.SysUser;
 import com.bigdata.modules.system.mapper.SysMenuPermissionMapper;
 import com.bigdata.modules.system.mapper.SysUserRoleMapper;
@@ -20,14 +17,10 @@ import com.bigdata.modules.system.vo.UserInfoVO;
 import jakarta.validation.Valid;
 import jakarta.validation.groups.Default;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.util.CollectionUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
@@ -105,59 +98,6 @@ public class UserController {
     public Result<Void> resetPassword(@PathVariable Long id) {
         sysUserService.resetPassword(id);
         return Result.success();
-    }
-
-    @GetMapping("/current")
-    public Result<UserInfoVO> getCurrentUserInfo() {
-        Long currentUserId = getCurrentUserId();
-        SysUser user = sysUserService.getUserById(currentUserId);
-        List<Long> roleIds = sysUserService.getUserRoleIds(currentUserId);
-        SysUserVO userVO = toVO(user);
-
-        if (!CollectionUtils.isEmpty(roleIds)) {
-            List<Long> menuPermissionIds = new ArrayList<>();
-            for (Long roleId : roleIds) {
-                List<Long> ids = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(roleId);
-                if (ids != null) {
-                    menuPermissionIds.addAll(ids);
-                }
-            }
-            Set<Long> uniqueMenuPermIds = menuPermissionIds.stream().collect(Collectors.toSet());
-
-            if (!uniqueMenuPermIds.isEmpty()) {
-                List<SysMenuPermission> menuPermissions = sysMenuPermissionMapper.selectBatchIds(uniqueMenuPermIds);
-                userVO.setMenuTags(menuPermissions.stream()
-                        .map(SysMenuPermission::getMenuCode)
-                        .filter(code -> code != null && !code.isEmpty())
-                        .distinct()
-                        .collect(Collectors.toList()));
-            } else {
-                userVO.setMenuTags(Collections.emptyList());
-            }
-
-            List<SysRoleProjectPermission> projectPermissions = roleIds.stream()
-                    .flatMap(roleId -> sysRoleProjectPermissionService.getPermissionsByRoleId(roleId).stream())
-                    .collect(Collectors.toList());
-
-            if (!CollectionUtils.isEmpty(projectPermissions)) {
-                List<Long> projectIds = projectPermissions.stream()
-                        .map(SysRoleProjectPermission::getProjectId)
-                        .distinct()
-                        .collect(Collectors.toList());
-                List<DevProject> projects = devProjectMapper.selectBatchIds(projectIds);
-                userVO.setProjectCodes(projects.stream()
-                        .map(DevProject::getProjectCode)
-                        .collect(Collectors.toList()));
-            } else {
-                userVO.setProjectCodes(Collections.emptyList());
-            }
-        } else {
-            userVO.setMenuTags(Collections.emptyList());
-            userVO.setProjectCodes(Collections.emptyList());
-        }
-
-        UserInfoVO vo = new UserInfoVO(userVO, roleIds);
-        return Result.success(vo);
     }
 
     private Long getCurrentUserId() {

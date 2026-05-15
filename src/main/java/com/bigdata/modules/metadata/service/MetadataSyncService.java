@@ -1,15 +1,10 @@
 package com.bigdata.modules.metadata.service;
 
-import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
-import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
-import com.bigdata.modules.metadata.entity.MetadataSyncLog;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
-import com.bigdata.modules.metadata.vo.MetadataSyncResultVO;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,77 +21,13 @@ public class MetadataSyncService {
     private static final Logger log = LoggerFactory.getLogger(MetadataSyncService.class);
 
     @Autowired
-    private DatasourceConfigMapper datasourceConfigMapper;
-
-    @Autowired
     private TableMetadataService tableMetadataService;
-
-    @Autowired
-    private MetadataSyncLogService metadataSyncLogService;
 
     @Autowired
     private DatasourceConfigService datasourceConfigService;
 
     @Autowired
     private TableMetadataMapper tableMetadataMapper;
-
-    @Transactional
-    public MetadataSyncResultVO syncDatasourceMetadata(Long datasourceId) {
-        DatasourceConfig dsConfig = datasourceConfigMapper.selectById(datasourceId);
-        if (dsConfig == null) {
-            return new MetadataSyncResultVO(false, "数据源不存在", 0, 0, 0);
-        }
-
-        MetadataSyncLog syncLog = metadataSyncLogService.createSyncLog(datasourceId, "full", 1L);
-
-        Connection connection = null;
-        try {
-            connection = datasourceConfigService.getConnection(datasourceId);
-            List<TableMetadata> tables = new ArrayList<>();
-            Map<String, List<ColumnMetadata>> columnsMap = new HashMap<>();
-            Set<String> databases = new HashSet<>();
-            int totalColumns = 0;
-
-            List<String> databaseNames = getDatabases(connection, dsConfig);
-
-            for (String dbName : databaseNames) {
-                databases.add(dbName);
-                List<TableMetadata> dbTables = getTables(connection, dsConfig, dbName);
-                for (TableMetadata table : dbTables) {
-                    tables.add(table);
-                    table.setStorageEngine(dsConfig.getStorageEngine());
-                                       List<ColumnMetadata> columns = getColumns(connection, table, dbName);
-                    String tableKey = table.getStorageEngine().name() + TableMetadataService.DELIMITER + dbName + TableMetadataService.DELIMITER + table.getTableName();
-                    columnsMap.put(tableKey, columns);
-                    totalColumns += columns.size();
-                }
-            }
-            for(String dbName : databases){
-                tableMetadataService.syncMetadataFromDatasource(dsConfig.getStorageEngine(), dbName, tables, columnsMap);
-
-            }
-
-            metadataSyncLogService.completeSyncLog(syncLog.getId(),
-                    databases.size(), tables.size(), totalColumns);
-
-            dsConfig.setConnectionStatus(1);
-            datasourceConfigMapper.updateById(dsConfig);
-
-            return new MetadataSyncResultVO(true, "同步成功", databases.size(), tables.size(), totalColumns);
-        } catch (Exception e) {
-            log.error("元数据同步失败: datasourceId={}, error={}", datasourceId, e.getMessage(), e);
-            metadataSyncLogService.failSyncLog(syncLog.getId(), e.getMessage());
-
-            dsConfig.setConnectionStatus(2);
-            datasourceConfigMapper.updateById(dsConfig);
-
-            return new MetadataSyncResultVO(false, "同步失败: " + e.getMessage(), 0, 0, 0);
-        } finally {
-            if (connection != null) {
-                try { connection.close(); } catch (SQLException ignored) {}
-            }
-        }
-    }
 
     @Transactional
     public boolean syncSingleTableMetadata(Long datasourceId, StorageEngineType storageEngine, String databaseName, String tableName, String ddlType) {
@@ -121,93 +52,6 @@ public class MetadataSyncService {
             if (connection != null) {
                 try { connection.close(); } catch (SQLException ignored) {}
             }
-        }
-    }
-
-    private List<String> getDatabases(Connection conn, DatasourceConfig dsConfig) throws SQLException {
-        List<String> databases = new ArrayList<>();
-        DatasourceType type = dsConfig.getDatasourceType();
-
-        if (type == DatasourceType.MYSQL || type == DatasourceType.DORIS || type == DatasourceType.STARROCKS) {
-            try (ResultSet rs = conn.getMetaData().getCatalogs()) {
-                while (rs.next()) {
-                    String name = rs.getString("TABLE_CAT");
-                    if (!isSystemDatabase(name, type)) {
-                        databases.add(name);
-                    }
-                }
-            }
-        } else {
-            try (ResultSet rs = conn.getMetaData().getSchemas()) {
-                while (rs.next()) {
-                    String name = rs.getString("TABLE_SCHEM");
-                    if (!isSystemSchema(name)) {
-                        databases.add(name);
-                    }
-                }
-            }
-            if (databases.isEmpty()) {
-                databases.add(dsConfig.getDatabaseName() != null ? dsConfig.getDatabaseName() : "default");
-            }
-        }
-        return databases;
-    }
-
-    private boolean isSystemDatabase(String name, DatasourceType type) {
-        if (type == DatasourceType.MYSQL) {
-            return Set.of("information_schema", "mysql", "performance_schema", "sys").contains(name.toLowerCase());
-        }
-        if (type == DatasourceType.DORIS || type == DatasourceType.STARROCKS) {
-            return Set.of("information_schema", "__internal_schema").contains(name.toLowerCase());
-        }
-        return false;
-    }
-
-    private boolean isSystemSchema(String name) {
-        return Set.of("information_schema", "sys", "INFORMATION_SCHEMA").contains(name);
-    }
-
-    private List<TableMetadata> getTables(Connection conn, DatasourceConfig dsConfig, String dbName) throws SQLException {
-        List<TableMetadata> tables = new ArrayList<>();
-        String[] tableTypes = {"TABLE", "VIEW"};
-        DatasourceType type = dsConfig.getDatasourceType();
-        StorageEngineType storageEngine = dsConfig.getStorageEngine() != null ? 
-                dsConfig.getStorageEngine() : inferStorageEngineFromDatasourceType(type);
-
-        String catalog = null;
-        String schema = dbName;
-        if (type == DatasourceType.MYSQL || type == DatasourceType.DORIS || type == DatasourceType.STARROCKS) {
-            catalog = dbName;
-            schema = null;
-        }
-
-        try (ResultSet rs = conn.getMetaData().getTables(catalog, schema, "%", tableTypes)) {
-            while (rs.next()) {
-                TableMetadata table = new TableMetadata();
-                table.setDatasourceId(dsConfig.getId());
-                table.setStorageEngine(storageEngine);
-                table.setDatabaseName(dbName);
-                table.setTableName(rs.getString("TABLE_NAME"));
-                table.setTableType(rs.getString("TABLE_TYPE"));
-                table.setTableComment(rs.getString("REMARKS"));
-                table.setSyncTime(new java.util.Date());
-                table.setDeleted(0);
-                tables.add(table);
-            }
-        }
-        return tables;
-    }
-
-    private StorageEngineType inferStorageEngineFromDatasourceType(DatasourceType datasourceType) {
-        if (datasourceType == null) return StorageEngineType.MYSQL;
-        switch (datasourceType) {
-            case HIVE: return StorageEngineType.HIVE;
-            case DORIS: return StorageEngineType.DORIS;
-            case STARROCKS: return StorageEngineType.STARROCKS;
-            case MYSQL: return StorageEngineType.MYSQL;
-            case ES: return StorageEngineType.ES;
-            case CLICKHOUSE: return StorageEngineType.CLICKHOUSE;
-            default: return StorageEngineType.MYSQL;
         }
     }
 

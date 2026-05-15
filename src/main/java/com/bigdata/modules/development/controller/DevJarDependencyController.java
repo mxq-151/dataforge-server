@@ -35,19 +35,6 @@ public class DevJarDependencyController {
         return Result.success(voPage);
     }
 
-    @GetMapping("/all")
-    public Result<List<DevJarDependencyVO>> getAllJars() {
-        List<DevJarDependency> list = devJarDependencyService.getAllJars();
-        List<DevJarDependencyVO> voList = list.stream().map(this::toVO).collect(Collectors.toList());
-        return Result.success(voList);
-    }
-
-    @GetMapping("/{id}")
-    public Result<DevJarDependencyVO> getById(@PathVariable Long id) {
-        DevJarDependency jar = devJarDependencyService.getJarById(id);
-        return Result.success(toVO(jar));
-    }
-
     @PostMapping
     public Result<Void> save(@Valid @RequestBody DevJarDependencyDTO dto) {
         DevJarDependency jar = new DevJarDependency();

@@ -42,12 +42,6 @@ public class DatasourceConfigController {
         return Result.success(voList);
     }
 
-    @GetMapping("/{id}")
-    public Result<DatasourceConfigVO> getById(@PathVariable Long id) {
-        DatasourceConfig config = datasourceConfigService.getDatasourceById(id);
-        return Result.success(toVO(config));
-    }
-
     @PostMapping
     public Result<Void> save(@Valid @RequestBody DatasourceConfigDTO dto) {
         DatasourceConfig config = new DatasourceConfig();

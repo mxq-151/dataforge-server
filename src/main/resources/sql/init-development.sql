@@ -218,25 +218,7 @@ CREATE TABLE storage_config (
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='存储配置表';
 
--- 14. 集群配置表
-CREATE TABLE cluster_config (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
-    cluster_name VARCHAR(100) NOT NULL COMMENT '集群名称',
-    cluster_type VARCHAR(20) NOT NULL COMMENT '集群类型(yarn/k8s)',
-    resource_manager_url VARCHAR(255) DEFAULT NULL COMMENT 'YARN RM地址',
-    k8s_api_server VARCHAR(255) DEFAULT NULL COMMENT 'K8s API Server地址',
-    k8s_namespace VARCHAR(100) DEFAULT NULL COMMENT 'K8s命名空间',
-    kubeconfig_path VARCHAR(500) DEFAULT NULL COMMENT 'Kubeconfig文件路径',
-    grafana_url VARCHAR(255) DEFAULT NULL COMMENT 'Grafana地址',
-    grafana_api_key VARCHAR(255) DEFAULT NULL COMMENT 'Grafana API Key',
-    dolphin_scheduler_url VARCHAR(255) DEFAULT NULL COMMENT 'DolphinScheduler地址',
-    dolphin_scheduler_token VARCHAR(255) DEFAULT NULL COMMENT 'DS Token',
-    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态(0-禁用 1-正常)',
-    description VARCHAR(500) DEFAULT NULL COMMENT '描述',
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='集群配置表';
+-- 14. (已移除) 集群配置表 - 前端未使用
 
 -- ============================================================
 -- 三、审计日志模块
@@ -472,7 +454,7 @@ INSERT INTO sys_menu_permission (parent_id, menu_name, menu_code, path, icon, so
 (0, '系统管理', 'system', '/system', 'Setting', 1, 1, 1),
 (1, '数据源配置', 'datasource', '/system/config/datasource', '', 1, 1, 1),
 (1, '存储配置', 'storage', '/system/config/storage', '', 2, 1, 1),
-(1, '集群配置', 'cluster', '/system/config/cluster', '', 3, 1, 1),
+-- (1, '集群配置', 'cluster', '/system/config/cluster', '', 3, 1, 1), -- 已移除：前端未使用
 (1, '用户管理', 'user', '/system/user/list', '', 4, 1, 1),
 (1, '角色管理', 'role', '/system/role/list', '', 5, 1, 1),
 (1, '权限管理', 'permission', '/system/permission/manage', '', 6, 1, 1),

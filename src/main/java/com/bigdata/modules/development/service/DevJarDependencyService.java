@@ -35,23 +35,12 @@ public class DevJarDependencyService {
         return devJarDependencyMapper.selectPage(page, wrapper);
     }
 
-    public List<DevJarDependency> getAllJars() {
-        LambdaQueryWrapper<DevJarDependency> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DevJarDependency::getStatus, 1)
-               .orderByAsc(DevJarDependency::getJarName);
-        return devJarDependencyMapper.selectList(wrapper);
-    }
-
     public List<DevJarDependency> getJarsBySource(String source) {
         LambdaQueryWrapper<DevJarDependency> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(DevJarDependency::getSource, source)
                .eq(DevJarDependency::getStatus, 1)
                .orderByAsc(DevJarDependency::getJarName);
         return devJarDependencyMapper.selectList(wrapper);
-    }
-
-    public DevJarDependency getJarById(Long id) {
-        return devJarDependencyMapper.selectById(id);
     }
 
     public void saveJar(DevJarDependency jar) {

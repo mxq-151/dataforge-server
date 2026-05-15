@@ -41,12 +41,6 @@ public class StorageConfigController {
         return Result.success(voList);
     }
 
-    @GetMapping("/{id}")
-    public Result<StorageConfigVO> getById(@PathVariable Long id) {
-        StorageConfig config = storageConfigService.getStorageById(id);
-        return Result.success(toVO(config));
-    }
-
     @PostMapping
     public Result<Void> save(@Valid @RequestBody StorageConfigDTO dto) {
         StorageConfig config = new StorageConfig();

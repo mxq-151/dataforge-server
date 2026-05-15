@@ -173,17 +173,4 @@ public class FileExplorerController {
         List<String> types = fileExplorerService.getSupportedStorageTypes();
         return Result.success(types);
     }
-
-    @GetMapping("/test-connection")
-    public Result<StorageConnectionTestVO> testConnection(
-            @RequestParam String storageType,
-            @RequestParam(required = false) Long configId) {
-        boolean success = fileExplorerService.testConnection(storageType, configId);
-        StorageConnectionTestVO vo = new StorageConnectionTestVO(
-                success,
-                success ? "连接成功" : "连接失败",
-                storageType
-        );
-        return Result.success(vo);
-    }
 }

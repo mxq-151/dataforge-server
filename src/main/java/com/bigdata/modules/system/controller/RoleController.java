@@ -50,13 +50,6 @@ public class RoleController {
         return Result.success(vo);
     }
 
-    @GetMapping("/{id}/users")
-    public Result<List<SysUserVO>> getUsersByRoleId(@PathVariable Long id) {
-        List<SysUser> users = sysRoleService.getUsersByRoleId(id);
-        List<SysUserVO> voList = users.stream().map(this::toUserVO).collect(Collectors.toList());
-        return Result.success(voList);
-    }
-
     @PostMapping
     public Result<Void> save(@Valid @RequestBody RoleDTO dto) {
         sysRoleService.saveRole(dto);

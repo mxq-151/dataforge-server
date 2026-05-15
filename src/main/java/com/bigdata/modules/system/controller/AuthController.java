@@ -1,12 +1,10 @@
 package com.bigdata.modules.system.controller;
 
 import com.bigdata.common.exception.BusinessException;
-import com.bigdata.common.utils.JwtTokenUtils;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.entity.DevProject;
 import com.bigdata.modules.development.mapper.DevProjectMapper;
-import com.bigdata.modules.system.dto.ChangePasswordDTO;
 import com.bigdata.modules.system.dto.LoginDTO;
 import com.bigdata.modules.system.entity.SysMenuPermission;
 import com.bigdata.modules.system.entity.SysRole;
@@ -44,9 +42,6 @@ public class AuthController {
 
     @Autowired
     private SysRoleProjectPermissionService sysRoleProjectPermissionService;
-
-    @Autowired
-    private JwtTokenUtils jwtTokenUtils;
 
     @Autowired
     private SysRoleMapper sysRoleMapper;
@@ -92,12 +87,6 @@ public class AuthController {
         }
 
         return Result.success(vo);
-    }
-
-    @PostMapping("/logout")
-    public Result<Void> logout() {
-        SecurityContextHolderClear();
-        return Result.success();
     }
 
     @GetMapping("/info")
@@ -177,64 +166,5 @@ public class AuthController {
         }
 
         return Result.success(vo);
-    }
-
-    @PostMapping("/refresh")
-    public Result<LoginVO> refreshToken() {
-        Long currentUserId = SecurityUtils.getCurrentUserId();
-        String currentUsername = SecurityUtils.getCurrentUsername();
-        if (currentUserId == null || currentUsername == null) {
-            throw new BusinessException("未登录或登录已过期");
-        }
-
-        SysUser user = sysUserService.getUserById(currentUserId);
-        if (user == null) {
-            throw new BusinessException("用户不存在");
-        }
-        if (user.getStatus() != 1) {
-            throw new BusinessException("账号已被禁用");
-        }
-
-        List<Long> roleIds = sysUserRoleMapper.selectRoleIdsByUserId(user.getId());
-        String role = "ROLE_USER";
-        if (!CollectionUtils.isEmpty(roleIds)) {
-            List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
-            if (!CollectionUtils.isEmpty(roles)) {
-                role = roles.stream()
-                        .map(r -> "ROLE_" + r.getRoleCode().toUpperCase())
-                        .collect(Collectors.joining(","));
-            }
-        }
-
-        String newToken = jwtTokenUtils.generateToken(user.getId(), user.getUsername(), role);
-
-        LoginVO vo = new LoginVO(newToken);
-        vo.setUserId(user.getId());
-        vo.setUsername(user.getUsername());
-        vo.setRealName(user.getRealName());
-        vo.setAvatar(user.getAvatar());
-        vo.setRoles(List.of(role.split(",")));
-
-        SysTenant tenant = sysTenantService.getTenantByUserId(user.getId());
-        if (tenant != null) {
-            vo.setTenantId(tenant.getId());
-            vo.setTenantName(tenant.getTenantName());
-        }
-
-        return Result.success(vo);
-    }
-
-    @PutMapping("/password")
-    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordDTO dto) {
-        Long currentUserId = SecurityUtils.getCurrentUserId();
-        if (currentUserId == null) {
-            throw new BusinessException("未登录或登录已过期");
-        }
-        sysUserService.changePassword(currentUserId, dto);
-        return Result.success();
-    }
-
-    private void SecurityContextHolderClear() {
-        org.springframework.security.core.context.SecurityContextHolder.clearContext();
     }
 }
