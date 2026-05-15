@@ -17,6 +17,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 
 @Service
@@ -49,38 +52,47 @@ public class MenuRoleBindService {
     public List<MenuRoleBindVO> getBinds() {
 
         List<SysMenuPermission> menus = getMenuList(null);
+        Map<Long, SysMenuPermission> menuMap = menus.stream()
+                .collect(Collectors.toMap(SysMenuPermission::getId, m -> m));
 
         LambdaQueryWrapper<SysRoleMenuPermission> wrapper = new LambdaQueryWrapper<>();
         List<SysRoleMenuPermission> rolePermissions=this.sysRoleMenuPermissionMapper.selectList(wrapper);
+
+        Set<Long> roleIds = rolePermissions.stream()
+                .map(SysRoleMenuPermission::getRoleId)
+                .collect(Collectors.toSet());
+        Map<Long, SysRole> roleMap;
+        if (!roleIds.isEmpty()) {
+            List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
+            roleMap = roles.stream().collect(Collectors.toMap(SysRole::getId, r -> r));
+        } else {
+            roleMap = Map.of();
+        }
         
         List<MenuRoleBindVO> result = new ArrayList<>();
         for(SysRoleMenuPermission srp:rolePermissions)
         {
-            for(SysMenuPermission menu:menus){
-                if (menu.getId()==srp.getMenuPermissionId())
-                {
-                    MenuRoleBindVO vo = new MenuRoleBindVO();
-                    vo.setId(srp.getId());
-                    vo.setMenuName(menu.getMenuName());
-                    vo.setMenuCode(menu.getMenuCode());
-                    vo.setPath(menu.getPath());
-                    vo.setIcon(menu.getIcon());
-                    vo.setSortOrder(menu.getSortOrder());
-                    vo.setVisible(menu.getVisible());
-                    vo.setStatus(menu.getStatus());
-                    vo.setRoleId(srp.getRoleId());
-                    SysRole sr=this.sysRoleMapper.selectById(srp.getRoleId());
-                    if(sr==null)
-                    {
-                        continue;
-                    }
-                    vo.setRoleCode(sr.getRoleCode());
-                    vo.setRoleName(sr.getRoleName());
-                    result.add(vo);
-                    break;
-                }   
+            SysMenuPermission menu = menuMap.get(srp.getMenuPermissionId());
+            if (menu == null) continue;
+
+            MenuRoleBindVO vo = new MenuRoleBindVO();
+            vo.setId(srp.getId());
+            vo.setMenuName(menu.getMenuName());
+            vo.setMenuCode(menu.getMenuCode());
+            vo.setPath(menu.getPath());
+            vo.setIcon(menu.getIcon());
+            vo.setSortOrder(menu.getSortOrder());
+            vo.setVisible(menu.getVisible());
+            vo.setStatus(menu.getStatus());
+            vo.setRoleId(srp.getRoleId());
+            SysRole sr = roleMap.get(srp.getRoleId());
+            if(sr==null)
+            {
+                continue;
             }
-            
+            vo.setRoleCode(sr.getRoleCode());
+            vo.setRoleName(sr.getRoleName());
+            result.add(vo);
         }
         return result;
     }

@@ -126,12 +126,7 @@ public class AuthController {
 
         List<Long> menuPermissionIds = new ArrayList<>();
         if (!CollectionUtils.isEmpty(roleIds)) {
-            for (Long roleId : roleIds) {
-                List<Long> ids = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(roleId);
-                if (ids != null) {
-                    menuPermissionIds.addAll(ids);
-                }
-            }
+            menuPermissionIds = sysUserRoleMapper.selectMenuPermissionIdsByRoleIds(roleIds);
         }
         Set<Long> uniqueMenuPermIds = menuPermissionIds.stream().collect(Collectors.toSet());
 
@@ -147,9 +142,7 @@ public class AuthController {
         }
 
         List<SysRoleProjectPermission> projectPermissions = roleIds != null && !roleIds.isEmpty()
-                ? roleIds.stream()
-                    .flatMap(roleId -> sysRoleProjectPermissionService.getPermissionsByRoleId(roleId).stream())
-                    .collect(Collectors.toList())
+                ? sysRoleProjectPermissionService.getPermissionsByRoleIds(roleIds)
                 : Collections.emptyList();
 
         if (!CollectionUtils.isEmpty(projectPermissions)) {

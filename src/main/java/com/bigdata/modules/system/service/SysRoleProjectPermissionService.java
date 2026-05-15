@@ -29,6 +29,13 @@ public class SysRoleProjectPermissionService {
         return sysRoleProjectPermissionMapper.selectByRoleId(roleId);
     }
 
+    public List<SysRoleProjectPermission> getPermissionsByRoleIds(List<Long> roleIds) {
+        if (roleIds == null || roleIds.isEmpty()) {
+            return List.of();
+        }
+        return sysRoleProjectPermissionMapper.selectByRoleIds(roleIds);
+    }
+
     public List<SysRoleProjectPermission> getPermissionsByProjectId(Long projectId) {
         return sysRoleProjectPermissionMapper.selectByProjectId(projectId);
     }
@@ -71,8 +78,27 @@ public class SysRoleProjectPermissionService {
 
     @Transactional
     public void batchAssignPermissions(Long roleId, List<ProjectPermissionItem> items) {
+        SysRole role = sysRoleMapper.selectById(roleId);
+        if (role == null) {
+            throw new BusinessException("角色不存在");
+        }
+        if (role.getStatus() != 1) {
+            throw new BusinessException("角色已被禁用，无法分配权限");
+        }
+
         for (ProjectPermissionItem item : items) {
-            assignPermission(roleId, item.getProjectId(), item.getPermissionType());
+            SysRoleProjectPermission existPermission = getPermission(roleId, item.getProjectId());
+            if (existPermission != null) {
+                existPermission.setPermissionType(item.getPermissionType());
+                sysRoleProjectPermissionMapper.updateById(existPermission);
+            } else {
+                SysRoleProjectPermission permission = new SysRoleProjectPermission();
+                permission.setRoleId(roleId);
+                permission.setProjectId(item.getProjectId());
+                permission.setPermissionType(item.getPermissionType());
+                permission.setCreateTime(LocalDateTime.now());
+                sysRoleProjectPermissionMapper.insert(permission);
+            }
         }
     }
 

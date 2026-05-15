@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -154,13 +155,16 @@ public class SysRoleService {
     }
 
     private void saveRoleUsers(Long roleId, List<Long> userIds) {
+        LocalDateTime now = LocalDateTime.now();
+        List<SysUserRole> list = new ArrayList<>(userIds.size());
         for (Long userId : userIds) {
             SysUserRole userRole = new SysUserRole();
             userRole.setUserId(userId);
             userRole.setRoleId(roleId);
-            userRole.setCreateTime(LocalDateTime.now());
-            sysUserRoleMapper.insert(userRole);
+            userRole.setCreateTime(now);
+            list.add(userRole);
         }
+        sysUserRoleMapper.batchInsertUserRoles(list);
     }
 
     private void deleteRoleUsers(Long roleId) {

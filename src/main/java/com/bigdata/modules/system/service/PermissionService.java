@@ -1,6 +1,5 @@
 package com.bigdata.modules.system.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
@@ -54,7 +53,7 @@ public class PermissionService {
 
     public Page<FilePermissionVO> getFilePermissionList(int current, int size, Long roleId) {
         Page<SysFilePermission> page = new Page<>(current, size);
-        LambdaQueryWrapper<SysFilePermission> wrapper = new LambdaQueryWrapper<>();
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysFilePermission> wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         wrapper.orderByDesc(SysFilePermission::getCreateTime);
         Page<SysFilePermission> entityPage = filePermissionMapper.selectPage(page, wrapper);
         return toFilePermissionVOPage(entityPage);
@@ -80,7 +79,7 @@ public class PermissionService {
 
     public Page<TablePermissionVO> getTablePermissionList(int current, int size, Long roleId) {
         Page<SysTablePermission> page = new Page<>(current, size);
-        LambdaQueryWrapper<SysTablePermission> wrapper = new LambdaQueryWrapper<>();
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SysTablePermission> wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         wrapper.orderByDesc(SysTablePermission::getCreateTime);
         Page<SysTablePermission> entityPage = tablePermissionMapper.selectPage(page, wrapper);
         return toTablePermissionVOPage(entityPage);
@@ -117,21 +116,15 @@ public class PermissionService {
     public void assignRolePermissions(Long roleId, List<Long> menuPermissionIds,
                                        List<Long> filePermissionIds, List<Long> tablePermissionIds) {
         deleteRoleAllPermissions(roleId);
+        LocalDateTime now = LocalDateTime.now();
         if (menuPermissionIds != null && !menuPermissionIds.isEmpty()) {
-            for (Long menuPermId : menuPermissionIds) {
-                userRoleMapper.insertRoleMenuPermission(roleId, menuPermId, LocalDateTime.now());
-            }
+            userRoleMapper.batchInsertRoleMenuPermissions(roleId, menuPermissionIds, now);
         }
-
         if (filePermissionIds != null && !filePermissionIds.isEmpty()) {
-            for (Long filePermId : filePermissionIds) {
-                userRoleMapper.insertRoleFilePermission(roleId, filePermId, LocalDateTime.now());
-            }
+            userRoleMapper.batchInsertRoleFilePermissions(roleId, filePermissionIds, now);
         }
         if (tablePermissionIds != null && !tablePermissionIds.isEmpty()) {
-            for (Long tablePermId : tablePermissionIds) {
-                userRoleMapper.insertRoleTablePermission(roleId, tablePermId, LocalDateTime.now());
-            }
+            userRoleMapper.batchInsertRoleTablePermissions(roleId, tablePermissionIds, now);
         }
     }
 
@@ -182,11 +175,26 @@ public class PermissionService {
 
     private Page<FilePermissionVO> toFilePermissionVOPage(Page<SysFilePermission> entityPage) {
         Map<Long, String> roleNameMap = getAllRoleNameMap();
+        List<SysFilePermission> records = entityPage.getRecords();
+        if (records.isEmpty()) {
+            Page<FilePermissionVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
+            voPage.setRecords(List.of());
+            return voPage;
+        }
+
+        List<Long> permissionIds = records.stream().map(SysFilePermission::getId).collect(Collectors.toList());
+        List<SysRoleFilePermission> allBindings = roleFilePermissionMapper.selectByPermissionIds(permissionIds);
+        Map<Long, List<Long>> permRoleMap = allBindings.stream()
+                .collect(Collectors.groupingBy(
+                        SysRoleFilePermission::getFilePermissionId,
+                        Collectors.mapping(SysRoleFilePermission::getRoleId, Collectors.toList())
+                ));
+
         Page<FilePermissionVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
-        voPage.setRecords(entityPage.getRecords().stream().map(entity -> {
+        voPage.setRecords(records.stream().map(entity -> {
             FilePermissionVO vo = new FilePermissionVO();
             BeanUtils.copyProperties(entity, vo);
-            List<Long> roleIds = roleFilePermissionMapper.selectRoleIdsByPermissionId(entity.getId());
+            List<Long> roleIds = permRoleMap.getOrDefault(entity.getId(), List.of());
             vo.setRoleIds(roleIds);
             vo.setRoleNames(roleIds.stream()
                     .map(rId -> roleNameMap.getOrDefault(rId, "未知"))
@@ -219,16 +227,31 @@ public class PermissionService {
         Map<Long, String> roleNameMap = getAllRoleNameMap();
 
         List<SysTablePermission> records = entityPage.getRecords();
-
-        Set<Long> allTableMetadataIds = new HashSet<>();
-        Map<Long, List<Long>> permissionTableMap = new HashMap<>();
-        for (SysTablePermission entity : records) {
-            List<Long> tIds = permissionTableMapper.selectTableMetadataIdsByPermissionId(entity.getId());
-            permissionTableMap.put(entity.getId(), tIds);
-            if (tIds != null) {
-                allTableMetadataIds.addAll(tIds);
-            }
+        if (records.isEmpty()) {
+            Page<TablePermissionVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
+            voPage.setRecords(List.of());
+            return voPage;
         }
+
+        List<Long> permissionIds = records.stream().map(SysTablePermission::getId).collect(Collectors.toList());
+
+        List<SysRoleTablePermission> allRoleBindings = roleTablePermissionMapper.selectByPermissionIds(permissionIds);
+        Map<Long, List<Long>> permRoleMap = allRoleBindings.stream()
+                .collect(Collectors.groupingBy(
+                        SysRoleTablePermission::getTablePermissionId,
+                        Collectors.mapping(SysRoleTablePermission::getRoleId, Collectors.toList())
+                ));
+
+        List<SysPermissionTable> allPermTables = permissionTableMapper.selectByPermissionIds(permissionIds);
+        Map<Long, List<Long>> permissionTableMap = allPermTables.stream()
+                .collect(Collectors.groupingBy(
+                        SysPermissionTable::getTablePermissionId,
+                        Collectors.mapping(SysPermissionTable::getTableMetadataId, Collectors.toList())
+                ));
+
+        Set<Long> allTableMetadataIds = allPermTables.stream()
+                .map(SysPermissionTable::getTableMetadataId)
+                .collect(Collectors.toSet());
 
         Map<Long, TableMetadata> tableMetadataMap;
         if (!allTableMetadataIds.isEmpty()) {
@@ -257,7 +280,7 @@ public class PermissionService {
         voPage.setRecords(records.stream().map(entity -> {
             TablePermissionVO vo = new TablePermissionVO();
             BeanUtils.copyProperties(entity, vo);
-            List<Long> roleIds = roleTablePermissionMapper.selectRoleIdsByPermissionId(entity.getId());
+            List<Long> roleIds = permRoleMap.getOrDefault(entity.getId(), List.of());
             vo.setRoleIds(roleIds);
             vo.setRoleNames(roleIds.stream()
                     .map(rId -> roleNameMap.getOrDefault(rId, "未知"))
@@ -323,31 +346,44 @@ public class PermissionService {
 
     private void savePermissionTables(Long permissionId, List<Long> tableMetadataIds) {
         if (tableMetadataIds == null || tableMetadataIds.isEmpty()) return;
+        LocalDateTime now = LocalDateTime.now();
+        List<SysPermissionTable> list = new ArrayList<>(tableMetadataIds.size());
         for (Long tableMetadataId : tableMetadataIds) {
-            permissionTableMapper.insertPermissionTable(permissionId, tableMetadataId, LocalDateTime.now());
+            SysPermissionTable pt = new SysPermissionTable();
+            pt.setTablePermissionId(permissionId);
+            pt.setTableMetadataId(tableMetadataId);
+            pt.setCreateTime(now);
+            list.add(pt);
         }
+        permissionTableMapper.batchInsert(list);
     }
 
 
     private void saveFilePermissionRoles(Long permissionId, List<Long> roleIds) {
         if (roleIds == null || roleIds.isEmpty()) return;
+        LocalDateTime now = LocalDateTime.now();
+        List<SysRoleFilePermission> list = new ArrayList<>(roleIds.size());
         for (Long roleId : roleIds) {
             SysRoleFilePermission rp = new SysRoleFilePermission();
             rp.setRoleId(roleId);
             rp.setFilePermissionId(permissionId);
-            rp.setCreateTime(LocalDateTime.now());
-            roleFilePermissionMapper.insert(rp);
+            rp.setCreateTime(now);
+            list.add(rp);
         }
+        roleFilePermissionMapper.batchInsert(list);
     }
 
     private void saveTablePermissionRoles(Long permissionId, List<Long> roleIds) {
         if (roleIds == null || roleIds.isEmpty()) return;
+        LocalDateTime now = LocalDateTime.now();
+        List<SysRoleTablePermission> list = new ArrayList<>(roleIds.size());
         for (Long roleId : roleIds) {
             SysRoleTablePermission rp = new SysRoleTablePermission();
             rp.setRoleId(roleId);
             rp.setTablePermissionId(permissionId);
-            rp.setCreateTime(LocalDateTime.now());
-            roleTablePermissionMapper.insert(rp);
+            rp.setCreateTime(now);
+            list.add(rp);
         }
+        roleTablePermissionMapper.batchInsert(list);
     }
 }

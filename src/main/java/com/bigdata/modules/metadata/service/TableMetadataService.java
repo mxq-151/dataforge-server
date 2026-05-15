@@ -77,11 +77,8 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
         }
 
         existingTableKeys.removeAll(newTableKeys);
-        for (String deletedTableKey : existingTableKeys) {
-            String[] parts = deletedTableKey.split(DELIMITER);
-            if (parts.length == 3) {
-                deleteTableByEngineAndNames(parts[0], parts[1], parts[2]);
-            }
+        if (!existingTableKeys.isEmpty()) {
+            batchDeleteTablesByEngineAndNames(existingTableKeys);
         }
     }
 
@@ -121,15 +118,15 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             save(table);
         }
 
-        if (columns != null) {
+        if (columns != null && !columns.isEmpty()) {
             for (ColumnMetadata column : columns) {
                 column.setTableMetadataId(table.getId());
                 column.setStorageEngine(storageEngine);
                 column.setDatabaseName(table.getDatabaseName());
                 column.setTableName(table.getTableName());
                 column.setSyncTime(new Date());
-                columnMetadataMapper.insert(column);
             }
+            columnMetadataMapper.batchInsertOrUpdate(columns);
         }
     }
 
@@ -161,5 +158,43 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             columnMetadataMapper.delete(colDelWrapper);
             removeById(existing.getId());
         }
+    }
+
+    @Transactional
+    public void batchDeleteTablesByEngineAndNames(Set<String> tableKeys) {
+        if (tableKeys == null || tableKeys.isEmpty()) return;
+
+        List<String> storageEngines = new ArrayList<>();
+        List<String> dbNames = new ArrayList<>();
+        List<String> tblNames = new ArrayList<>();
+        for (String key : tableKeys) {
+            String[] parts = key.split(DELIMITER);
+            if (parts.length == 3) {
+                storageEngines.add(parts[0]);
+                dbNames.add(parts[1]);
+                tblNames.add(parts[2]);
+            }
+        }
+        if (storageEngines.isEmpty()) return;
+
+        LambdaQueryWrapper<TableMetadata> findWrapper = new LambdaQueryWrapper<>();
+        findWrapper.and(w -> {
+            for (int i = 0; i < storageEngines.size(); i++) {
+                if (i > 0) w.or();
+                w.eq(TableMetadata::getStorageEngine, storageEngines.get(i))
+                 .eq(TableMetadata::getDatabaseName, dbNames.get(i))
+                 .eq(TableMetadata::getTableName, tblNames.get(i));
+            }
+        });
+        List<TableMetadata> existingTables = list(findWrapper);
+        if (existingTables.isEmpty()) return;
+
+        List<Long> tableIds = existingTables.stream().map(TableMetadata::getId).collect(Collectors.toList());
+
+        LambdaQueryWrapper<ColumnMetadata> colDelWrapper = new LambdaQueryWrapper<>();
+        colDelWrapper.in(ColumnMetadata::getTableMetadataId, tableIds);
+        columnMetadataMapper.delete(colDelWrapper);
+
+        removeByIds(tableIds);
     }
 }

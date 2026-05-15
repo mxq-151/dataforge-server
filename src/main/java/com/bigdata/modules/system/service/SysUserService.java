@@ -272,12 +272,15 @@ public class SysUserService implements UserDetailsService {
     }
 
     private void saveUserRoles(Long userId, List<Long> roleIds) {
+        LocalDateTime now = LocalDateTime.now();
+        List<SysUserRole> list = new ArrayList<>(roleIds.size());
         for (Long roleId : roleIds) {
             SysUserRole userRole = new SysUserRole();
             userRole.setUserId(userId);
             userRole.setRoleId(roleId);
-            userRole.setCreateTime(LocalDateTime.now());
-            sysUserRoleMapper.insert(userRole);
+            userRole.setCreateTime(now);
+            list.add(userRole);
         }
+        sysUserRoleMapper.batchInsertUserRoles(list);
     }
 }

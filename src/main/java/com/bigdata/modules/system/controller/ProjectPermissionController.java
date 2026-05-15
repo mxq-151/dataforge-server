@@ -15,7 +15,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @RestController
@@ -34,14 +34,14 @@ public class ProjectPermissionController {
     @GetMapping("/role/{roleId}")
     public Result<List<ProjectPermissionVO>> getPermissionsByRoleId(@PathVariable Long roleId) {
         List<SysRoleProjectPermission> permissions = sysRoleProjectPermissionService.getPermissionsByRoleId(roleId);
-        List<ProjectPermissionVO> voList = permissions.stream().map(this::toVO).collect(Collectors.toList());
+        List<ProjectPermissionVO> voList = toVOList(permissions);
         return Result.success(voList);
     }
 
     @GetMapping("/project/{projectId}")
     public Result<List<ProjectPermissionVO>> getPermissionsByProjectId(@PathVariable Long projectId) {
         List<SysRoleProjectPermission> permissions = sysRoleProjectPermissionService.getPermissionsByProjectId(projectId);
-        List<ProjectPermissionVO> voList = permissions.stream().map(this::toVO).collect(Collectors.toList());
+        List<ProjectPermissionVO> voList = toVOList(permissions);
         return Result.success(voList);
     }
 
@@ -92,35 +92,64 @@ public class ProjectPermissionController {
         return Result.success();
     }
 
-    private ProjectPermissionVO toVO(SysRoleProjectPermission entity) {
-        ProjectPermissionVO vo = new ProjectPermissionVO();
-        BeanUtils.copyProperties(entity, vo);
-
-        SysRole role = sysRoleMapper.selectById(entity.getRoleId());
-        if (role != null) {
-            vo.setRoleName(role.getRoleName());
+    private List<ProjectPermissionVO> toVOList(List<SysRoleProjectPermission> permissions) {
+        if (permissions == null || permissions.isEmpty()) {
+            return List.of();
         }
 
-        DevProject project = devProjectMapper.selectById(entity.getProjectId());
-        if (project != null) {
-            vo.setProjectName(project.getProjectName());
+        Set<Long> roleIds = permissions.stream()
+                .map(SysRoleProjectPermission::getRoleId)
+                .collect(Collectors.toSet());
+        Set<Long> projectIds = permissions.stream()
+                .map(SysRoleProjectPermission::getProjectId)
+                .collect(Collectors.toSet());
+
+        Map<Long, SysRole> roleMap;
+        if (!roleIds.isEmpty()) {
+            List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
+            roleMap = roles.stream().collect(Collectors.toMap(SysRole::getId, r -> r));
+        } else {
+            roleMap = Map.of();
         }
 
-        switch (entity.getPermissionType()) {
-            case 1:
-                vo.setPermissionTypeName("可读");
-                break;
-            case 2:
-                vo.setPermissionTypeName("可编辑");
-                break;
-            case 3:
-                vo.setPermissionTypeName("可删除");
-                break;
-            default:
-                vo.setPermissionTypeName("未知");
-                break;
+        Map<Long, DevProject> projectMap;
+        if (!projectIds.isEmpty()) {
+            List<DevProject> projects = devProjectMapper.selectBatchIds(projectIds);
+            projectMap = projects.stream().collect(Collectors.toMap(DevProject::getId, p -> p));
+        } else {
+            projectMap = Map.of();
         }
 
-        return vo;
+        return permissions.stream().map(entity -> {
+            ProjectPermissionVO vo = new ProjectPermissionVO();
+            BeanUtils.copyProperties(entity, vo);
+
+            SysRole role = roleMap.get(entity.getRoleId());
+            if (role != null) {
+                vo.setRoleName(role.getRoleName());
+            }
+
+            DevProject project = projectMap.get(entity.getProjectId());
+            if (project != null) {
+                vo.setProjectName(project.getProjectName());
+            }
+
+            switch (entity.getPermissionType()) {
+                case 1:
+                    vo.setPermissionTypeName("可读");
+                    break;
+                case 2:
+                    vo.setPermissionTypeName("可编辑");
+                    break;
+                case 3:
+                    vo.setPermissionTypeName("可删除");
+                    break;
+                default:
+                    vo.setPermissionTypeName("未知");
+                    break;
+            }
+
+            return vo;
+        }).collect(Collectors.toList());
     }
 }

@@ -15,6 +15,14 @@ public interface SysRoleProjectPermissionMapper extends BaseMapper<SysRoleProjec
     @Select("SELECT * FROM sys_role_project_permission WHERE role_id = #{roleId}")
     List<SysRoleProjectPermission> selectByRoleId(@Param("roleId") Long roleId);
 
+    @Select("<script>" +
+            "SELECT * FROM sys_role_project_permission WHERE role_id IN " +
+            "<foreach item='roleId' collection='roleIds' open='(' separator=',' close=')'>" +
+            "#{roleId}" +
+            "</foreach>" +
+            "</script>")
+    List<SysRoleProjectPermission> selectByRoleIds(@Param("roleIds") List<Long> roleIds);
+
     @Select("SELECT * FROM sys_role_project_permission WHERE project_id = #{projectId}")
     List<SysRoleProjectPermission> selectByProjectId(@Param("projectId") Long projectId);
 

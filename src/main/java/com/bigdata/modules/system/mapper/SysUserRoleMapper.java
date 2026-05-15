@@ -31,6 +31,38 @@ public interface SysUserRoleMapper extends BaseMapper<SysUserRole> {
     @Delete("DELETE FROM sys_user_role WHERE role_id = #{roleId}")
     int deleteByRoleId(@Param("roleId") Long roleId);
 
+    @Insert("<script>" +
+            "INSERT INTO sys_user_role(user_id, role_id, create_time) VALUES " +
+            "<foreach item='item' collection='list' separator=','>" +
+            "(#{item.userId}, #{item.roleId}, #{item.createTime})" +
+            "</foreach>" +
+            "</script>")
+    void batchInsertUserRoles(@Param("list") List<SysUserRole> list);
+
+    @Insert("<script>" +
+            "INSERT INTO sys_role_menu_permission(role_id, menu_permission_id, create_time) VALUES " +
+            "<foreach item='permId' collection='permissionIds' separator=','>" +
+            "(#{roleId}, #{permId}, #{createTime})" +
+            "</foreach>" +
+            "</script>")
+    void batchInsertRoleMenuPermissions(@Param("roleId") Long roleId, @Param("permissionIds") List<Long> permissionIds, @Param("createTime") LocalDateTime createTime);
+
+    @Insert("<script>" +
+            "INSERT INTO sys_role_file_permission(role_id, file_permission_id, create_time) VALUES " +
+            "<foreach item='permId' collection='permissionIds' separator=','>" +
+            "(#{roleId}, #{permId}, #{createTime})" +
+            "</foreach>" +
+            "</script>")
+    void batchInsertRoleFilePermissions(@Param("roleId") Long roleId, @Param("permissionIds") List<Long> permissionIds, @Param("createTime") LocalDateTime createTime);
+
+    @Insert("<script>" +
+            "INSERT INTO sys_role_table_permission(role_id, table_permission_id, create_time) VALUES " +
+            "<foreach item='permId' collection='permissionIds' separator=','>" +
+            "(#{roleId}, #{permId}, #{createTime})" +
+            "</foreach>" +
+            "</script>")
+    void batchInsertRoleTablePermissions(@Param("roleId") Long roleId, @Param("permissionIds") List<Long> permissionIds, @Param("createTime") LocalDateTime createTime);
+
     @Insert("INSERT INTO sys_role_menu_permission(role_id, menu_permission_id, create_time) VALUES(#{roleId}, #{permissionId}, #{createTime})")
     void insertRoleMenuPermission(@Param("roleId") Long roleId, @Param("permissionId") Long permissionId, @Param("createTime") LocalDateTime createTime);
 
@@ -51,6 +83,14 @@ public interface SysUserRoleMapper extends BaseMapper<SysUserRole> {
 
     @Select("SELECT menu_permission_id FROM sys_role_menu_permission WHERE role_id = #{roleId}")
     List<Long> selectMenuPermissionIdsByRoleId(@Param("roleId") Long roleId);
+
+    @Select("<script>" +
+            "SELECT menu_permission_id FROM sys_role_menu_permission WHERE role_id IN " +
+            "<foreach item='roleId' collection='roleIds' open='(' separator=',' close=')'>" +
+            "#{roleId}" +
+            "</foreach>" +
+            "</script>")
+    List<Long> selectMenuPermissionIdsByRoleIds(@Param("roleIds") List<Long> roleIds);
 
     @Select("SELECT file_permission_id FROM sys_role_file_permission WHERE role_id = #{roleId}")
     List<Long> selectFilePermissionIdsByRoleId(@Param("roleId") Long roleId);
