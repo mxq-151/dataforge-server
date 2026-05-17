@@ -8,7 +8,7 @@ import java.util.List;
 
 public enum EngineType {
 
-    SPARK("spark", "Apache Spark", Arrays.asList(CodeType.SCALA, CodeType.PYTHON, CodeType.SQL)),
+    SPARK("spark", "Apache Spark", Arrays.asList(CodeType.JAVA,CodeType.SCALA, CodeType.PYTHON, CodeType.SQL)),
     KYUUBI("kyuubi", "Apache Kyuubi", Arrays.asList(CodeType.SQL)),
     FLINK("flink", "Apache Flink", Arrays.asList(CodeType.JAVA, CodeType.SCALA, CodeType.PYTHON, CodeType.SQL));
 

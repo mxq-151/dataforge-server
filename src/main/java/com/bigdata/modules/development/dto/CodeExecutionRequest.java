@@ -7,7 +7,6 @@ import java.util.Map;
 
 public class CodeExecutionRequest {
 
-    @NotBlank(message = "代码内容不能为空")
     private String codeContent;
 
     @NotBlank(message = "代码类型不能为空")
@@ -18,6 +17,12 @@ public class CodeExecutionRequest {
 
     private List<String> datasources;
 
+    private String mainClass;
+
+    private String fileName;
+
+    private String uploadedJarPath;
+
     private List<String> jarDependencyCatalogs;
 
     private Map<String, Object> runParams;
@@ -25,6 +30,30 @@ public class CodeExecutionRequest {
     private Map<String, Object> computeResources;
 
     private String remark;
+
+        public String getMainClass() {
+        return mainClass;
+    }
+
+    public void setMainClass(String mainClass) {
+        this.mainClass = mainClass;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
+    }
+
+    public String getUploadedJarPath() {
+        return uploadedJarPath;
+    }
+
+    public void setUploadedJarPath(String uploadedJarPath) {
+        this.uploadedJarPath = uploadedJarPath;
+    }
 
     public String getCodeContent() {
         return codeContent;

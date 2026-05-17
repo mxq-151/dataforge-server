@@ -4,7 +4,6 @@ import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +20,9 @@ public class CodeExecutionContext {
     private String jarDependencies;
     private Map<String, Object> runParams;
     private Map<String, Object> computeResources;
+    private String uploadedJarPath;
+    private String mainClass;
+    private String fileName;
 
 
     public String getCodeContent() {
@@ -110,6 +112,30 @@ public class CodeExecutionContext {
         this.computeResources = computeResources;
     }
 
+    public String getUploadedJarPath() {
+        return uploadedJarPath;
+    }
+
+    public void setUploadedJarPath(String uploadedJarPath) {
+        this.uploadedJarPath = uploadedJarPath;
+    }
+
+    public String getMainClass() {
+        return mainClass;
+    }
+
+    public void setMainClass(String mainClass) {
+        this.mainClass = mainClass;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
+    }
+
     public DatasourceType getPrimaryDatasourceType() {
         DatasourceConfig config = getPrimaryDatasourceConfig();
         return config != null ? config.getDatasourceType() : null;
@@ -142,5 +168,9 @@ public class CodeExecutionContext {
 
     public boolean hasMultipleDatasources() {
         return datasourceConfigs != null && datasourceConfigs.size() > 1;
+    }
+
+    public boolean isJarExecutionMode() {
+        return uploadedJarPath != null && !uploadedJarPath.isEmpty();
     }
 }

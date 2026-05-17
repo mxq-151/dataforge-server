@@ -95,18 +95,11 @@ public class DevProjectController {
         }
     }
 
-    @GetMapping("/{projectId}/params")
-    public Result<List<ProgramParamsVO>> listProgramParams(@PathVariable Long projectId) {
-        dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_READ);
-        List<ProgramParams> list = programParamsService.listByProjectId(projectId);
-        List<ProgramParamsVO> voList = list.stream().map(this::toParamsVO).collect(Collectors.toList());
-        return Result.success(voList);
-    }
 
-    @GetMapping("/{projectId}/params/{filePath:.+}")
+    @GetMapping("/{projectId}/params")
     public Result<ProgramParamsVO> getProgramParams(
             @PathVariable Long projectId,
-            @PathVariable String filePath) {
+            @RequestParam(required = true) String filePath) {
         dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_READ);
         ProgramParams params = programParamsService.getByProjectIdAndFilePath(projectId, filePath);
         if (params == null) {
@@ -131,10 +124,10 @@ public class DevProjectController {
         }
     }
 
-    @PutMapping("/{projectId}/params/{filePath:.+}")
+    @PutMapping("/{projectId}/params")
     public Result<Void> updateProgramParams(
             @PathVariable Long projectId,
-            @PathVariable String filePath,
+            @RequestParam(required = true) String filePath,
             @Valid @RequestBody ProgramParamsDTO dto) {
         dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_EDIT);
         try {
@@ -149,10 +142,10 @@ public class DevProjectController {
         }
     }
 
-    @DeleteMapping("/{projectId}/params/{filePath:.+}")
+    @DeleteMapping("/{projectId}/params")
     public Result<Void> deleteProgramParams(
             @PathVariable Long projectId,
-            @PathVariable String filePath) {
+            @RequestParam(required = true) String filePath) {
         dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_DELETE);
         try {
             programParamsService.delete(projectId, filePath);

@@ -29,10 +29,9 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         long startTime = System.currentTimeMillis();
 
         try {
-            Path tempScriptFile = createTempScriptFile(context);
-            List<String> command = buildSparkSubmitCommand(context, tempScriptFile);
+            List<String> command = buildCommand(context);
 
-            log.info("🔥 Spark提交命令: {}", String.join(" ", command));
+            log.info("Spark提交命令: {}", String.join(" ", command));
             log.info("   - 执行ID: {}", executionId);
             log.info("   - 引擎类型: {}", context.getEngineType());
             log.info("   - 代码类型: {}", context.getCodeType());
@@ -56,8 +55,6 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
             int exitCode = process.waitFor();
             long duration = System.currentTimeMillis() - startTime;
 
-            Files.deleteIfExists(tempScriptFile);
-
             if (exitCode == 0) {
                 CodeExecutionResult result = CodeExecutionResult.success(executionId, output.toString());
                 result.setStartTime(new java.util.Date(startTime));
@@ -72,7 +69,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
                 return result;
             }
         } catch (Exception e) {
-            log.error("❌ Spark执行失败", e);
+            log.error("Spark执行失败", e);
             long duration = System.currentTimeMillis() - startTime;
             CodeExecutionResult result = CodeExecutionResult.failure(executionId, e.getMessage());
             result.setStartTime(new java.util.Date(startTime));
@@ -82,14 +79,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         }
     }
 
-    private Path createTempScriptFile(CodeExecutionContext context) throws Exception {
-        String suffix = "." + context.getCodeType().getExtensions().get(0);
-        Path tempFile = Files.createTempFile("spark_exec_", suffix);
-        Files.writeString(tempFile, context.getCodeContent());
-        return tempFile;
-    }
-
-    private List<String> buildSparkSubmitCommand(CodeExecutionContext context, Path scriptFile) {
+    private List<String> buildCommand(CodeExecutionContext context) throws Exception {
         List<String> command = new ArrayList<>();
         command.add(SPARK_SUBMIT_CMD);
 
@@ -99,59 +89,51 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         addInputParams(command, context);
         addCodeTypeSpecificOptions(command, context);
 
-        command.add(scriptFile.toAbsolutePath().toString());
         return command;
     }
 
     private void addComputeResources(List<String> command, CodeExecutionContext context) {
         Map<String, Object> resources = context.getComputeResources();
         if (resources == null || resources.isEmpty()) {
-            log.debug("未配置计算资源，使用默认值");
             return;
         }
 
-        log.info("⚙️ 添加计算资源配置:");
+        log.info("添加计算资源配置:");
 
         Object driverMemory = resources.get("driver-memory");
         if (driverMemory != null) {
             command.add("--driver-memory");
             command.add(driverMemory.toString());
-            log.info("   --driver-memory {}", driverMemory);
         }
 
         Object executorMemory = resources.get("executor-memory");
         if (executorMemory != null) {
             command.add("--executor-memory");
             command.add(executorMemory.toString());
-            log.info("   --executor-memory {}", executorMemory);
         }
 
         Object executorCores = resources.get("executor-cores");
         if (executorCores != null) {
             command.add("--executor-cores");
             command.add(executorCores.toString());
-            log.info("   --executor-cores {}", executorCores);
         }
 
         Object numExecutors = resources.get("num-executors");
         if (numExecutors != null) {
             command.add("--num-executors");
             command.add(numExecutors.toString());
-            log.info("   --num-executors {}", numExecutors);
         }
 
         Object master = resources.get("master");
         if (master != null) {
             command.add("--master");
             command.add(master.toString());
-            log.info("   --master {}", master);
         }
 
         Object deployMode = resources.get("deploy-mode");
         if (deployMode != null) {
             command.add("--deploy-mode");
             command.add(deployMode.toString());
-            log.info("   --deploy-mode {}", deployMode);
         }
 
         for (Map.Entry<String, Object> entry : resources.entrySet()) {
@@ -160,7 +142,6 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
                 Object value = entry.getValue();
                 command.add("--conf");
                 command.add("spark." + key + "=" + value);
-                log.info("   --conf spark.{}={}", key, value);
             }
         }
     }
@@ -173,47 +154,36 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     private void addAllDatasourceConfs(List<String> command, CodeExecutionContext context) {
         List<DatasourceConfig> datasourceConfigs = context.getDatasourceConfigs();
         if (datasourceConfigs == null || datasourceConfigs.isEmpty()) {
-            log.warn("⚠️ 未配置数据源");
             return;
         }
-
-        log.info("📊 添加数据源配置 (共{}个):", datasourceConfigs.size());
 
         for (DatasourceConfig dsConfig : datasourceConfigs) {
             String dsName = dsConfig.getDatasourceName();
             DatasourceType dsType = dsConfig.getDatasourceType();
             StorageEngineType storageEngine = dsConfig.getStorageEngine();
-
-            log.info("   处理数据源 [名称={}, 类型={}, 存储引擎={}]", dsName, dsType, storageEngine);
-
             String confPrefix = "spark." + dsName;
 
             command.add("--conf");
             command.add(confPrefix + ".type=" + (dsType != null ? dsType.getCode() : "unknown"));
-            log.info("   --conf {}.type={}", confPrefix, dsType);
 
             if (dsConfig.getUrl() != null) {
                 command.add("--conf");
                 command.add(confPrefix + ".url=" + dsConfig.getUrl());
-                log.info("   --conf {}.url={}", confPrefix, dsConfig.getUrl());
             }
 
             if (dsConfig.getUsername() != null) {
                 command.add("--conf");
                 command.add(confPrefix + ".user=" + dsConfig.getUsername());
-                log.info("   --conf {}.user=***", confPrefix);
             }
 
             if (dsConfig.getPassword() != null) {
                 command.add("--conf");
                 command.add(confPrefix + ".password=" + dsConfig.getPassword());
-                log.info("   --conf {}.password=***", confPrefix);
             }
 
             if (dsConfig.getDatabaseName() != null) {
                 command.add("--conf");
                 command.add(confPrefix + ".database=" + dsConfig.getDatabaseName());
-                log.info("   --conf {}.database={}", confPrefix, dsConfig.getDatabaseName());
             }
 
             addDatasourceSpecificConf(command, confPrefix, dsConfig, storageEngine);
@@ -226,95 +196,52 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
         switch (dsType) {
             case HIVE:
-                addHiveSpecificConf(command, confPrefix, dsConfig, storageEngine);
+                command.add("--conf");
+                command.add(confPrefix + ".metastore.uris=" + dsConfig.getUrl());
+                if (storageEngine == StorageEngineType.HUDI) {
+                    command.add("--conf");
+                    command.add(confPrefix + ".sql.extensions=org.apache.spark.sql.hudi.HudiSparkSessionExtension");
+                    command.add("--conf");
+                    command.add(confPrefix + ".serializer=org.apache.spark.serializer.KryoSerializer");
+                } else if (storageEngine == StorageEngineType.ICEBERG) {
+                    command.add("--conf");
+                    command.add(confPrefix + ".sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions");
+                    command.add("--conf");
+                    command.add(confPrefix + ".catalog.type=hive");
+                }
                 break;
             case MYSQL:
-                addMysqlSpecificConf(command, confPrefix, dsConfig, storageEngine);
+                command.add("--conf");
+                command.add(confPrefix + ".jdbc.driver=com.mysql.cj.jdbc.Driver");
                 break;
             case DORIS:
-                addDorisSpecificConf(command, confPrefix, dsConfig, storageEngine);
+                command.add("--conf");
+                command.add(confPrefix + ".fenier.host=" + extractHost(dsConfig.getUrl()));
+                command.add("--conf");
+                command.add(confPrefix + ".fenier.query.port=" + extractPort(dsConfig.getUrl(), "9030"));
+                command.add("--conf");
+                command.add(confPrefix + ".catalog.type=doris");
                 break;
             case CLICKHOUSE:
-                addClickHouseSpecificConf(command, confPrefix, dsConfig, storageEngine);
+                command.add("--conf");
+                command.add(confPrefix + ".write.batch.size=10000");
+                command.add("--conf");
+                command.add(confPrefix + ".connection.timeout=30000");
                 break;
             default:
-                addGenericJdbcSpecificConf(command, confPrefix, dsConfig);
+                if (dsConfig.getExtraParams() != null && !dsConfig.getExtraParams().isEmpty()) {
+                    command.add("--conf");
+                    command.add(confPrefix + ".extra.params=" + dsConfig.getExtraParams());
+                }
                 break;
-        }
-    }
-
-    private void addHiveSpecificConf(List<String> command, String confPrefix,
-                                      DatasourceConfig dsConfig, StorageEngineType storageEngine) {
-        command.add("--conf");
-        command.add(confPrefix + ".metastore.uris=" + dsConfig.getUrl());
-        log.info("   --conf {}.metastore.uris={}", confPrefix, dsConfig.getUrl());
-
-        if (storageEngine == StorageEngineType.HUDI) {
-            command.add("--conf");
-            command.add(confPrefix + ".sql.extensions=org.apache.spark.sql.hudi.HudiSparkSessionExtension");
-            command.add("--conf");
-            command.add(confPrefix + ".serializer=org.apache.spark.serializer.KryoSerializer");
-        } else if (storageEngine == StorageEngineType.ICEBERG) {
-            command.add("--conf");
-            command.add(confPrefix + ".sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions");
-            command.add("--conf");
-            command.add(confPrefix + ".sql.catalog.type=hive");
-        }
-    }
-
-    private void addMysqlSpecificConf(List<String> command, String confPrefix,
-                                       DatasourceConfig dsConfig, StorageEngineType storageEngine) {
-        command.add("--conf");
-        command.add(confPrefix + ".jdbc.driver=com.mysql.cj.jdbc.Driver");
-        log.info("   --conf {}.jdbc.driver=com.mysql.cj.jdbc.Driver", confPrefix);
-
-        if (storageEngine == StorageEngineType.MYSQL) {
-            command.add("--conf");
-            command.add(confPrefix + ".connector=mysql-cdc");
-        }
-    }
-
-    private void addDorisSpecificConf(List<String> command, String confPrefix,
-                                       DatasourceConfig dsConfig, StorageEngineType storageEngine) {
-        command.add("--conf");
-        command.add(confPrefix + ".fenier.host=" + extractHost(dsConfig.getUrl()));
-        command.add("--conf");
-        command.add(confPrefix + ".fenier.query.port=" + extractPort(dsConfig.getUrl(), "9030"));
-        command.add("--conf");
-        command.add(confPrefix + ".catalog.type=doris");
-
-        if (storageEngine == StorageEngineType.STARROCKS) {
-            command.add("--conf");
-            command.add(confPrefix + ".starrocks.fenier.host=" + extractHost(dsConfig.getUrl()));
-            command.add("--conf");
-            command.add(confPrefix + ".starrocks.jdbc.url=" + dsConfig.getUrl());
-        }
-    }
-
-    private void addClickHouseSpecificConf(List<String> command, String confPrefix,
-                                            DatasourceConfig dsConfig, StorageEngineType storageEngine) {
-        command.add("--conf");
-        command.add(confPrefix + ".write.batch.size=10000");
-        command.add("--conf");
-        command.add(confPrefix + ".connection.timeout=30000");
-    }
-
-    private void addGenericJdbcSpecificConf(List<String> command, String confPrefix,
-                                             DatasourceConfig dsConfig) {
-        if (dsConfig.getExtraParams() != null && !dsConfig.getExtraParams().isEmpty()) {
-            command.add("--conf");
-            command.add(confPrefix + ".extra.params=" + dsConfig.getExtraParams());
         }
     }
 
     private void addInputParams(List<String> command, CodeExecutionContext context) {
         Map<String, Object> runParams = context.getRunParams();
         if (runParams == null || runParams.isEmpty()) {
-            log.debug("未配置程序入参");
             return;
         }
-
-        log.info("📝 添加程序入参 (共{}个):", runParams.size());
 
         for (Map.Entry<String, Object> entry : runParams.entrySet()) {
             String paramName = entry.getKey();
@@ -323,17 +250,13 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
             if (paramValue instanceof Map) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> paramDetail = (Map<String, Object>) paramValue;
-                String type = (String) paramDetail.getOrDefault("type", "string");
                 Object value = paramDetail.get("value");
-
                 command.add("--conf");
                 command.add("spark.app.params." + paramName + "=" +
                            (value != null ? value.toString() : ""));
-                log.info("   --conf spark.app.params.{}={} (type={})", paramName, value, type);
             } else {
                 command.add("--conf");
                 command.add("spark.app.params." + paramName + "=" + paramValue.toString());
-                log.info("   --conf spark.app.params.{}={}", paramName, paramValue);
             }
         }
     }
@@ -343,34 +266,94 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         if (jarDependencies != null && !jarDependencies.isEmpty()) {
             command.add("--jars");
             command.add(jarDependencies);
-            log.info("📦 添加依赖包: {}", jarDependencies);
         }
     }
 
-    private void addCodeTypeSpecificOptions(List<String> command, CodeExecutionContext context) {
-        switch (context.getCodeType()) {
-            case SCALA:
-                command.add("--class");
-                command.add("Main");
-                log.info("📄 Scala模式: --class Main");
-                break;
-            case PYTHON:
-                log.info("🐍 Python模式");
-                break;
-            case SQL:
-                command.add("--conf");
-                command.add("spark.sql.codegen.wholeStage=true");
-                log.info("💾 SQL模式: 启用全阶段代码生成");
-                break;
-            case JAVA:
-                command.add("--class");
-                command.add("Main");
-                log.info("☕ Java模式: --class Main");
-                break;
-            default:
-                log.info("📄 默认代码类型: {}", context.getCodeType());
-                break;
+    private void addCodeTypeSpecificOptions(List<String> command, CodeExecutionContext context) throws Exception {
+        CodeType codeType = context.getCodeType();
+
+        if (context.isJarExecutionMode()) {
+            handleJarMode(command, context);
+        } else {
+            switch (codeType) {
+                case SQL:
+                    handleSqlMode(command, context);
+                    break;
+                case PYTHON:
+                    handlePythonMode(command, context);
+                    break;
+                case SCALA:
+                case JAVA:
+                    handleCompiledMode(command, context);
+                    break;
+                default:
+                    handleDefaultMode(command, context);
+                    break;
+            }
         }
+    }
+
+    private void handleJarMode(List<String> command, CodeExecutionContext context) {
+        String mainClass = context.getMainClass();
+        if (mainClass == null || mainClass.trim().isEmpty()) {
+            mainClass = "Main";
+        }
+        command.add("--class");
+        command.add(mainClass);
+
+        String jarPath = context.getUploadedJarPath();
+        if (jarPath != null) {
+            command.add(jarPath);
+        }
+    }
+
+    private void handleSqlMode(List<String> command, CodeExecutionContext context) {
+        command.add("--conf");
+        command.add("spark.sql.codegen.wholeStage=true");
+
+        String codeContent = context.getCodeContent();
+        if (codeContent != null && !codeContent.trim().isEmpty()) {
+            command.add("-e");
+            command.add(codeContent.trim());
+        } else {
+            command.add("-e");
+            command.add("SELECT 1");
+        }
+    }
+
+    private void handlePythonMode(List<String> command, CodeExecutionContext context) throws Exception {
+        Path tempScriptFile = createTempScriptFile(context, "py");
+        command.add(tempScriptFile.toAbsolutePath().toString());
+    }
+
+    private void handleCompiledMode(List<String> command, CodeExecutionContext context) throws Exception {
+        String mainClass = context.getMainClass();
+        if (mainClass == null || mainClass.trim().isEmpty()) {
+            mainClass = "Main";
+        }
+        command.add("--class");
+        command.add(mainClass);
+
+        Path tempScriptFile = createTempScriptFile(context, context.getCodeType().getExtensions().get(0));
+        command.add(tempScriptFile.toAbsolutePath().toString());
+    }
+
+    private void handleDefaultMode(List<String> command, CodeExecutionContext context) throws Exception {
+        String codeContent = context.getCodeContent();
+        if (codeContent != null && !codeContent.trim().isEmpty()) {
+            command.add("-e");
+            command.add(codeContent.trim());
+        }
+    }
+
+    private Path createTempScriptFile(CodeExecutionContext context, String suffix) throws Exception {
+        Path tempFile = Files.createTempFile("spark_exec_", "." + suffix);
+        String content = context.getCodeContent();
+        if (content == null) {
+            content = "";
+        }
+        Files.writeString(tempFile, content);
+        return tempFile;
     }
 
     private String extractHost(String url) {

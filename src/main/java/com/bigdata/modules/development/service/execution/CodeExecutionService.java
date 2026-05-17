@@ -73,6 +73,9 @@ public class CodeExecutionService {
         context.setSubmitByName(submitByName);
         context.setRunParams(request.getRunParams());
         context.setComputeResources(request.getComputeResources());
+        context.setUploadedJarPath(request.getUploadedJarPath());
+        context.setMainClass(request.getMainClass());
+        context.setFileName(request.getFileName());
 
         CodeType codeType = CodeType.fromCode(request.getCodeType());
         if (codeType == null) {
@@ -98,9 +101,7 @@ public class CodeExecutionService {
     }
 
     private void validateContext(CodeExecutionContext context) {
-        if (context.getCodeContent() == null || context.getCodeContent().trim().isEmpty()) {
-            throw new BusinessException("代码内容不能为空");
-        }
+
         if (context.getCodeType() == null) {
             throw new BusinessException("无法识别代码类型");
         }
