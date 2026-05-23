@@ -21,8 +21,6 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
     @Autowired
     private ColumnMetadataMapper columnMetadataMapper;
 
-    @Autowired
-    private TableMetadataMapper tableMetadataMapper;
 
     public static final String DELIMITER = "##";
 
@@ -41,9 +39,12 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             wrapper.like(TableMetadata::getTableName, tableName);
         }
         if (keyword != null && !keyword.isEmpty()) {
-            wrapper.and(w -> w.like(TableMetadata::getTableName, keyword)
-                    .or().like(TableMetadata::getTableComment, keyword)
-                    .or().like(TableMetadata::getDatabaseName, keyword));
+            String[] words=keyword.split(",");
+            for(String word:words)
+            {
+                wrapper.and(w -> w.like(TableMetadata::getTableName, word)
+                    .or().like(TableMetadata::getTableComment, word));
+            }
         }
 
         wrapper.orderByDesc(TableMetadata::getSyncTime);
@@ -54,6 +55,15 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
     public List<ColumnMetadata> getColumnsByTableId(Long tableMetadataId) {
         LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ColumnMetadata::getTableMetadataId, tableMetadataId)
+               .orderByAsc(ColumnMetadata::getOrdinalPosition);
+        return columnMetadataMapper.selectList(wrapper);
+    }
+
+    public List<ColumnMetadata> getColumnsByNames(StorageEngineType storageEngine, String databaseName, String tableName) {
+        LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ColumnMetadata::getStorageEngine, storageEngine)
+               .eq(ColumnMetadata::getDatabaseName, databaseName)
+               .eq(ColumnMetadata::getTableName, tableName)
                .orderByAsc(ColumnMetadata::getOrdinalPosition);
         return columnMetadataMapper.selectList(wrapper);
     }

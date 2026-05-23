@@ -8,6 +8,7 @@ import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.devops.vo.ConnectionTestResult;
 import com.bigdata.modules.devops.vo.DatasourceConfigVO;
+import com.bigdata.modules.metadata.service.MetadataSyncService;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +24,9 @@ public class DatasourceConfigController {
 
     @Autowired
     private DatasourceConfigService datasourceConfigService;
+
+    @Autowired
+    private MetadataSyncService metadataSyncService;
 
     @GetMapping("/list")
     public Result<Page<DatasourceConfigVO>> getList(
@@ -72,6 +76,17 @@ public class DatasourceConfigController {
     public Result<ConnectionTestResult> testConnection(@PathVariable Long id) {
         ConnectionTestResult result = datasourceConfigService.testConnection(id);
         return Result.success(result);
+    }
+
+    @PostMapping("/{id}/sync-metadata")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<Void> syncMetadata(@PathVariable Long id) {
+        boolean success = metadataSyncService.syncAllMetadataByDatasourceId(id);
+        if (success) {
+            return Result.success();
+        } else {
+            return Result.error(500, "元数据同步失败");
+        }
     }
 
     @PostMapping("/test")

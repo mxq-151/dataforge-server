@@ -1,10 +1,12 @@
 package com.bigdata.modules.development.service.execution;
 
+import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -21,7 +23,11 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(SparkExecutionStrategy.class);
 
-    private static final String SPARK_SUBMIT_CMD = "spark-submit";
+    @Autowired
+    private EngineProperties engineProperties;
+
+    @Autowired
+    private ProcessManager processManager;
 
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
@@ -43,6 +49,8 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
             pb.redirectErrorStream(true);
             Process process = pb.start();
 
+            String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "spark");
+
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -54,6 +62,8 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
             int exitCode = process.waitFor();
             long duration = System.currentTimeMillis() - startTime;
+
+            processManager.unregister(registeredId);
 
             if (exitCode == 0) {
                 CodeExecutionResult result = CodeExecutionResult.success(executionId, output.toString());
@@ -81,7 +91,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
     private List<String> buildCommand(CodeExecutionContext context) throws Exception {
         List<String> command = new ArrayList<>();
-        command.add(SPARK_SUBMIT_CMD);
+        command.add(engineProperties.getSpark().getSparkSubmitCommand());
 
         addComputeResources(command, context);
         addAllDatasourceConfs(command, context);

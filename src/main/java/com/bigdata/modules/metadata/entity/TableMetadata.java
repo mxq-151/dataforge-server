@@ -23,8 +23,13 @@ public class TableMetadata {
     private Date lastModifyTime;
     private String partitionColumns;
     private String storageFormat;
+    private String compression;
+    private String location;
     private Long rowCount;
     private Long sizeBytes;
+    private Integer hotDays = 90;
+    private Integer coldDays = 180;
+    private Integer keepDays = 720;
     private Date syncTime;
     private Long createBy;
     private Date createTime;
@@ -55,10 +60,20 @@ public class TableMetadata {
     public void setPartitionColumns(String partitionColumns) { this.partitionColumns = partitionColumns; }
     public String getStorageFormat() { return storageFormat; }
     public void setStorageFormat(String storageFormat) { this.storageFormat = storageFormat; }
+    public String getCompression() { return compression; }
+    public void setCompression(String compression) { this.compression = compression; }
+    public String getLocation() { return location; }
+    public void setLocation(String location) { this.location = location; }
     public Long getRowCount() { return rowCount; }
     public void setRowCount(Long rowCount) { this.rowCount = rowCount; }
     public Long getSizeBytes() { return sizeBytes; }
     public void setSizeBytes(Long sizeBytes) { this.sizeBytes = sizeBytes; }
+    public Integer getHotDays() { return hotDays; }
+    public void setHotDays(Integer hotDays) { this.hotDays = hotDays; }
+    public Integer getColdDays() { return coldDays; }
+    public void setColdDays(Integer coldDays) { this.coldDays = coldDays; }
+    public Integer getKeepDays() { return keepDays; }
+    public void setKeepDays(Integer keepDays) { this.keepDays = keepDays; }
     public Date getSyncTime() { return syncTime; }
     public void setSyncTime(Date syncTime) { this.syncTime = syncTime; }
     public Long getCreateBy() { return createBy; }

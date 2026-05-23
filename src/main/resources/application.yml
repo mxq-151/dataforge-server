@@ -60,14 +60,8 @@ jwt:
   header: Authorization
   prefix: Bearer
 
-knife4j:
-  enable: true
-  setting:
-    language: zh_cn
-
-storage:
-  base-path: /Users/mxq/bigdata-platform-storage
-
-git:
-  repositories:
-    base-path: /tmp/git-repositories
+engine:
+  spark:
+    home: /Users/mxq/Desktop/bigdata-workspace/spark-4.1.1-bin-hadoop3
+  flink:
+    home: /opt/flink

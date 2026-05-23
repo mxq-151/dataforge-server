@@ -1,5 +1,6 @@
 package com.bigdata.modules.devops.service;
 
+import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
@@ -15,7 +16,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -28,6 +29,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
     private static final String CLICKHOUSE_DRIVER = "com.clickhouse.jdbc.ClickHouseDriver";
 
     private final ConcurrentHashMap<Long, HikariDataSource> poolMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, HikariDataSource> poolMapWithDb = new ConcurrentHashMap<>();
 
     @Autowired
     private DatasourceConfigMapper datasourceConfigMapper;
@@ -51,25 +53,78 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
     }
 
     public Connection getConnection(Long datasourceId, String databaseName) throws SQLException {
-        Connection conn = getConnection(datasourceId);
-        if (databaseName != null && !databaseName.isEmpty()) {
+        if (databaseName == null || databaseName.isEmpty()) {
+            return getConnection(datasourceId);
+        }
+
+        Long userId = SecurityUtils.getCurrentUserId();
+        String poolKey = buildPoolKey(userId, datasourceId, databaseName);
+        HikariDataSource pool = poolMapWithDb.computeIfAbsent(poolKey, key -> {
             try {
                 DatasourceConfig config = getDatasourceConfig(datasourceId);
-                DatasourceType type = config.getDatasourceType();
-                if (type == DatasourceType.MYSQL || type == DatasourceType.DORIS || type == DatasourceType.STARROCKS) {
-                    conn.setCatalog(databaseName);
-                } else {
-                    conn.setSchema(databaseName);
-                }
-            } catch (SQLException e) {
-                try {
-                    conn.close();
-                } catch (SQLException ignored) {
-                }
-                throw e;
+                DatasourceConfig configWithDb = new DatasourceConfig();
+                org.springframework.beans.BeanUtils.copyProperties(config, configWithDb);
+                configWithDb.setUrl(buildUrlWithDatabase(config.getUrl(), config.getDatasourceType(), databaseName));
+                HikariDataSource ds = createPoolFromConfig(configWithDb);
+                ds.setPoolName("ds-" + userId + "-" + datasourceId + "-" + databaseName);
+                return ds;
+            } catch (Exception e) {
+                log.error("创建带数据库名的连接池失败: poolKey={}", poolKey, e);
+                throw new RuntimeException("创建连接池失败: " + e.getMessage(), e);
             }
+        });
+
+        return pool.getConnection();
+    }
+
+    private String buildPoolKey(Long userId, Long datasourceId, String databaseName) {
+        return userId + ":" + datasourceId + ":" + databaseName;
+    }
+
+    private String buildUrlWithDatabase(String originalUrl, DatasourceType type, String databaseName) {
+        if (originalUrl == null || originalUrl.isEmpty()) {
+            return originalUrl;
         }
-        return conn;
+
+        String normalizedUrl = normalizeUrl(originalUrl, type);
+
+        switch (type) {
+            case MYSQL:
+            case DORIS:
+            case STARROCKS:
+                if (normalizedUrl.contains("/")) {
+                    int lastSlash = normalizedUrl.lastIndexOf('/');
+                    int questionMark = normalizedUrl.indexOf('?', lastSlash);
+                    if (questionMark > 0) {
+                        return normalizedUrl.substring(0, lastSlash + 1) + databaseName + normalizedUrl.substring(questionMark);
+                    } else {
+                        return normalizedUrl.substring(0, lastSlash + 1) + databaseName;
+                    }
+                }
+                break;
+            case CLICKHOUSE:
+                if (normalizedUrl.contains("jdbc:clickhouse://")) {
+                    String hostPart = normalizedUrl.replace("jdbc:clickhouse://", "");
+                    if (hostPart.contains("/")) {
+                        int firstSlash = hostPart.indexOf('/');
+                        return "jdbc:clickhouse://" + hostPart.substring(0, firstSlash + 1) + databaseName;
+                    } else {
+                        return normalizedUrl + "/" + databaseName;
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+
+        return normalizedUrl;
+    }
+
+    private HikariDataSource createPoolFromConfig(DatasourceConfig config) {
+        HikariConfig hc = buildHikariConfig(config);
+        HikariDataSource pool = new HikariDataSource(hc);
+        log.info("创建连接池(带数据库): type={}, url={}", config.getDatasourceType(), config.getUrl());
+        return pool;
     }
 
     public boolean testConnection(Long datasourceId) {
@@ -103,13 +158,35 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
     }
 
     public void refreshPool(Long datasourceId) {
-        HikariDataSource oldPool = poolMap.remove(datasourceId);
-        if (oldPool != null && !oldPool.isClosed()) {
-            oldPool.close();
-            log.info("已关闭旧连接池: datasourceId={}", datasourceId);
+        synchronized (this) {
+            HikariDataSource oldPool = poolMap.remove(datasourceId);
+            if (oldPool != null && !oldPool.isClosed()) {
+                oldPool.close();
+                log.info("已关闭旧连接池: datasourceId={}", datasourceId);
+            }
+
+            closePoolsWithDbForDatasource(datasourceId);
+
+            getOrCreatePool(datasourceId);
+            log.info("已刷新连接池: datasourceId={}", datasourceId);
         }
-        getOrCreatePool(datasourceId);
-        log.info("已刷新连接池: datasourceId={}", datasourceId);
+    }
+
+    private void closePoolsWithDbForDatasource(Long datasourceId) {
+        String dsIdStr = ":" + datasourceId + ":";
+        List<String> keysToRemove = new ArrayList<>();
+        for (String key : poolMapWithDb.keySet()) {
+            if (key.contains(dsIdStr)) {
+                keysToRemove.add(key);
+            }
+        }
+        for (String key : keysToRemove) {
+            HikariDataSource pool = poolMapWithDb.remove(key);
+            if (pool != null && !pool.isClosed()) {
+                pool.close();
+                log.info("已关闭带数据库名的连接池: poolKey={}", key);
+            }
+        }
     }
 
     public void closePool(Long datasourceId) {
@@ -125,7 +202,14 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         for (Long id : ids) {
             closePool(id);
         }
-        log.info("已关闭所有连接池, 共{}个", ids.size());
+        List<String> dbKeys = new ArrayList<>(poolMapWithDb.keySet());
+        for (String key : dbKeys) {
+            HikariDataSource pool = poolMapWithDb.remove(key);
+            if (pool != null && !pool.isClosed()) {
+                pool.close();
+            }
+        }
+        log.info("已关闭所有连接池, 主池{}个, 带数据库池{}个", ids.size(), dbKeys.size());
     }
 
     public PoolStatus getPoolStatus(Long datasourceId) {
@@ -240,12 +324,12 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         switch (type) {
             case KYUUBI:
             case HIVE:
-                hc.setMaximumPoolSize(3);
-                hc.setMinimumIdle(1);
+                hc.setMaximumPoolSize(10);
+                hc.setMinimumIdle(2);
                 break;
             default:
-                hc.setMaximumPoolSize(5);
-                hc.setMinimumIdle(1);
+                hc.setMaximumPoolSize(20);
+                hc.setMinimumIdle(3);
                 break;
         }
     }

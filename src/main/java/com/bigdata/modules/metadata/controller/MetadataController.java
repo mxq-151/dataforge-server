@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
@@ -94,29 +95,33 @@ public class MetadataController {
         return Result.success(voPage);
     }
 
-    @GetMapping("/table/{id}/columns")
-    public Result<List<ColumnMetadataVO>> getTableColumns(@PathVariable Long id) {
-        TableMetadata tableMetadata = tableMetadataService.getById(id);
-        if (tableMetadata == null) {
-            return Result.error(404, "表不存在");
-        }
+    @GetMapping("/tables/all")
+    public Result<Page<TableMetadataVO>> getAllTables(
+            @RequestParam(defaultValue = "1") int current,
+            @RequestParam(defaultValue = "10000") int size,
+            @RequestParam(required = true) String databaseName,
+            @RequestParam(required = false) String tableName,
+            @RequestParam(required = false) String keyword) {
+        Page<TableMetadata> page = tableMetadataService.getTableList(current, size, null, databaseName, tableName, keyword);
+        Page<TableMetadataVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream().map(this::toTableMetadataVO).collect(Collectors.toList()));
+        return Result.success(voPage);
+    }
 
-        String datasourceName = null;
-        if (tableMetadata.getDatasourceId() != null) {
-            DatasourceConfig ds = datasourceConfigMapper.selectById(tableMetadata.getDatasourceId());
-            if (ds != null) {
-                datasourceName = ds.getDatasourceName();
-            }
-        }
+    @GetMapping("/table/columns")
+    public Result<List<ColumnMetadataVO>> getTableColumns(
+            @RequestParam StorageEngineType storageEngine,
+            @RequestParam String databaseName,
+            @RequestParam String tableName) {
 
         dataAccessPermissionService.checkTablePermission(
-                datasourceName,
-                tableMetadata.getDatabaseName(),
-                tableMetadata.getTableName(),
+                null,
+                databaseName,
+                tableName,
                 DataAccessPermissionService.TABLE_OP_SELECT
         );
 
-        List<ColumnMetadata> columns = tableMetadataService.getColumnsByTableId(id);
+        List<ColumnMetadata> columns = tableMetadataService.getColumnsByNames(storageEngine, databaseName, tableName);
         List<ColumnMetadataVO> voList = columns.stream().map(this::toColumnMetadataVO).collect(Collectors.toList());
         return Result.success(voList);
     }

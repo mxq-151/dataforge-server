@@ -26,6 +26,9 @@ public class CodeExecutionService {
     @Autowired
     private DatasourceConfigService datasourceConfigService;
 
+    @Autowired
+    private ProcessManager processManager;
+
     
     public CodeExecutionResult executeCode(CodeExecutionRequest request, Long submitBy, String submitByName) {
         log.info("🚀 开始执行代码任务");
@@ -211,5 +214,21 @@ public class CodeExecutionService {
             return false;
         }
         return strategyFactory.isSupported(engineType, type);
+    }
+
+    public boolean cancelExecution(String executionId, Long userId) {
+        log.info("请求取消任务: executionId={}, userId={}", executionId, userId);
+        boolean cancelled = processManager.cancel(executionId, userId);
+        if (cancelled) {
+            log.info("任务已取消: executionId={}", executionId);
+        } else {
+            log.warn("任务取消失败: executionId={}", executionId);
+        }
+        return cancelled;
+    }
+
+    public List<Map<String, Object>> getRunningProcesses(Long userId) {
+        processManager.cleanup();
+        return processManager.getRunningProcesses(userId);
     }
 }

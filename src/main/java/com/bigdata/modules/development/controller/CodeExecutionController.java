@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/development/execution")
@@ -83,6 +84,44 @@ public class CodeExecutionController {
         } catch (Exception e) {
             log.error("代码执行接口异常", e);
             return Result.error("代码执行失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/cancel")
+    public Result<Boolean> cancelExecution(@RequestParam String executionId) {
+        try {
+            Long userId = SecurityUtils.getCurrentUserId();
+            if (userId == null) {
+                return Result.error(401, "未登录或登录已过期");
+            }
+
+            log.info("收到取消任务请求: executionId={}, userId={}", executionId, userId);
+
+            boolean cancelled = codeExecutionService.cancelExecution(executionId, userId);
+            if (cancelled) {
+                return Result.success("任务已成功取消", true);
+            } else {
+                return Result.error(400, "任务取消失败，任务可能不存在、已完成或无权操作");
+            }
+        } catch (Exception e) {
+            log.error("取消任务接口异常: executionId={}", executionId, e);
+            return Result.error("取消任务失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/running")
+    public Result<List<Map<String, Object>>> getRunningProcesses() {
+        try {
+            Long userId = SecurityUtils.getCurrentUserId();
+            if (userId == null) {
+                return Result.error(401, "未登录或登录已过期");
+            }
+
+            List<Map<String, Object>> processes = codeExecutionService.getRunningProcesses(userId);
+            return Result.success(processes);
+        } catch (Exception e) {
+            log.error("获取运行中任务列表异常", e);
+            return Result.error("获取运行中任务列表失败: " + e.getMessage());
         }
     }
 

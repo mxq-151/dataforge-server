@@ -4,12 +4,10 @@ import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.service.FileExplorerService;
 import com.bigdata.modules.devops.vo.FileInfoVO;
-import com.bigdata.modules.devops.vo.StorageConnectionTestVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 

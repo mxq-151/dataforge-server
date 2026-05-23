@@ -1,10 +1,12 @@
 package com.bigdata.modules.development.service.execution;
 
+import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
@@ -22,7 +24,11 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(FlinkExecutionStrategy.class);
 
-    private static final String FLINK_RUN_CMD = "flink";
+    @Autowired
+    private EngineProperties engineProperties;
+
+    @Autowired
+    private ProcessManager processManager;
 
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
@@ -64,6 +70,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
         if (context.isJarExecutionMode() || context.getCodeType() == CodeType.PYTHON) {
             Process process = pb.start();
+            String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "flink");
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
@@ -74,6 +81,8 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
             }
 
             int exitCode = process.waitFor();
+            processManager.unregister(registeredId);
+
             if (exitCode == 0) {
                 String jobId = extractJobId(output.toString());
                 return CodeExecutionResult.submitted(jobId != null ? jobId : executionId, output.toString());
@@ -87,6 +96,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
             }
             pb.redirectInput(ProcessBuilder.Redirect.PIPE);
             Process process = pb.start();
+            String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "flink");
 
             try (var writer = process.getOutputStream()) {
                 writer.write(codeContent.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -103,6 +113,8 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
             }
 
             int exitCode = process.waitFor();
+            processManager.unregister(registeredId);
+
             if (exitCode == 0) {
                 String jobId = extractJobId(output.toString());
                 return CodeExecutionResult.submitted(jobId != null ? jobId : executionId, output.toString());
@@ -122,6 +134,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
         pb.redirectErrorStream(true);
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         Process process = pb.start();
+        String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "flink-sql");
 
         String sqlContent = buildFlinkSqlWithConfiguration(context);
         try (var writer = process.getOutputStream()) {
@@ -139,6 +152,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
         }
 
         int exitCode = process.waitFor();
+        processManager.unregister(registeredId);
 
         if (exitCode == 0) {
             return CodeExecutionResult.success(executionId, output.toString());
@@ -149,7 +163,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
     private List<String> buildFlinkRunCommand(CodeExecutionContext context) throws Exception {
         List<String> command = new ArrayList<>();
-        command.add(FLINK_RUN_CMD);
+        command.add(engineProperties.getFlink().getFlinkCommand());
         command.add("run");
 
         addComputeResources(command, context);
@@ -163,7 +177,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
     private List<String> buildFlinkSqlCommand(CodeExecutionContext context) {
         List<String> command = new ArrayList<>();
-        command.add(FLINK_RUN_CMD);
+        command.add(engineProperties.getFlink().getFlinkCommand());
         command.add("sql-client");
 
         addComputeResourcesForSqlClient(command, context);
