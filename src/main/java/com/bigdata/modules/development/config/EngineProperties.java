@@ -9,6 +9,7 @@ public class EngineProperties {
 
     private Spark spark = new Spark();
     private Flink flink = new Flink();
+    private Doris doris = new Doris();
 
     public Spark getSpark() {
         return spark;
@@ -24,6 +25,14 @@ public class EngineProperties {
 
     public void setFlink(Flink flink) {
         this.flink = flink;
+    }
+
+    public Doris getDoris() {
+        return doris;
+    }
+
+    public void setDoris(Doris doris) {
+        this.doris = doris;
     }
 
     public static class Spark {
@@ -61,6 +70,45 @@ public class EngineProperties {
                 return home.trim().endsWith("/") ? home + "bin/flink" : home + "/bin/flink";
             }
             return "flink";
+        }
+    }
+
+    public static class Doris {
+        private Integer queryTimeout = 600;
+        private Integer insertTimeout = 600;
+        private Integer batchSize = 4096;
+        private Integer parallelFragmentExecInstanceNum = 4;
+
+        public Integer getQueryTimeout() {
+            return queryTimeout;
+        }
+
+        public void setQueryTimeout(Integer queryTimeout) {
+            this.queryTimeout = queryTimeout;
+        }
+
+        public Integer getInsertTimeout() {
+            return insertTimeout;
+        }
+
+        public void setInsertTimeout(Integer insertTimeout) {
+            this.insertTimeout = insertTimeout;
+        }
+
+        public Integer getBatchSize() {
+            return batchSize;
+        }
+
+        public void setBatchSize(Integer batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public Integer getParallelFragmentExecInstanceNum() {
+            return parallelFragmentExecInstanceNum;
+        }
+
+        public void setParallelFragmentExecInstanceNum(Integer parallelFragmentExecInstanceNum) {
+            this.parallelFragmentExecInstanceNum = parallelFragmentExecInstanceNum;
         }
     }
 }

@@ -10,7 +10,8 @@ public enum EngineType {
 
     SPARK("spark", "Apache Spark", Arrays.asList(CodeType.JAVA,CodeType.SCALA, CodeType.PYTHON, CodeType.SQL)),
     KYUUBI("kyuubi", "Apache Kyuubi", Arrays.asList(CodeType.SQL)),
-    FLINK("flink", "Apache Flink", Arrays.asList(CodeType.JAVA, CodeType.SCALA, CodeType.PYTHON, CodeType.SQL));
+    FLINK("flink", "Apache Flink", Arrays.asList(CodeType.JAVA, CodeType.SCALA, CodeType.PYTHON, CodeType.SQL)),
+    DORIS("doris", "Apache Doris", Arrays.asList(CodeType.SQL));
 
     @EnumValue
     @JsonValue

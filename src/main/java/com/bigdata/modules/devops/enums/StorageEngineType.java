@@ -1,5 +1,7 @@
 package com.bigdata.modules.devops.enums;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -39,5 +41,15 @@ public enum StorageEngineType {
         return Arrays.stream(StorageEngineType.values())
                 .map(StorageEngineType::getName)
                 .collect(Collectors.toList());
+    }
+
+    @JsonCreator
+    public static StorageEngineType fromValue(String value) {
+        for (StorageEngineType type : StorageEngineType.values()) {
+            if (type.name().equalsIgnoreCase(value)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unknown StorageEngineType: " + value);
     }
 }

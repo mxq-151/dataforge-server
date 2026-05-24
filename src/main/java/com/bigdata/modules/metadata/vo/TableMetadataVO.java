@@ -21,8 +21,13 @@ public class TableMetadataVO implements Serializable {
     private Date lastModifyTime;
     private String partitionColumns;
     private String storageFormat;
+    private String compression;
+    private String location;
     private Long rowCount;
     private Long sizeBytes;
+    private Integer hotDays;
+    private Integer coldDays;
+    private Integer keepDays;
     private Date syncTime;
     private Date createTime;
     private Date updateTime;
@@ -123,6 +128,22 @@ public class TableMetadataVO implements Serializable {
         this.storageFormat = storageFormat;
     }
 
+    public String getCompression() {
+        return compression;
+    }
+
+    public void setCompression(String compression) {
+        this.compression = compression;
+    }
+
+    public String getLocation() {
+        return location;
+    }
+
+    public void setLocation(String location) {
+        this.location = location;
+    }
+
     public Long getRowCount() {
         return rowCount;
     }
@@ -137,6 +158,30 @@ public class TableMetadataVO implements Serializable {
 
     public void setSizeBytes(Long sizeBytes) {
         this.sizeBytes = sizeBytes;
+    }
+
+    public Integer getHotDays() {
+        return hotDays;
+    }
+
+    public void setHotDays(Integer hotDays) {
+        this.hotDays = hotDays;
+    }
+
+    public Integer getColdDays() {
+        return coldDays;
+    }
+
+    public void setColdDays(Integer coldDays) {
+        this.coldDays = coldDays;
+    }
+
+    public Integer getKeepDays() {
+        return keepDays;
+    }
+
+    public void setKeepDays(Integer keepDays) {
+        this.keepDays = keepDays;
     }
 
     public Date getSyncTime() {
