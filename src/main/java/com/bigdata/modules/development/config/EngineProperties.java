@@ -10,6 +10,7 @@ public class EngineProperties {
     private Spark spark = new Spark();
     private Flink flink = new Flink();
     private Doris doris = new Doris();
+    private HBase hbase = new HBase();
 
     public Spark getSpark() {
         return spark;
@@ -33,6 +34,14 @@ public class EngineProperties {
 
     public void setDoris(Doris doris) {
         this.doris = doris;
+    }
+
+    public HBase getHbase() {
+        return hbase;
+    }
+
+    public void setHbase(HBase hbase) {
+        this.hbase = hbase;
     }
 
     public static class Spark {
@@ -109,6 +118,36 @@ public class EngineProperties {
 
         public void setParallelFragmentExecInstanceNum(Integer parallelFragmentExecInstanceNum) {
             this.parallelFragmentExecInstanceNum = parallelFragmentExecInstanceNum;
+        }
+    }
+
+    public static class HBase {
+        private String zkQuorum = "localhost";
+        private String zkPort = "2181";
+        private String namespace = "default";
+
+        public String getZkQuorum() {
+            return zkQuorum;
+        }
+
+        public void setZkQuorum(String zkQuorum) {
+            this.zkQuorum = zkQuorum;
+        }
+
+        public String getZkPort() {
+            return zkPort;
+        }
+
+        public void setZkPort(String zkPort) {
+            this.zkPort = zkPort;
+        }
+
+        public String getNamespace() {
+            return namespace;
+        }
+
+        public void setNamespace(String namespace) {
+            this.namespace = namespace;
         }
     }
 }
