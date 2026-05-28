@@ -240,8 +240,8 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
             TableMetadata tableMeta = new TableMetadata();
             tableMeta.setDatasourceId(datasourceConfig.getId());
             tableMeta.setStorageEngine(StorageEngineType.HBASE);
-            tableMeta.setDatabaseName(datasourceConfig.getDatabaseName() != null
-                    ? datasourceConfig.getDatabaseName() : "default");
+            tableMeta.setDatabaseName(datasourceConfig.getDatabaseName() != null && !datasourceConfig.getDatabaseName().isEmpty()
+                    ? datasourceConfig.getDatabaseName().get(0) : "default");
             tableMeta.setTableName(tableName);
             tableMeta.setTableType("TABLE");
             tableMeta.setSyncTime(new Date());

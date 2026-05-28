@@ -16,7 +16,7 @@ public class DevJarDependencyService {
     @Autowired
     private DevJarDependencyMapper devJarDependencyMapper;
 
-    public Page<DevJarDependency> getJarList(int current, int size, String jarName, String source, String scope, String category) {
+    public Page<DevJarDependency> getJarList(int current, int size, String jarName, String source, String scope, String category, String programType) {
         Page<DevJarDependency> page = new Page<>(current, size);
         LambdaQueryWrapper<DevJarDependency> wrapper = new LambdaQueryWrapper<>();
         if (jarName != null && !jarName.isEmpty()) {
@@ -30,6 +30,9 @@ public class DevJarDependencyService {
         }
         if (category != null && !category.isEmpty()) {
             wrapper.eq(DevJarDependency::getCategory, category);
+        }
+        if (programType != null && !programType.isEmpty()) {
+            wrapper.eq(DevJarDependency::getProgramType, programType);
         }
         wrapper.orderByDesc(DevJarDependency::getCreateTime);
         return devJarDependencyMapper.selectPage(page, wrapper);
@@ -76,5 +79,9 @@ public class DevJarDependencyService {
                .groupBy(DevJarDependency::getCategory);
         List<DevJarDependency> list = devJarDependencyMapper.selectList(wrapper);
         return list.stream().map(DevJarDependency::getCategory).toList();
+    }
+
+    public List<String> getProgramTypes() {
+        return List.of("flink", "spark","common");
     }
 }

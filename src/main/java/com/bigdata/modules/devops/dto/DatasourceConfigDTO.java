@@ -6,6 +6,8 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
+import java.util.List;
+
 public class DatasourceConfigDTO {
 
     private Long id;
@@ -22,7 +24,7 @@ public class DatasourceConfigDTO {
     @Size(max = 500, message = "URL长度不能超过500字符")
     private String url;
 
-    private String databaseName;
+    private List<String> databaseName;
     private String username;
     private String password;
     private String extraParams;
@@ -68,11 +70,11 @@ public class DatasourceConfigDTO {
         this.url = url;
     }
 
-    public String getDatabaseName() {
+    public List<String> getDatabaseName() {
         return databaseName;
     }
 
-    public void setDatabaseName(String databaseName) {
+    public void setDatabaseName(List<String> databaseName) {
         this.databaseName = databaseName;
     }
 

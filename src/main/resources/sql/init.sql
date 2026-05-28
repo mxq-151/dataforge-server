@@ -116,11 +116,14 @@ CREATE TABLE IF NOT EXISTS dev_jar_dependency (
     status TINYINT NOT NULL DEFAULT 1 COMMENT '状态(0-禁用 1-正常)',
     description VARCHAR(500) DEFAULT NULL COMMENT '描述',
     category VARCHAR(100) DEFAULT NULL COMMENT '功能分类(用户自定义)',
+    program_type VARCHAR(20) NOT NULL DEFAULT 'flink' COMMENT '程序类型(flink-flink任务 spark-spark任务)',
+    auto_choose TINYINT NOT NULL DEFAULT 0 COMMENT '是否自动选择(0-否 1-是)',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
     KEY idx_source (source),
-    KEY idx_scope (scope)
+    KEY idx_scope (scope),
+    KEY idx_program_type (program_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='JAR包依赖配置表';
 
 -- 操作审计日志表

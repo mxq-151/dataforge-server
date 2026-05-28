@@ -37,6 +37,10 @@ public class DevJarDependency extends BaseEntity {
 
     private String category;
 
+    private String programType;
+
+    private Integer autoChoose;
+
     public Long getId() {
         return id;
     }
@@ -147,5 +151,21 @@ public class DevJarDependency extends BaseEntity {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    public String getProgramType() {
+        return programType;
+    }
+
+    public void setProgramType(String programType) {
+        this.programType = programType;
+    }
+
+    public Integer getAutoChoose() {
+        return autoChoose;
+    }
+
+    public void setAutoChoose(Integer autoChoose) {
+        this.autoChoose = autoChoose;
     }
 }

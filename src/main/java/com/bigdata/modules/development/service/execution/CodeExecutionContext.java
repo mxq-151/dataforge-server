@@ -158,7 +158,10 @@ public class CodeExecutionContext {
 
     public String getPrimaryDatasourceDatabaseName() {
         DatasourceConfig config = getPrimaryDatasourceConfig();
-        return config != null ? config.getDatabaseName() : null;
+        if (config != null && config.getDatabaseName() != null && !config.getDatabaseName().isEmpty()) {
+            return config.getDatabaseName().get(0);
+        }
+        return null;
     }
 
     public StorageEngineType getPrimaryStorageEngine() {

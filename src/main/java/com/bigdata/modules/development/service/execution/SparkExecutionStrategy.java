@@ -191,9 +191,9 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
                 command.add(confPrefix + ".password=" + dsConfig.getPassword());
             }
 
-            if (dsConfig.getDatabaseName() != null) {
+            if (dsConfig.getDatabaseName() != null && !dsConfig.getDatabaseName().isEmpty()) {
                 command.add("--conf");
-                command.add(confPrefix + ".database=" + dsConfig.getDatabaseName());
+                command.add(confPrefix + ".database=" + dsConfig.getDatabaseName().get(0));
             }
 
             addDatasourceSpecificConf(command, confPrefix, dsConfig, storageEngine);

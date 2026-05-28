@@ -5,6 +5,7 @@ import com.bigdata.modules.devops.enums.StorageEngineType;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class DatasourceConfigVO implements Serializable {
 
@@ -15,7 +16,7 @@ public class DatasourceConfigVO implements Serializable {
     private DatasourceType datasourceType;
     private StorageEngineType storageEngine;
     private String url;
-    private String databaseName;
+    private List<String> databaseName;
     private String username;
     private String extraParams;
     private Integer connectionStatus;
@@ -64,11 +65,11 @@ public class DatasourceConfigVO implements Serializable {
         this.url = url;
     }
 
-    public String getDatabaseName() {
+    public List<String> getDatabaseName() {
         return databaseName;
     }
 
-    public void setDatabaseName(String databaseName) {
+    public void setDatabaseName(List<String> databaseName) {
         this.databaseName = databaseName;
     }
 

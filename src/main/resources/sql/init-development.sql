@@ -108,6 +108,9 @@ CREATE TABLE sys_file_permission (
     permission_type TINYINT NOT NULL DEFAULT 1 COMMENT '权限类型(1-可读 2-读写 3-完全控制)',
     `recursive` TINYINT NOT NULL DEFAULT 0 COMMENT '是否递归子目录(0-否 1-是)',
     description VARCHAR(500) DEFAULT NULL COMMENT '描述',
+    category VARCHAR(50) DEFAULT NULL COMMENT '分类',
+    program_type VARCHAR(20) NOT NULL DEFAULT 'flink' COMMENT '程序类型(flink-flink任务 spark-spark任务)',
+    auto_choose TINYINT NOT NULL DEFAULT 0 COMMENT '是否自动选择(0-否 1-是)',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
@@ -389,11 +392,15 @@ CREATE TABLE dev_jar_dependency (
     checksum VARCHAR(64) DEFAULT NULL COMMENT '文件校验和(MD5/SHA256)',
     status TINYINT NOT NULL DEFAULT 1 COMMENT '状态(0-禁用 1-正常)',
     description VARCHAR(500) DEFAULT NULL COMMENT '描述',
+    category VARCHAR(50) DEFAULT NULL COMMENT '分类',
+    program_type VARCHAR(20) NOT NULL DEFAULT 'flink' COMMENT '程序类型(flink-flink任务 spark-spark任务)',
+    auto_choose TINYINT NOT NULL DEFAULT 0 COMMENT '是否自动选择(0-否 1-是)',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
     KEY idx_source (source),
-    KEY idx_scope (scope)
+    KEY idx_scope (scope),
+    KEY idx_program_type (program_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='JAR包依赖配置表';
 
 -- 22. 调度任务配置表

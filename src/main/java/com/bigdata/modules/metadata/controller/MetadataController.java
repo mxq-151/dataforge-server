@@ -6,6 +6,7 @@ import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
+import com.bigdata.modules.devops.service.DatasourceConnectionPoolManager;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.service.TableMetadataService;
@@ -14,8 +15,13 @@ import com.bigdata.modules.metadata.vo.TableMetadataVO;
 import com.bigdata.modules.system.entity.SysTablePermission;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -32,6 +38,9 @@ public class MetadataController {
 
     @Autowired
     private DatasourceConfigMapper datasourceConfigMapper;
+
+    @Autowired
+    private DatasourceConnectionPoolManager connectionPoolManager;
 
     @GetMapping("/tables")
     public Result<Page<TableMetadataVO>> getTableList(
@@ -147,6 +156,39 @@ public class MetadataController {
                 tableMetadata.getTableName()
         );
         return Result.success(permission);
+    }
+
+    @GetMapping("/databases")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<List<String>> getDatabasesByDatasourceId(
+            @RequestParam Long datasourceId,
+            @RequestParam(required = false) String catalog) {
+        DatasourceConfig config = datasourceConfigMapper.selectById(datasourceId);
+        if (config == null) {
+            return Result.error(404, "数据源不存在");
+        }
+
+        List<String> databases = new ArrayList<>();
+        try (Connection connection = connectionPoolManager.getConnection(datasourceId)) {
+            try (ResultSet resultSet = connection.getMetaData().getCatalogs()) {
+                while (resultSet.next()) {
+                    String dbName = resultSet.getString("TABLE_CAT");
+                    if (dbName != null && !dbName.isEmpty()) {
+                        if (catalog == null || catalog.isEmpty() || dbName.equalsIgnoreCase(catalog)) {
+                            databases.add(dbName);
+                        }
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            return Result.error(500, "获取数据库列表失败: " + e.getMessage());
+        }
+
+        if (catalog != null && !catalog.isEmpty() && databases.isEmpty()) {
+            return Result.error(404, "指定的 catalog 不存在: " + catalog);
+        }
+
+        return Result.success(databases);
     }
 
     private TableMetadataVO toTableMetadataVO(TableMetadata entity) {

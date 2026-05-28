@@ -1,10 +1,13 @@
 package com.bigdata.modules.devops.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.bigdata.common.config.JsonStringListTypeHandler;
 import com.bigdata.common.entity.BaseEntity;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @TableName("datasource_config")
 public class DatasourceConfig extends BaseEntity {
@@ -13,7 +16,8 @@ public class DatasourceConfig extends BaseEntity {
     private DatasourceType datasourceType;
     private StorageEngineType storageEngine;
     private String url;
-    private String databaseName;
+    @TableField(typeHandler = JsonStringListTypeHandler.class)
+    private List<String> databaseName;
     private String username;
     private String password;
     private String extraParams;
@@ -54,11 +58,11 @@ public class DatasourceConfig extends BaseEntity {
         this.url = url;
     }
 
-    public String getDatabaseName() {
+    public List<String> getDatabaseName() {
         return databaseName;
     }
 
-    public void setDatabaseName(String databaseName) {
+    public void setDatabaseName(List<String> databaseName) {
         this.databaseName = databaseName;
     }
 

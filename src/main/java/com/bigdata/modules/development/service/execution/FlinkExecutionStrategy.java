@@ -274,9 +274,9 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
                 command.add(confPrefix + ".password=" + dsConfig.getPassword());
             }
 
-            if (dsConfig.getDatabaseName() != null) {
+            if (dsConfig.getDatabaseName() != null && !dsConfig.getDatabaseName().isEmpty()) {
                 command.add("--conf");
-                command.add(confPrefix + ".database=" + dsConfig.getDatabaseName());
+                command.add(confPrefix + ".database=" + dsConfig.getDatabaseName().get(0));
             }
 
             addDatasourceSpecificConf(command, confPrefix, dsConfig, storageEngine);
@@ -449,9 +449,9 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
                     sql.append("SET '").append(dsName).append(".user' = '")
                        .append(dsConfig.getUsername()).append("';\n");
                 }
-                if (dsConfig.getDatabaseName() != null) {
+                if (dsConfig.getDatabaseName() != null && !dsConfig.getDatabaseName().isEmpty()) {
                     sql.append("SET '").append(dsName).append(".database' = '")
-                       .append(dsConfig.getDatabaseName()).append("';\n");
+                       .append(dsConfig.getDatabaseName().get(0)).append("';\n");
                 }
             }
             sql.append("\n");

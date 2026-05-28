@@ -29,8 +29,9 @@ public class DevJarDependencyController {
             @RequestParam(required = false) String jarName,
             @RequestParam(required = false) String source,
             @RequestParam(required = false) String scope,
-            @RequestParam(required = false) String category) {
-        Page<DevJarDependency> page = devJarDependencyService.getJarList(current, size, jarName, source, scope, category);
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String programType) {
+        Page<DevJarDependency> page = devJarDependencyService.getJarList(current, size, jarName, source, scope, category, programType);
         Page<DevJarDependencyVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
         return Result.success(voPage);
@@ -77,6 +78,12 @@ public class DevJarDependencyController {
     public Result<List<String>> getJarCategories() {
         List<String> categories = devJarDependencyService.getJarCategories();
         return Result.success(categories);
+    }
+
+    @GetMapping("/programTypes")
+    public Result<List<String>> getProgramTypes() {
+        List<String> programTypes = devJarDependencyService.getProgramTypes();
+        return Result.success(programTypes);
     }
 
     private DevJarDependencyVO toVO(DevJarDependency entity) {
