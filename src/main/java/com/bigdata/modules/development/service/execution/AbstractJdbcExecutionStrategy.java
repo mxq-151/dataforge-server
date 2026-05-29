@@ -6,7 +6,8 @@ import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
-import com.bigdata.modules.system.mapper.SysUserRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantUserMapper;
 import org.slf4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -44,7 +45,10 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
     protected DataAccessPermissionService dataAccessPermissionService;
 
     @Autowired
-    protected SysUserRoleMapper sysUserRoleMapper;
+    protected SysTenantUserMapper sysTenantUserMapper;
+
+    @Autowired
+    protected SysTenantRoleMapper sysTenantRoleMapper;
 
     @Autowired
     protected SysRoleMapper sysRoleMapper;
@@ -377,7 +381,8 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
         }
 
         try {
-            List<Long> roleIds = sysUserRoleMapper.selectRoleIdsByUserId(userId);
+            Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(userId);
+            List<Long> roleIds = tenantId != null ? sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId) : null;
             if (roleIds == null || roleIds.isEmpty()) {
                 return false;
             }

@@ -8,11 +8,13 @@ import com.bigdata.common.utils.PasswordUtils;
 import com.bigdata.modules.system.dto.ChangePasswordDTO;
 import com.bigdata.modules.system.dto.UserDTO;
 import com.bigdata.modules.system.entity.SysRole;
+import com.bigdata.modules.system.entity.SysTenant;
+import com.bigdata.modules.system.entity.SysTenantRole;
 import com.bigdata.modules.system.entity.SysUser;
-import com.bigdata.modules.system.entity.SysUserRole;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantUserMapper;
 import com.bigdata.modules.system.mapper.SysUserMapper;
-import com.bigdata.modules.system.mapper.SysUserRoleMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
@@ -34,10 +36,16 @@ public class SysUserService implements UserDetailsService {
     private SysUserMapper sysUserMapper;
 
     @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
+    private SysRoleMapper sysRoleMapper;
 
     @Autowired
-    private SysRoleMapper sysRoleMapper;
+    private SysTenantUserMapper sysTenantUserMapper;
+
+    @Autowired
+    private SysTenantRoleMapper sysTenantRoleMapper;
+
+    @Autowired
+    private SysTenantService sysTenantService;
 
     @Autowired
     private JwtTokenUtils jwtTokenUtils;
@@ -57,7 +65,12 @@ public class SysUserService implements UserDetailsService {
         user.setLastLoginTime(LocalDateTime.now());
         sysUserMapper.updateById(user);
 
-        List<Long> roleIds = sysUserRoleMapper.selectRoleIdsByUserId(user.getId());
+        Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(user.getId());
+        List<Long> roleIds = Collections.emptyList();
+        if (tenantId != null) {
+            roleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
+        }
+
         String role = "ROLE_USER";
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
@@ -68,7 +81,7 @@ public class SysUserService implements UserDetailsService {
             }
         }
 
-        return jwtTokenUtils.generateToken(user.getId(), user.getUsername(), role);
+        return jwtTokenUtils.generateToken(user.getId(), user.getUsername(), role, tenantId);
     }
 
     @Override
@@ -103,16 +116,29 @@ public class SysUserService implements UserDetailsService {
         if (!CollectionUtils.isEmpty(users)) {
             List<Long> userIds = users.stream().map(SysUser::getId).collect(Collectors.toList());
 
-            List<SysUserRole> userRoles = sysUserRoleMapper.selectByUserIds(userIds);
-            Map<Long, List<Long>> userRoleIdsMap = userRoles.stream()
-                    .collect(Collectors.groupingBy(
-                            SysUserRole::getUserId,
-                            Collectors.mapping(SysUserRole::getRoleId, Collectors.toList())
-                    ));
+            Map<Long, Long> userTenantIdMap = new HashMap<>();
+            for (Long userId : userIds) {
+                Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(userId);
+                if (tenantId != null) {
+                    userTenantIdMap.put(userId, tenantId);
+                }
+            }
 
-            Set<Long> allRoleIds = userRoles.stream()
-                    .map(SysUserRole::getRoleId)
-                    .collect(Collectors.toSet());
+            Set<Long> allTenantIds = new HashSet<>(userTenantIdMap.values());
+            Map<Long, List<Long>> tenantRoleIdsMap = new HashMap<>();
+            if (!allTenantIds.isEmpty()) {
+                List<SysTenantRole> tenantRoles = sysTenantRoleMapper.selectByTenantIds(new ArrayList<>(allTenantIds));
+                tenantRoleIdsMap = tenantRoles.stream()
+                        .collect(Collectors.groupingBy(
+                                SysTenantRole::getTenantId,
+                                Collectors.mapping(SysTenantRole::getRoleId, Collectors.toList())
+                        ));
+            }
+
+            Set<Long> allRoleIds = new HashSet<>();
+            for (List<Long> ids : tenantRoleIdsMap.values()) {
+                allRoleIds.addAll(ids);
+            }
 
             Map<Long, SysRole> roleMap;
             if (!allRoleIds.isEmpty()) {
@@ -124,7 +150,10 @@ public class SysUserService implements UserDetailsService {
             }
 
             for (SysUser user : users) {
-                List<Long> roleIds = userRoleIdsMap.getOrDefault(user.getId(), List.of());
+                Long tenantId = userTenantIdMap.get(user.getId());
+                List<Long> roleIds = tenantId != null
+                        ? tenantRoleIdsMap.getOrDefault(tenantId, List.of())
+                        : List.of();
                 user.setRoleIds(roleIds);
 
                 List<String> roleNames = roleIds.stream()
@@ -166,11 +195,13 @@ public class SysUserService implements UserDetailsService {
         user.setPhone(dto.getPhone());
         user.setAvatar(dto.getAvatar());
         user.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
-        
+
         sysUserMapper.insert(user);
 
         if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
-            saveUserRoles(user.getId(), dto.getRoleIds());
+            SysTenant tenant = sysTenantService.ensureTenantForUser(user.getId());
+            sysTenantRoleMapper.deleteByTenantId(tenant.getId());
+            sysTenantService.saveTenantRoles(tenant.getId(), dto.getRoleIds());
         }
     }
 
@@ -211,9 +242,10 @@ public class SysUserService implements UserDetailsService {
         sysUserMapper.updateById(user);
 
         if (dto.getRoleIds() != null) {
-            sysUserRoleMapper.deleteByUserId(user.getId());
+            SysTenant tenant = sysTenantService.ensureTenantForUser(user.getId());
+            sysTenantRoleMapper.deleteByTenantId(tenant.getId());
             if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
-                saveUserRoles(user.getId(), dto.getRoleIds());
+                sysTenantService.saveTenantRoles(tenant.getId(), dto.getRoleIds());
             }
         }
     }
@@ -227,7 +259,10 @@ public class SysUserService implements UserDetailsService {
         if ("admin".equals(user.getUsername())) {
             throw new BusinessException("不能删除管理员账号");
         }
-        sysUserRoleMapper.deleteByUserId(id);
+        Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(id);
+        if (tenantId != null) {
+            sysTenantService.unbindUser(tenantId, id);
+        }
         sysUserMapper.deleteById(id);
     }
 
@@ -268,19 +303,10 @@ public class SysUserService implements UserDetailsService {
     }
 
     public List<Long> getUserRoleIds(Long userId) {
-        return sysUserRoleMapper.selectRoleIdsByUserId(userId);
-    }
-
-    private void saveUserRoles(Long userId, List<Long> roleIds) {
-        LocalDateTime now = LocalDateTime.now();
-        List<SysUserRole> list = new ArrayList<>(roleIds.size());
-        for (Long roleId : roleIds) {
-            SysUserRole userRole = new SysUserRole();
-            userRole.setUserId(userId);
-            userRole.setRoleId(roleId);
-            userRole.setCreateTime(now);
-            list.add(userRole);
+        Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(userId);
+        if (tenantId == null) {
+            return Collections.emptyList();
         }
-        sysUserRoleMapper.batchInsertUserRoles(list);
+        return sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
     }
 }

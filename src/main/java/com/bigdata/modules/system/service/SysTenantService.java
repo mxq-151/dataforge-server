@@ -5,9 +5,11 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.system.dto.TenantDTO;
 import com.bigdata.modules.system.entity.SysTenant;
+import com.bigdata.modules.system.entity.SysTenantRole;
 import com.bigdata.modules.system.entity.SysTenantUser;
 import com.bigdata.modules.system.entity.SysUser;
 import com.bigdata.modules.system.mapper.SysTenantMapper;
+import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
 import com.bigdata.modules.system.mapper.SysUserMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -26,6 +29,9 @@ public class SysTenantService {
 
     @Autowired
     private SysTenantUserMapper sysTenantUserMapper;
+
+    @Autowired
+    private SysTenantRoleMapper sysTenantRoleMapper;
 
     @Autowired
     private SysUserMapper sysUserMapper;
@@ -68,6 +74,10 @@ public class SysTenantService {
         return sysTenantMapper.selectById(tenantId);
     }
 
+    public Long getTenantIdByUserId(Long userId) {
+        return sysTenantUserMapper.selectTenantIdByUserId(userId);
+    }
+
     public SysUser getUserByTenantId(Long tenantId) {
         List<Long> userIds = sysTenantUserMapper.selectUserIdsByTenantId(tenantId);
         if (CollectionUtils.isEmpty(userIds)) {
@@ -91,11 +101,16 @@ public class SysTenantService {
         tenant.setContactEmail(dto.getContactEmail());
         tenant.setDescription(dto.getDescription());
         tenant.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
+        tenant.setPassword(dto.getPassword());
 
         sysTenantMapper.insert(tenant);
 
         if (dto.getUserId() != null) {
             bindUser(tenant.getId(), dto.getUserId());
+        }
+
+        if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
+            saveTenantRoles(tenant.getId(), dto.getRoleIds());
         }
     }
 
@@ -132,12 +147,22 @@ public class SysTenantService {
         if (dto.getStatus() != null) {
             tenant.setStatus(dto.getStatus());
         }
+        if (dto.getPassword() != null) {
+            tenant.setPassword(dto.getPassword());
+        }
 
         sysTenantMapper.updateById(tenant);
 
         if (dto.getUserId() != null) {
             unbindAllUsers(tenant.getId());
             bindUser(tenant.getId(), dto.getUserId());
+        }
+
+        if (dto.getRoleIds() != null) {
+            sysTenantRoleMapper.deleteByTenantId(tenant.getId());
+            if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
+                saveTenantRoles(tenant.getId(), dto.getRoleIds());
+            }
         }
     }
 
@@ -147,6 +172,7 @@ public class SysTenantService {
         if (tenant == null) {
             throw new BusinessException("租户不存在");
         }
+        sysTenantRoleMapper.deleteByTenantId(id);
         unbindAllUsers(id);
         sysTenantMapper.deleteById(id);
     }
@@ -205,5 +231,70 @@ public class SysTenantService {
     @Transactional
     public void unbindAllUsers(Long tenantId) {
         sysTenantUserMapper.deleteByTenantId(tenantId);
+    }
+
+    public List<Long> getRoleIdsByTenantId(Long tenantId) {
+        return sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
+    }
+
+    public List<Long> getTenantIdsByRoleId(Long roleId) {
+        return sysTenantRoleMapper.selectTenantIdsByRoleId(roleId);
+    }
+
+    @Transactional
+    public void saveTenantRoles(Long tenantId, List<Long> roleIds) {
+        LocalDateTime now = LocalDateTime.now();
+        List<SysTenantRole> list = new ArrayList<>(roleIds.size());
+        for (Long roleId : roleIds) {
+            SysTenantRole tenantRole = new SysTenantRole();
+            tenantRole.setTenantId(tenantId);
+            tenantRole.setRoleId(roleId);
+            tenantRole.setCreateTime(now);
+            list.add(tenantRole);
+        }
+        sysTenantRoleMapper.batchInsertTenantRoles(list);
+    }
+
+    @Transactional
+    public void deleteTenantRoles(Long tenantId) {
+        sysTenantRoleMapper.deleteByTenantId(tenantId);
+    }
+
+    @Transactional
+    public SysTenant ensureTenantForUser(Long userId) {
+        Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(userId);
+        if (tenantId != null) {
+            return sysTenantMapper.selectById(tenantId);
+        }
+
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+
+        String tenantCode = "T_" + user.getUsername();
+        SysTenant existTenant = getTenantByCode(tenantCode);
+        if (existTenant != null) {
+            bindUser(existTenant.getId(), userId);
+            return existTenant;
+        }
+
+        SysTenant tenant = new SysTenant();
+        tenant.setTenantName(user.getRealName() != null ? user.getRealName() : user.getUsername());
+        tenant.setTenantCode(tenantCode);
+        tenant.setContactName(user.getRealName());
+        tenant.setContactPhone(user.getPhone());
+        tenant.setContactEmail(user.getEmail());
+        tenant.setStatus(1);
+        tenant.setOwnerId(userId);
+        sysTenantMapper.insert(tenant);
+
+        SysTenantUser tenantUser = new SysTenantUser();
+        tenantUser.setTenantId(tenant.getId());
+        tenantUser.setUserId(userId);
+        tenantUser.setCreateTime(LocalDateTime.now());
+        sysTenantUserMapper.insert(tenantUser);
+
+        return tenant;
     }
 }

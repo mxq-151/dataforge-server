@@ -29,7 +29,10 @@ public class DataAccessPermissionService {
     private static final String ADMIN_ROLE_CODE = "ROLE_ADMIN";
 
     @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
+    private SysTenantUserMapper sysTenantUserMapper;
+
+    @Autowired
+    private SysTenantRoleMapper sysTenantRoleMapper;
 
     @Autowired
     private SysRoleFilePermissionMapper sysRoleFilePermissionMapper;
@@ -469,7 +472,11 @@ public class DataAccessPermissionService {
     }
 
     private List<Long> getUserRoleIds(Long userId) {
-        List<Long> roleIds = sysUserRoleMapper.selectRoleIdsByUserId(userId);
+        Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(userId);
+        if (tenantId == null) {
+            return Collections.emptyList();
+        }
+        List<Long> roleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
         return roleIds != null ? roleIds : Collections.emptyList();
     }
 

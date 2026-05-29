@@ -13,6 +13,8 @@ import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysUser;
 import com.bigdata.modules.system.mapper.SysMenuPermissionMapper;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantUserMapper;
 import com.bigdata.modules.system.mapper.SysUserRoleMapper;
 import com.bigdata.modules.system.service.SysRoleProjectPermissionService;
 import com.bigdata.modules.system.service.SysTenantService;
@@ -47,6 +49,12 @@ public class AuthController {
     private SysRoleMapper sysRoleMapper;
 
     @Autowired
+    private SysTenantRoleMapper sysTenantRoleMapper;
+
+    @Autowired
+    private SysTenantUserMapper sysTenantUserMapper;
+
+    @Autowired
     private SysUserRoleMapper sysUserRoleMapper;
 
     @Autowired
@@ -70,7 +78,12 @@ public class AuthController {
         vo.setRealName(user.getRealName());
         vo.setAvatar(user.getAvatar());
 
-        List<Long> roleIds = sysUserRoleMapper.selectRoleIdsByUserId(user.getId());
+        Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(user.getId());
+        List<Long> roleIds = Collections.emptyList();
+        if (tenantId != null) {
+            roleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
+        }
+
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
             vo.setRoles(roles.stream()
@@ -80,7 +93,7 @@ public class AuthController {
             vo.setRoles(Collections.singletonList("ROLE_USER"));
         }
 
-        SysTenant tenant = sysTenantService.getTenantByUserId(user.getId());
+        SysTenant tenant = tenantId != null ? sysTenantService.getTenantById(tenantId) : null;
         if (tenant != null) {
             vo.setTenantId(tenant.getId());
             vo.setTenantName(tenant.getTenantName());
@@ -109,7 +122,12 @@ public class AuthController {
         vo.setPhone(user.getPhone());
         vo.setAvatar(user.getAvatar());
 
-        List<Long> roleIds = sysUserRoleMapper.selectRoleIdsByUserId(user.getId());
+        Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(user.getId());
+        List<Long> roleIds = Collections.emptyList();
+        if (tenantId != null) {
+            roleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
+        }
+
         vo.setRoleIds(roleIds);
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
@@ -118,7 +136,7 @@ public class AuthController {
             vo.setRoles(Collections.singletonList("普通用户"));
         }
 
-        SysTenant tenant = sysTenantService.getTenantByUserId(user.getId());
+        SysTenant tenant = tenantId != null ? sysTenantService.getTenantById(tenantId) : null;
         if (tenant != null) {
             vo.setTenantId(tenant.getId());
             vo.setTenantName(tenant.getTenantName());
@@ -141,7 +159,7 @@ public class AuthController {
             vo.setMenuTags(Collections.emptyList());
         }
 
-        List<SysRoleProjectPermission> projectPermissions = roleIds != null && !roleIds.isEmpty()
+        List<SysRoleProjectPermission> projectPermissions = !CollectionUtils.isEmpty(roleIds)
                 ? sysRoleProjectPermissionService.getPermissionsByRoleIds(roleIds)
                 : Collections.emptyList();
 

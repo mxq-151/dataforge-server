@@ -4,6 +4,8 @@ import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
+import com.bigdata.modules.system.entity.SysTenant;
+import com.bigdata.modules.system.service.SysTenantService;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.slf4j.Logger;
@@ -16,7 +18,6 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -33,6 +34,9 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
 
     @Autowired
     private DatasourceConfigMapper datasourceConfigMapper;
+
+    @Autowired
+    private SysTenantService sysTenantService;
 
     static {
         loadDriverSilently(KYUUBI_DRIVER);
@@ -260,10 +264,37 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         HikariConfig hc = new HikariConfig();
         DatasourceType type = config.getDatasourceType();
 
-        hc.setPoolName("ds-" + config.getId());
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        List<String> currentUserRoles = SecurityUtils.getCurrentUserRoles();
+        boolean isAdmin = currentUserRoles != null && currentUserRoles.stream()
+                .anyMatch("ROLE_ADMIN"::equalsIgnoreCase);
+
+        String tenantName = "";
+        if (currentUserId != null) {
+            SysTenant tenant = sysTenantService.getTenantByUserId(currentUserId);
+            if (tenant != null) {
+                tenantName = tenant.getTenantName();
+            }
+        }
+
+        if (isAdmin) {
+            hc.setPoolName("ds-" + config.getId() + "-" + SecurityUtils.getCurrentUsername());
+            hc.setUsername(config.getUsername());
+            hc.setPassword(config.getPassword());
+        } else {
+            String tenantPassword = "";
+            if (currentUserId != null) {
+                SysTenant tenant = sysTenantService.getTenantByUserId(currentUserId);
+                if (tenant != null && tenant.getPassword() != null) {
+                    tenantPassword = tenant.getPassword();
+                }
+            }
+            hc.setPoolName("ds-" + config.getId() + "-" + tenantName);
+            hc.setUsername(tenantName);
+            hc.setPassword(tenantPassword);
+        }
+
         hc.setJdbcUrl(normalizeUrl(config.getUrl(), type));
-        hc.setUsername(config.getUsername());
-        hc.setPassword(config.getPassword());
 
         configureDriver(hc, type);
         configurePoolSize(hc, type);

@@ -47,11 +47,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     Long userId = jwtTokenUtils.getUserIdFromToken(authToken);
                     String username = jwtTokenUtils.getUsernameFromToken(authToken);
                     String role = jwtTokenUtils.getRoleFromToken(authToken);
+                    Long tenantId = jwtTokenUtils.getTenantIdFromToken(authToken);
 
                     List<SimpleGrantedAuthority> authorities = parseAuthorities(role);
 
                     CustomUserDetails userDetails = new CustomUserDetails(
-                            userId, username, null, parseRoleNames(role),
+                            userId, username, tenantId, parseRoleNames(role),
                             authorities, true
                     );
 

@@ -4,13 +4,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
-import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.system.dto.ChangePasswordDTO;
 import com.bigdata.modules.system.dto.UserDTO;
 import com.bigdata.modules.system.entity.SysUser;
-import com.bigdata.modules.system.mapper.SysMenuPermissionMapper;
-import com.bigdata.modules.system.mapper.SysUserRoleMapper;
-import com.bigdata.modules.system.service.SysRoleProjectPermissionService;
 import com.bigdata.modules.system.service.SysUserService;
 import com.bigdata.modules.system.vo.SysUserVO;
 import com.bigdata.modules.system.vo.UserInfoVO;
@@ -30,18 +26,6 @@ public class UserController {
 
     @Autowired
     private SysUserService sysUserService;
-
-    @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
-
-    @Autowired
-    private SysMenuPermissionMapper sysMenuPermissionMapper;
-
-    @Autowired
-    private DevProjectMapper devProjectMapper;
-
-    @Autowired
-    private SysRoleProjectPermissionService sysRoleProjectPermissionService;
 
     @GetMapping("/list")
     @PreAuthorize("hasRole('ADMIN')")

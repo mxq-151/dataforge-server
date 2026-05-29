@@ -5,17 +5,17 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.system.dto.RoleDTO;
 import com.bigdata.modules.system.entity.SysRole;
+import com.bigdata.modules.system.entity.SysTenantUser;
 import com.bigdata.modules.system.entity.SysUser;
-import com.bigdata.modules.system.entity.SysUserRole;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
+import com.bigdata.modules.system.mapper.SysTenantUserMapper;
 import com.bigdata.modules.system.mapper.SysUserMapper;
-import com.bigdata.modules.system.mapper.SysUserRoleMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -29,7 +29,13 @@ public class SysRoleService {
     private SysUserMapper sysUserMapper;
 
     @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
+    private SysTenantRoleMapper sysTenantRoleMapper;
+
+    @Autowired
+    private SysTenantUserMapper sysTenantUserMapper;
+
+    @Autowired
+    private SysTenantService sysTenantService;
 
     public Page<SysRole> getRoleList(int current, int size, String roleName) {
         Page<SysRole> page = new Page<>(current, size);
@@ -71,11 +77,11 @@ public class SysRoleService {
         role.setRoleType(dto.getRoleType());
         role.setDescription(dto.getDescription());
         role.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
-        
+
         sysRoleMapper.insert(role);
 
         if (!CollectionUtils.isEmpty(dto.getUserIds())) {
-            saveRoleUsers(role.getId(), dto.getUserIds());
+            saveRoleTenantsFromUserIds(role.getId(), dto.getUserIds());
         }
     }
 
@@ -110,9 +116,9 @@ public class SysRoleService {
         sysRoleMapper.updateById(role);
 
         if (dto.getUserIds() != null) {
-            deleteRoleUsers(role.getId());
+            sysTenantRoleMapper.deleteByRoleId(role.getId());
             if (!CollectionUtils.isEmpty(dto.getUserIds())) {
-                saveRoleUsers(role.getId(), dto.getUserIds());
+                saveRoleTenantsFromUserIds(role.getId(), dto.getUserIds());
             }
         }
     }
@@ -126,7 +132,7 @@ public class SysRoleService {
         if ("admin".equals(role.getRoleCode())) {
             throw new BusinessException("不能删除管理员角色");
         }
-        deleteRoleUsers(id);
+        sysTenantRoleMapper.deleteByRoleId(id);
         sysRoleMapper.deleteById(id);
     }
 
@@ -143,31 +149,50 @@ public class SysRoleService {
     }
 
     public List<SysUser> getUsersByRoleId(Long roleId) {
-        List<Long> userIds = sysUserRoleMapper.selectUserIdsByRoleId(roleId);
-        if (CollectionUtils.isEmpty(userIds)) {
+        List<Long> tenantIds = sysTenantRoleMapper.selectTenantIdsByRoleId(roleId);
+        if (CollectionUtils.isEmpty(tenantIds)) {
+            return List.of();
+        }
+        List<Long> userIds = new ArrayList<>();
+        for (Long tenantId : tenantIds) {
+            List<Long> usersInTenant = sysTenantUserMapper.selectUserIdsByTenantId(tenantId);
+            userIds.addAll(usersInTenant);
+        }
+        if (userIds.isEmpty()) {
             return List.of();
         }
         return sysUserMapper.selectBatchIds(userIds);
     }
 
     public List<Long> getUserIdsByRoleId(Long roleId) {
-        return sysUserRoleMapper.selectUserIdsByRoleId(roleId);
-    }
-
-    private void saveRoleUsers(Long roleId, List<Long> userIds) {
-        LocalDateTime now = LocalDateTime.now();
-        List<SysUserRole> list = new ArrayList<>(userIds.size());
-        for (Long userId : userIds) {
-            SysUserRole userRole = new SysUserRole();
-            userRole.setUserId(userId);
-            userRole.setRoleId(roleId);
-            userRole.setCreateTime(now);
-            list.add(userRole);
+        List<Long> tenantIds = sysTenantRoleMapper.selectTenantIdsByRoleId(roleId);
+        if (CollectionUtils.isEmpty(tenantIds)) {
+            return List.of();
         }
-        sysUserRoleMapper.batchInsertUserRoles(list);
+        List<Long> userIds = new ArrayList<>();
+        for (Long tenantId : tenantIds) {
+            List<Long> usersInTenant = sysTenantUserMapper.selectUserIdsByTenantId(tenantId);
+            userIds.addAll(usersInTenant);
+        }
+        return userIds;
     }
 
-    private void deleteRoleUsers(Long roleId) {
-        sysUserRoleMapper.deleteByRoleId(roleId);
+    private void saveRoleTenantsFromUserIds(Long roleId, List<Long> userIds) {
+        for (Long userId : userIds) {
+            SysTenantUser tenantUser = sysTenantUserMapper.selectByUserId(userId);
+            if (tenantUser == null) {
+                continue;
+            }
+            Long tenantId = tenantUser.getTenantId();
+            List<Long> existingRoleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
+            if (!existingRoleIds.contains(roleId)) {
+                com.bigdata.modules.system.entity.SysTenantRole tenantRole =
+                        new com.bigdata.modules.system.entity.SysTenantRole();
+                tenantRole.setTenantId(tenantId);
+                tenantRole.setRoleId(roleId);
+                tenantRole.setCreateTime(java.time.LocalDateTime.now());
+                sysTenantRoleMapper.insert(tenantRole);
+            }
+        }
     }
 }

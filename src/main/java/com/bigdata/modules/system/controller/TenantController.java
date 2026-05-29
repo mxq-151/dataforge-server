@@ -112,6 +112,9 @@ public class TenantController {
             vo.setUserRealName(user.getRealName());
         }
 
+        List<Long> roleIds = sysTenantService.getRoleIdsByTenantId(entity.getId());
+        vo.setRoleIds(roleIds);
+
         return vo;
     }
 }

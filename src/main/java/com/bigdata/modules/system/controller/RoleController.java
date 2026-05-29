@@ -4,11 +4,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.RoleDTO;
 import com.bigdata.modules.system.entity.SysRole;
-import com.bigdata.modules.system.entity.SysUser;
 import com.bigdata.modules.system.service.SysRoleService;
 import com.bigdata.modules.system.vo.RoleDetailVO;
 import com.bigdata.modules.system.vo.SysRoleVO;
-import com.bigdata.modules.system.vo.SysUserVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -85,23 +83,6 @@ public class RoleController {
     private SysRoleVO toRoleVO(SysRole entity) {
         SysRoleVO vo = new SysRoleVO();
         BeanUtils.copyProperties(entity, vo);
-        return vo;
-    }
-
-    private SysUserVO toUserVO(SysUser entity) {
-        SysUserVO vo = new SysUserVO();
-        vo.setId(entity.getId());
-        vo.setUsername(entity.getUsername());
-        vo.setRealName(entity.getRealName());
-        vo.setEmail(entity.getEmail());
-        vo.setPhone(entity.getPhone());
-        vo.setAvatar(entity.getAvatar());
-        vo.setStatus(entity.getStatus());
-        vo.setLastLoginTime(entity.getLastLoginTime());
-        vo.setRoles(entity.getRoles());
-        vo.setRoleIds(entity.getRoleIds());
-        vo.setCreateTime(entity.getCreateTime());
-        vo.setUpdateTime(entity.getUpdateTime());
         return vo;
     }
 }

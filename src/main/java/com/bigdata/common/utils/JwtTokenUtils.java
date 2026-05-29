@@ -26,11 +26,14 @@ public class JwtTokenUtils {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public String generateToken(Long userId, String username, String role) {
+    public String generateToken(Long userId, String username, String role, Long tenantId) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("username", username);
         claims.put("role", role);
+        if (tenantId != null) {
+            claims.put("tenantId", tenantId);
+        }
 
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expiration);
@@ -64,6 +67,21 @@ public class JwtTokenUtils {
     public String getRoleFromToken(String token) {
         Claims claims = getTokenClaims(token);
         return claims.get("role", String.class);
+    }
+
+    public Long getTenantIdFromToken(String token) {
+        Claims claims = getTokenClaims(token);
+        Object tenantId = claims.get("tenantId");
+        if (tenantId == null) {
+            return null;
+        }
+        if (tenantId instanceof Long) {
+            return (Long) tenantId;
+        }
+        if (tenantId instanceof Integer) {
+            return ((Integer) tenantId).longValue();
+        }
+        return Long.valueOf(tenantId.toString());
     }
 
     public boolean validateToken(String token) {

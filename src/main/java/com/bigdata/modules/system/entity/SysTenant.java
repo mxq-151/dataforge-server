@@ -14,6 +14,7 @@ public class SysTenant extends BaseEntity {
     private String description;
     private Integer status;
     private Long ownerId;
+    private String password;
 
     public String getTenantName() {
         return tenantName;
@@ -77,5 +78,13 @@ public class SysTenant extends BaseEntity {
 
     public void setOwnerId(Long ownerId) {
         this.ownerId = ownerId;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
     }
 }
