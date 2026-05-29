@@ -8,6 +8,7 @@ public class AuditStatisticsVO implements Serializable {
 
     private long totalOperations;
     private long sensitiveOperations;
+    private long errorOperations;
     private long todayOperations;
     private long weekOperations;
     private long avgDurationMs;
@@ -26,6 +27,14 @@ public class AuditStatisticsVO implements Serializable {
 
     public void setSensitiveOperations(long sensitiveOperations) {
         this.sensitiveOperations = sensitiveOperations;
+    }
+
+    public long getErrorOperations() {
+        return errorOperations;
+    }
+
+    public void setErrorOperations(long errorOperations) {
+        this.errorOperations = errorOperations;
     }
 
     public long getTodayOperations() {

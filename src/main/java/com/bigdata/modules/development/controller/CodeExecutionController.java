@@ -1,5 +1,6 @@
 package com.bigdata.modules.development.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.utils.SecurityUtils;
@@ -36,6 +37,7 @@ public class CodeExecutionController {
     private DataAccessPermissionService dataAccessPermissionService;
 
     @PostMapping(value = "/execute", consumes = {MediaType.APPLICATION_JSON_VALUE, MediaType.MULTIPART_FORM_DATA_VALUE})
+    @AuditLog(module = "SQL执行", operation = "执行SQL语句", targetType = "SQL")
     public Result<CodeExecutionResult> executeCode(
             @RequestPart(value = "request", required = false) CodeExecutionRequest request,
             @RequestParam(value = "file", required = false) MultipartFile file) {

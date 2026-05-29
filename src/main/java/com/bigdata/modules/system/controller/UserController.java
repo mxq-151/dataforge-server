@@ -1,5 +1,6 @@
 package com.bigdata.modules.system.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.utils.SecurityUtils;
@@ -50,6 +51,7 @@ public class UserController {
         return Result.success(vo);
     }
 
+    @AuditLog(module = "用户管理", operation = "创建用户", targetType = "User")
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> save(@Validated(UserDTO.Create.class) @RequestBody UserDTO dto) {
@@ -57,6 +59,7 @@ public class UserController {
         return Result.success();
     }
 
+    @AuditLog(module = "用户管理", operation = "更新用户", targetType = "User")
     @PutMapping
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@Validated({UserDTO.Update.class, Default.class}) @RequestBody UserDTO dto) {
@@ -64,6 +67,7 @@ public class UserController {
         return Result.success();
     }
 
+    @AuditLog(module = "用户管理", operation = "删除用户", targetType = "User")
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {

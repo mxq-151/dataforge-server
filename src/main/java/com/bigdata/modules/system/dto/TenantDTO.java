@@ -2,7 +2,6 @@ package com.bigdata.modules.system.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import java.util.List;
 
 public class TenantDTO {
 
@@ -31,8 +30,6 @@ public class TenantDTO {
     private Integer status;
 
     private Long userId;
-
-    private List<Long> roleIds;
 
     @Size(max = 200, message = "租户密码不能超过200字符")
     private String password;
@@ -107,14 +104,6 @@ public class TenantDTO {
 
     public void setUserId(Long userId) {
         this.userId = userId;
-    }
-
-    public List<Long> getRoleIds() {
-        return roleIds;
-    }
-
-    public void setRoleIds(List<Long> roleIds) {
-        this.roleIds = roleIds;
     }
 
     public String getPassword() {

@@ -25,6 +25,7 @@ public class ColumnMetadataVO implements Serializable {
     private Date syncTime;
     private Date createTime;
     private Date updateTime;
+    private String maskingType;
 
     public Long getId() {
         return id;
@@ -152,5 +153,13 @@ public class ColumnMetadataVO implements Serializable {
 
     public void setUpdateTime(Date updateTime) {
         this.updateTime = updateTime;
+    }
+
+    public String getMaskingType() {
+        return maskingType;
+    }
+
+    public void setMaskingType(String maskingType) {
+        this.maskingType = maskingType;
     }
 }

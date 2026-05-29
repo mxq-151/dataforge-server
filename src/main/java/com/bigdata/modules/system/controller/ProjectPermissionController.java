@@ -1,5 +1,6 @@
 package com.bigdata.modules.system.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.BatchProjectPermissionDTO;
 import com.bigdata.modules.system.dto.ProjectPermissionDTO;
@@ -57,6 +58,7 @@ public class ProjectPermissionController {
         return Result.success(hasPermission);
     }
 
+    @AuditLog(module = "权限管理", operation = "分配项目权限", targetType = "ProjectPermission")
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> assignPermission(@Valid @RequestBody ProjectPermissionDTO dto) {
@@ -64,6 +66,7 @@ public class ProjectPermissionController {
         return Result.success();
     }
 
+    @AuditLog(module = "权限管理", operation = "批量分配项目权限", targetType = "ProjectPermission")
     @PostMapping("/batch")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> batchAssignPermissions(@Valid @RequestBody BatchProjectPermissionDTO dto) {
@@ -79,6 +82,7 @@ public class ProjectPermissionController {
         return Result.success();
     }
 
+    @AuditLog(module = "权限管理", operation = "移除项目权限", targetType = "ProjectPermission")
     @DeleteMapping("/{roleId}/{projectId}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> removePermission(@PathVariable Long roleId, @PathVariable Long projectId) {
@@ -86,6 +90,7 @@ public class ProjectPermissionController {
         return Result.success();
     }
 
+    @AuditLog(module = "权限管理", operation = "按角色移除项目权限", targetType = "ProjectPermission")
     @DeleteMapping("/role/{roleId}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> removePermissionsByRoleId(@PathVariable Long roleId) {
@@ -93,6 +98,7 @@ public class ProjectPermissionController {
         return Result.success();
     }
 
+    @AuditLog(module = "权限管理", operation = "按项目移除项目权限", targetType = "ProjectPermission")
     @DeleteMapping("/project/{projectId}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> removePermissionsByProjectId(@PathVariable Long projectId) {

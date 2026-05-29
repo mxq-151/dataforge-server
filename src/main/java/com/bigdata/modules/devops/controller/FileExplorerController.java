@@ -1,5 +1,6 @@
 package com.bigdata.modules.devops.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.service.FileExplorerService;
@@ -33,22 +34,37 @@ public class FileExplorerController {
             @RequestParam(required = false) Long configId) {
         dataAccessPermissionService.checkFileReadPermission(path, configId);
         List<Map<String, Object>> fileList = fileExplorerService.listFiles(storageType, path, configId);
+        if (!dataAccessPermissionService.isAdmin()) {
+            fileList = fileList.stream()
+                    .filter(item -> {
+                        String itemPath = item.get("path") != null ? item.get("path").toString() : null;
+                        if (itemPath == null) {
+                            String itemName = item.get("name") != null ? item.get("name").toString() : "";
+                            itemPath = path.endsWith("/") ? path + itemName : path + "/" + itemName;
+                        }
+                        return dataAccessPermissionService.hasFileReadPermission(itemPath, configId);
+                    })
+                    .collect(Collectors.toList());
+        }
         List<FileInfoVO> voList = fileList.stream().map(FileInfoVO::fromMap).collect(Collectors.toList());
         return Result.success(voList);
     }
 
     @PostMapping("/directory")
+    @AuditLog(module = "文件管理", operation = "创建目录", targetType = "File")
     public Result<Void> createDirectory(
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam(defaultValue = "/") String parentPath,
             @RequestParam String name,
             @RequestParam(required = false) Long configId) {
-        dataAccessPermissionService.checkFileWritePermission(parentPath, configId);
+        String fullPath = parentPath.endsWith("/") ? parentPath + name : parentPath + "/" + name;
+        dataAccessPermissionService.checkFileWritePermission(fullPath, configId);
         fileExplorerService.createDirectory(storageType, parentPath, name, configId);
         return Result.success();
     }
 
     @DeleteMapping("/file")
+    @AuditLog(module = "文件管理", operation = "删除文件或目录", targetType = "File")
     public Result<Void> deleteFile(
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam String path,
@@ -59,6 +75,7 @@ public class FileExplorerController {
     }
 
     @PutMapping("/file")
+    @AuditLog(module = "文件管理", operation = "重命名文件或目录", targetType = "File")
     public Result<Void> renameFile(
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam String path,
@@ -70,12 +87,12 @@ public class FileExplorerController {
     }
 
     @PostMapping("/file/upload")
+    @AuditLog(module = "文件管理", operation = "上传文件", targetType = "File")
     public Result<Void> uploadFile(
             @RequestParam(defaultValue = "local") String storageType,
             @RequestParam(defaultValue = "/") String path,
             @RequestParam(required = false) Long configId,
             @RequestParam("file") MultipartFile file) {
-        dataAccessPermissionService.checkFileWritePermission(path, configId);
         try {
             String fileName = file.getOriginalFilename();
             if (fileName == null || fileName.isEmpty()) {
@@ -84,11 +101,15 @@ public class FileExplorerController {
 
             String filePath = path.endsWith("/") ? path + fileName : path + "/" + fileName;
 
+            dataAccessPermissionService.checkFileWritePermission(filePath, configId);
+
             try (InputStream inputStream = file.getInputStream()) {
                 fileExplorerService.uploadFile(storageType, filePath, inputStream, configId, file.getSize());
             }
 
             return Result.success();
+        } catch (com.bigdata.common.exception.BusinessException e) {
+            return Result.error(e.getCode(), e.getMessage());
         } catch (Exception e) {
             return Result.error("上传文件失败: " + e.getMessage());
         }

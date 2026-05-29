@@ -1,7 +1,6 @@
 package com.bigdata.modules.system.vo;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 public class TenantVO {
 
@@ -16,7 +15,6 @@ public class TenantVO {
     private Long userId;
     private String username;
     private String userRealName;
-    private List<Long> roleIds;
     private String password;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
@@ -107,14 +105,6 @@ public class TenantVO {
 
     public void setUserRealName(String userRealName) {
         this.userRealName = userRealName;
-    }
-
-    public List<Long> getRoleIds() {
-        return roleIds;
-    }
-
-    public void setRoleIds(List<Long> roleIds) {
-        this.roleIds = roleIds;
     }
 
     public String getPassword() {

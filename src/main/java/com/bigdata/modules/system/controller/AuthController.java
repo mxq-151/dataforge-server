@@ -1,5 +1,6 @@
 package com.bigdata.modules.system.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -63,6 +65,7 @@ public class AuthController {
     @Autowired
     private SysMenuPermissionMapper sysMenuPermissionMapper;
 
+    @AuditLog(module = "认证", operation = "用户登录", targetType = "User")
     @PostMapping("/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginDTO loginDTO) {
         String token = sysUserService.login(loginDTO.getUsername(), loginDTO.getPassword());
@@ -84,14 +87,18 @@ public class AuthController {
             roleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
         }
 
+        Set<String> roleSet = new LinkedHashSet<>();
+        if (Integer.valueOf(1).equals(user.getIsAdmin())) {
+            roleSet.add("ROLE_ADMIN");
+        }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
-            vo.setRoles(roles.stream()
-                    .map(r -> "ROLE_" + r.getRoleCode().toUpperCase())
-                    .collect(Collectors.toList()));
-        } else {
-            vo.setRoles(Collections.singletonList("ROLE_USER"));
+            roles.forEach(r -> roleSet.add("ROLE_" + r.getRoleCode().toUpperCase()));
         }
+        if (roleSet.isEmpty()) {
+            roleSet.add("ROLE_USER");
+        }
+        vo.setRoles(new ArrayList<>(roleSet));
 
         SysTenant tenant = tenantId != null ? sysTenantService.getTenantById(tenantId) : null;
         if (tenant != null) {
@@ -129,12 +136,19 @@ public class AuthController {
         }
 
         vo.setRoleIds(roleIds);
+
+        Set<String> roleNameSet = new LinkedHashSet<>();
+        if (Integer.valueOf(1).equals(user.getIsAdmin())) {
+            roleNameSet.add("超级管理员");
+        }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
-            vo.setRoles(roles.stream().map(SysRole::getRoleName).collect(Collectors.toList()));
-        } else {
-            vo.setRoles(Collections.singletonList("普通用户"));
+            roles.forEach(r -> roleNameSet.add(r.getRoleName()));
         }
+        if (roleNameSet.isEmpty()) {
+            roleNameSet.add("普通用户");
+        }
+        vo.setRoles(new ArrayList<>(roleNameSet));
 
         SysTenant tenant = tenantId != null ? sysTenantService.getTenantById(tenantId) : null;
         if (tenant != null) {

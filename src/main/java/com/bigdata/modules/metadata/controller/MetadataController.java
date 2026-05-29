@@ -112,6 +112,23 @@ public class MetadataController {
             @RequestParam(required = false) String tableName,
             @RequestParam(required = false) String keyword) {
         Page<TableMetadata> page = tableMetadataService.getTableList(current, size, null, databaseName, tableName, keyword);
+
+        if (!dataAccessPermissionService.isAdmin()) {
+            Set<String> accessibleTableNames = dataAccessPermissionService.getAccessibleTableNames(null, databaseName);
+            final Set<String> tblNames = accessibleTableNames;
+
+            if (tblNames != null && !tblNames.isEmpty()) {
+                List<TableMetadata> filtered = page.getRecords().stream()
+                        .filter(t -> t.getTableName() != null && tblNames.contains(t.getTableName()))
+                        .collect(Collectors.toList());
+                page.setRecords(filtered);
+                page.setTotal(filtered.size());
+            } else {
+                page.setRecords(new ArrayList<>());
+                page.setTotal(0);
+            }
+        }
+
         Page<TableMetadataVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream().map(this::toTableMetadataVO).collect(Collectors.toList()));
         return Result.success(voPage);
@@ -132,6 +149,30 @@ public class MetadataController {
 
         List<ColumnMetadata> columns = tableMetadataService.getColumnsByNames(storageEngine, databaseName, tableName);
         List<ColumnMetadataVO> voList = columns.stream().map(this::toColumnMetadataVO).collect(Collectors.toList());
+
+        if (!dataAccessPermissionService.isAdmin()) {
+            SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(null, databaseName, tableName);
+            if (mergedPerm != null && mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, Object> ruleMap = objectMapper.readValue(mergedPerm.getDataMaskingRule(), java.util.Map.class);
+                    for (ColumnMetadataVO vo : voList) {
+                        if (vo.getColumnName() != null && ruleMap.containsKey(vo.getColumnName())) {
+                            Object ruleValue = ruleMap.get(vo.getColumnName());
+                            if (ruleValue instanceof String) {
+                                vo.setMaskingType((String) ruleValue);
+                            } else if (ruleValue instanceof java.util.Map) {
+                                vo.setMaskingType((String) ((java.util.Map<String, Object>) ruleValue).getOrDefault("type", "partial"));
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // 脱敏规则解析失败时返回原始字段列表
+                }
+            }
+        }
+
         return Result.success(voList);
     }
 
@@ -159,7 +200,6 @@ public class MetadataController {
     }
 
     @GetMapping("/databases")
-    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<String>> getDatabasesByDatasourceId(
             @RequestParam Long datasourceId,
             @RequestParam(required = false) String catalog) {
@@ -182,6 +222,18 @@ public class MetadataController {
             }
         } catch (SQLException e) {
             return Result.error(500, "获取数据库列表失败: " + e.getMessage());
+        }
+
+        if (!dataAccessPermissionService.isAdmin()) {
+            String datasourceName = config.getDatasourceName();
+            Set<String> accessibleDbNames = dataAccessPermissionService.getAccessibleDatabaseNames(datasourceName);
+            if (accessibleDbNames != null && !accessibleDbNames.isEmpty()) {
+                databases = databases.stream()
+                        .filter(accessibleDbNames::contains)
+                        .collect(Collectors.toList());
+            } else {
+                databases = new ArrayList<>();
+            }
         }
 
         if (catalog != null && !catalog.isEmpty() && databases.isEmpty()) {

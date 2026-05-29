@@ -1,5 +1,6 @@
 package com.bigdata.modules.system.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.RoleDTO;
@@ -54,6 +55,7 @@ public class RoleController {
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="角色管理", operation="创建角色", targetType="Role")
     public Result<Void> save(@Valid @RequestBody RoleDTO dto) {
         sysRoleService.saveRole(dto);
         return Result.success();
@@ -61,6 +63,7 @@ public class RoleController {
 
     @PutMapping
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="角色管理", operation="更新角色", targetType="Role")
     public Result<Void> update(@Valid @RequestBody RoleDTO dto) {
         sysRoleService.updateRole(dto);
         return Result.success();
@@ -68,6 +71,7 @@ public class RoleController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="角色管理", operation="删除角色", targetType="Role")
     public Result<Void> delete(@PathVariable Long id) {
         sysRoleService.deleteRole(id);
         return Result.success();
@@ -75,6 +79,7 @@ public class RoleController {
 
     @PutMapping("/{id}/status")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="角色管理", operation="变更角色状态", targetType="Role")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
         sysRoleService.changeStatus(id, status);
         return Result.success();

@@ -1,27 +1,40 @@
 package com.bigdata.modules.system.entity;
 
+import com.baomidou.mybatisplus.annotation.*;
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
-public class OperationAuditLog {
+@TableName("operation_audit_log")
+public class OperationAuditLog implements Serializable {
 
+    private static final long serialVersionUID = 1L;
+
+    @TableId(type = IdType.AUTO)
     private Long id;
     private Long userId;
     private String username;
+    private Long tenantId;
+    private String tenantName;
     private String module;
     private String operation;
+    private String operationType;
     private String targetType;
     private Long targetId;
     private String targetName;
     private String requestMethod;
     private String requestUrl;
     private String requestParams;
+    private String responseBody;
     private Integer responseStatus;
+    private String errorMessage;
+    private String exceptionClass;
     private String ipAddress;
     private String userAgent;
     private LocalDateTime operationTime;
     private Integer durationMs;
     private Integer isSensitive;
-    private String remark;
+    @TableField(fill = FieldFill.INSERT)
+    private LocalDateTime createTime;
 
     public Long getId() {
         return id;
@@ -47,6 +60,22 @@ public class OperationAuditLog {
         this.username = username;
     }
 
+    public Long getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(Long tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public String getTenantName() {
+        return tenantName;
+    }
+
+    public void setTenantName(String tenantName) {
+        this.tenantName = tenantName;
+    }
+
     public String getModule() {
         return module;
     }
@@ -61,6 +90,14 @@ public class OperationAuditLog {
 
     public void setOperation(String operation) {
         this.operation = operation;
+    }
+
+    public String getOperationType() {
+        return operationType;
+    }
+
+    public void setOperationType(String operationType) {
+        this.operationType = operationType;
     }
 
     public String getTargetType() {
@@ -111,12 +148,36 @@ public class OperationAuditLog {
         this.requestParams = requestParams;
     }
 
+    public String getResponseBody() {
+        return responseBody;
+    }
+
+    public void setResponseBody(String responseBody) {
+        this.responseBody = responseBody;
+    }
+
     public Integer getResponseStatus() {
         return responseStatus;
     }
 
     public void setResponseStatus(Integer responseStatus) {
         this.responseStatus = responseStatus;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public void setErrorMessage(String errorMessage) {
+        this.errorMessage = errorMessage;
+    }
+
+    public String getExceptionClass() {
+        return exceptionClass;
+    }
+
+    public void setExceptionClass(String exceptionClass) {
+        this.exceptionClass = exceptionClass;
     }
 
     public String getIpAddress() {
@@ -159,11 +220,11 @@ public class OperationAuditLog {
         this.isSensitive = isSensitive;
     }
 
-    public String getRemark() {
-        return remark;
+    public LocalDateTime getCreateTime() {
+        return createTime;
     }
 
-    public void setRemark(String remark) {
-        this.remark = remark;
+    public void setCreateTime(LocalDateTime createTime) {
+        this.createTime = createTime;
     }
 }

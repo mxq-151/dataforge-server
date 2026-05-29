@@ -5,6 +5,7 @@ import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.system.entity.SysRole;
+import com.bigdata.modules.system.entity.SysTablePermission;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
@@ -19,6 +20,20 @@ import java.util.List;
 import java.util.UUID;
 
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.Parenthesis;
+import net.sf.jsqlparser.expression.StringValue;
+import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
+import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
+import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
+import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
+import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
+import net.sf.jsqlparser.expression.operators.relational.InExpression;
+import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
+import net.sf.jsqlparser.expression.operators.relational.MinorThan;
+import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
+import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
+import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.statement.alter.Alter;
 import net.sf.jsqlparser.statement.create.table.CreateTable;
 import net.sf.jsqlparser.statement.delete.Delete;
@@ -153,6 +168,28 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
                             }
                             rows.add(row);
                             rowCount++;
+                        }
+
+                        String datasourceName = context.getPrimaryDatasourceConfig().getDatasourceName();
+                        String defaultDatabase = context.getPrimaryDatasourceDatabaseName();
+
+                        SelectPermissionInfo permInfo = extractSelectPermissionInfo(singleSql, datasourceName, defaultDatabase);
+                        if (permInfo != null && permInfo.tableRef != null) {
+                            String dbName = permInfo.tableRef.databaseName != null ? permInfo.tableRef.databaseName : defaultDatabase;
+                            SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
+                                    datasourceName, dbName, permInfo.tableRef.tableName);
+                            if (mergedPerm != null) {
+                                if (mergedPerm.getRowFilterSql() != null && !mergedPerm.getRowFilterSql().isBlank()) {
+                                    int beforeSize = rows.size();
+                                    rows = applyRowFilter(rows, columns, mergedPerm.getRowFilterSql());
+                                    rowCount = rows.size();
+                                    getLog().info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rowCount, mergedPerm.getRowFilterSql());
+                                }
+                                if (mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
+                                    applyDataMasking(rows, columns, mergedPerm.getDataMaskingRule());
+                                    getLog().info("已应用数据脱敏规则, 表: {}.{}", dbName, permInfo.tableRef.tableName);
+                                }
+                            }
                         }
 
                         results.add(CodeExecutionResult.SqlResultItem.querySuccess(i, singleSql, columns, rows, rowCount));
@@ -571,6 +608,352 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
     protected static class TableRef {
         String tableName;
         String databaseName;
+    }
+
+    protected static class SelectPermissionInfo {
+        TableRef tableRef;
+        String operation;
+    }
+
+    protected SelectPermissionInfo extractSelectPermissionInfo(String sql, String datasourceName, String defaultDatabase) {
+        try {
+            net.sf.jsqlparser.statement.Statement jsqlStmt = CCJSqlParserUtil.parse(sql);
+            if (!(jsqlStmt instanceof Select)) {
+                return null;
+            }
+            SelectPermissionInfo info = new SelectPermissionInfo();
+            info.operation = DataAccessPermissionService.TABLE_OP_SELECT;
+            List<TableRef> tableRefs = extractTablesFromSelect((Select) jsqlStmt);
+            if (!tableRefs.isEmpty()) {
+                info.tableRef = tableRefs.get(0);
+            }
+            return info;
+        } catch (Exception e) {
+            getLog().debug("解析SELECT权限信息失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    protected List<List<String>> applyRowFilter(List<List<String>> rows, List<String> columns, String rowFilterSql) {
+        if (rows == null || rows.isEmpty() || rowFilterSql == null || rowFilterSql.isBlank()) {
+            return rows;
+        }
+        try {
+            String filterExpr = rowFilterSql.trim();
+            String filterLower = filterExpr.toLowerCase();
+            if (!filterLower.startsWith("where")) {
+                filterExpr = "WHERE " + filterExpr;
+            }
+            java.util.Map<String, Integer> colIndexMap = new java.util.LinkedHashMap<>();
+            for (int i = 0; i < columns.size(); i++) {
+                colIndexMap.put(columns.get(i).toLowerCase(), i);
+            }
+            String finalFilterExpr = filterExpr;
+            return rows.stream().filter(row -> {
+                try {
+                    return evaluateRowFilterExpression(row, columns, colIndexMap, finalFilterExpr);
+                } catch (Exception e) {
+                    getLog().debug("行过滤表达式求值失败，保留行: {}", e.getMessage());
+                    return true;
+                }
+            }).collect(java.util.stream.Collectors.toList());
+        } catch (Exception e) {
+            getLog().warn("行级过滤失败，返回原始结果: {}", e.getMessage());
+            return rows;
+        }
+    }
+
+    protected boolean evaluateRowFilterExpression(List<String> row, List<String> columns, java.util.Map<String, Integer> colIndexMap, String filterSql) {
+        String expr = filterSql;
+        if (expr.toLowerCase().startsWith("where")) {
+            expr = expr.substring(5).trim();
+        }
+        try {
+            Expression whereExpr = CCJSqlParserUtil.parseCondExpression(expr);
+            return evaluateExpression(whereExpr, row, colIndexMap);
+        } catch (Exception e) {
+            getLog().debug("行过滤SQL解析失败，保留行: {}", e.getMessage());
+            return true;
+        }
+    }
+
+    protected boolean evaluateExpression(Expression expr, List<String> row, java.util.Map<String, Integer> colIndexMap) {
+        if (expr == null) {
+            return true;
+        }
+
+        if (expr instanceof net.sf.jsqlparser.expression.operators.conditional.AndExpression) {
+            AndExpression andExpr = (AndExpression) expr;
+            return evaluateExpression(andExpr.getLeftExpression(), row, colIndexMap)
+                    && evaluateExpression(andExpr.getRightExpression(), row, colIndexMap);
+        }
+
+        if (expr instanceof OrExpression) {
+            OrExpression orExpr = (OrExpression) expr;
+            return evaluateExpression(orExpr.getLeftExpression(), row, colIndexMap)
+                    || evaluateExpression(orExpr.getRightExpression(), row, colIndexMap);
+        }
+
+        if (expr instanceof Parenthesis) {
+            Parenthesis paren = (Parenthesis) expr;
+            return evaluateExpression(paren.getExpression(), row, colIndexMap);
+        }
+
+        if (expr instanceof EqualsTo) {
+            EqualsTo eq = (EqualsTo) expr;
+            return compareColumnValue(eq.getLeftExpression(), eq.getRightExpression(), "=", row, colIndexMap);
+        }
+
+        if (expr instanceof NotEqualsTo) {
+            NotEqualsTo neq = (NotEqualsTo) expr;
+            return compareColumnValue(neq.getLeftExpression(), neq.getRightExpression(), "!=", row, colIndexMap);
+        }
+
+        if (expr instanceof GreaterThan) {
+            GreaterThan gt = (GreaterThan) expr;
+            return compareColumnValue(gt.getLeftExpression(), gt.getRightExpression(), ">", row, colIndexMap);
+        }
+
+        if (expr instanceof MinorThan) {
+            MinorThan lt = (MinorThan) expr;
+            return compareColumnValue(lt.getLeftExpression(), lt.getRightExpression(), "<", row, colIndexMap);
+        }
+
+        if (expr instanceof GreaterThanEquals) {
+            GreaterThanEquals gte = (GreaterThanEquals) expr;
+            return compareColumnValue(gte.getLeftExpression(), gte.getRightExpression(), ">=", row, colIndexMap);
+        }
+
+        if (expr instanceof MinorThanEquals) {
+            MinorThanEquals lte = (MinorThanEquals) expr;
+            return compareColumnValue(lte.getLeftExpression(), lte.getRightExpression(), "<=", row, colIndexMap);
+        }
+
+        if (expr instanceof LikeExpression) {
+            LikeExpression like = (LikeExpression) expr;
+            return compareColumnValue(like.getLeftExpression(), like.getRightExpression(), "LIKE", row, colIndexMap);
+        }
+
+        if (expr instanceof InExpression) {
+            InExpression inExpr = (InExpression) expr;
+            Expression left = inExpr.getLeftExpression();
+            Expression rightItems = inExpr.getRightExpression();
+            if (left instanceof Column && rightItems instanceof net.sf.jsqlparser.expression.operators.relational.ExpressionList) {
+                String colName = ((Column) left).getColumnName();
+                Integer colIdx = colIndexMap.get(colName.toLowerCase());
+                if (colIdx == null || colIdx >= row.size()) {
+                    return true;
+                }
+                String cellValue = row.get(colIdx);
+                if ("NULL".equals(cellValue)) cellValue = null;
+
+                List<Expression> items = ((net.sf.jsqlparser.expression.operators.relational.ExpressionList) rightItems).getExpressions();
+                for (Expression item : items) {
+                    String valStr = extractStringValue(item);
+                    if (valStr != null && valStr.equals(cellValue)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            return true;
+        }
+
+        getLog().debug("未支持的表达式类型: {}, 保留行", expr.getClass().getSimpleName());
+        return true;
+    }
+
+    private boolean compareColumnValue(Expression leftExpr, Expression rightExpr, String operator,
+                                       List<String> row, java.util.Map<String, Integer> colIndexMap) {
+        String colName = null;
+        String valueStr = null;
+
+        if (leftExpr instanceof Column && !(rightExpr instanceof Column)) {
+            colName = ((Column) leftExpr).getColumnName();
+            valueStr = extractStringValue(rightExpr);
+        } else if (rightExpr instanceof Column && !(leftExpr instanceof Column)) {
+            colName = ((Column) rightExpr).getColumnName();
+            valueStr = extractStringValue(leftExpr);
+            operator = reverseOperator(operator);
+        } else {
+            getLog().debug("比较表达式中缺少列引用或两侧都是列: {} {} {}", leftExpr, operator, rightExpr);
+            return true;
+        }
+
+        if (colName == null || valueStr == null) {
+            return true;
+        }
+
+        Integer colIdx = colIndexMap.get(colName.toLowerCase());
+        if (colIdx == null || colIdx >= row.size()) {
+            return true;
+        }
+
+        String cellValue = row.get(colIdx);
+        if ("NULL".equals(cellValue)) cellValue = null;
+
+        return doCompare(cellValue, operator, valueStr);
+    }
+
+    private String extractStringValue(Expression expr) {
+        if (expr instanceof StringValue) {
+            return ((StringValue) expr).getValue();
+        }
+        if (expr instanceof net.sf.jsqlparser.expression.LongValue) {
+            return String.valueOf(((net.sf.jsqlparser.expression.LongValue) expr).getValue());
+        }
+        if (expr instanceof net.sf.jsqlparser.expression.DoubleValue) {
+            return String.valueOf(((net.sf.jsqlparser.expression.DoubleValue) expr).getValue());
+        }
+        if (expr instanceof net.sf.jsqlparser.expression.StringValue) {
+            return ((net.sf.jsqlparser.expression.StringValue) expr).getValue();
+        }
+        if (expr instanceof net.sf.jsqlparser.expression.NullValue) {
+            return null;
+        }
+        String strVal = expr.toString();
+        if (strVal.startsWith("'") && strVal.endsWith("'")) {
+            return strVal.substring(1, strVal.length() - 1);
+        }
+        return strVal;
+    }
+
+    private boolean doCompare(String cellValue, String operator, String value) {
+        switch (operator.toUpperCase()) {
+            case "=":
+                return cellValue != null && cellValue.equals(value);
+            case "!=":
+            case "<>":
+                return cellValue == null || !cellValue.equals(value);
+            case ">":
+                return cellValue != null && compareNumeric(cellValue, value) > 0;
+            case "<":
+                return cellValue != null && compareNumeric(cellValue, value) < 0;
+            case ">=":
+                return cellValue != null && compareNumeric(cellValue, value) >= 0;
+            case "<=":
+                return cellValue != null && compareNumeric(cellValue, value) <= 0;
+            case "LIKE": {
+                if (cellValue == null) return false;
+                String pattern = value.toLowerCase().replace("%", "");
+                return cellValue.toLowerCase().contains(pattern);
+            }
+            default:
+                return true;
+        }
+    }
+
+    private String reverseOperator(String op) {
+        switch (op.toUpperCase()) {
+            case ">": return "<";
+            case "<": return ">";
+            case ">=": return "<=";
+            case "<=": return ">=";
+            default: return op;
+        }
+    }
+
+    private int compareNumeric(String a, String b) {
+        try {
+            double da = Double.parseDouble(a);
+            double db = Double.parseDouble(b);
+            return Double.compare(da, db);
+        } catch (NumberFormatException e) {
+            return a.compareTo(b);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    protected void applyDataMasking(List<List<String>> rows, List<String> columns, String maskingRule) {
+        if (rows == null || rows.isEmpty() || maskingRule == null || maskingRule.isBlank()) {
+            return;
+        }
+        try {
+            java.util.Map<String, Object> ruleMap;
+            if (maskingRule.trim().startsWith("{")) {
+                com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                ruleMap = objectMapper.readValue(maskingRule, java.util.Map.class);
+            } else {
+                return;
+            }
+            java.util.Map<String, Integer> colIndexMap = new java.util.LinkedHashMap<>();
+            for (int i = 0; i < columns.size(); i++) {
+                colIndexMap.put(columns.get(i).toLowerCase(), i);
+            }
+            for (java.util.Map.Entry<String, Object> entry : ruleMap.entrySet()) {
+                String colName = entry.getKey().toLowerCase();
+                Integer colIdx = colIndexMap.get(colName);
+                if (colIdx == null) continue;
+                Object ruleValue = entry.getValue();
+                String maskType;
+                java.util.List<Object> maskParams = null;
+                if (ruleValue instanceof String) {
+                    maskType = (String) ruleValue;
+                } else if (ruleValue instanceof java.util.Map) {
+                    java.util.Map<String, Object> ruleDetail = (java.util.Map<String, Object>) ruleValue;
+                    maskType = (String) ruleDetail.getOrDefault("type", "partial");
+                    Object params = ruleDetail.get("params");
+                    if (params instanceof java.util.List) {
+                        maskParams = (java.util.List<Object>) params;
+                    }
+                } else {
+                    continue;
+                }
+                for (List<String> row : rows) {
+                    if (colIdx < row.size()) {
+                        String original = row.get(colIdx);
+                        if (original == null || "NULL".equals(original)) continue;
+                        row.set(colIdx, applyMask(original, maskType, maskParams));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            getLog().warn("数据脱敏规则解析失败: {}", e.getMessage());
+        }
+    }
+
+    protected String applyMask(String original, String maskType, java.util.List<Object> maskParams) {
+        if (original == null || original.isEmpty()) return original;
+        switch (maskType.toLowerCase()) {
+            case "full":
+                return "*".repeat(original.length());
+            case "partial":
+                int keepFirst = 2;
+                int keepLast = 2;
+                if (maskParams != null && maskParams.size() >= 2) {
+                    try { keepFirst = ((Number) maskParams.get(0)).intValue(); } catch (Exception ignored) {}
+                    try { keepLast = ((Number) maskParams.get(1)).intValue(); } catch (Exception ignored) {}
+                }
+                if (original.length() <= keepFirst + keepLast) return "*".repeat(original.length());
+                StringBuilder sb = new StringBuilder();
+                sb.append(original, 0, Math.min(keepFirst, original.length()));
+                for (int i = keepFirst; i < original.length() - keepLast; i++) {
+                    sb.append('*');
+                }
+                if (keepLast > 0 && original.length() > keepFirst) {
+                    sb.append(original.substring(original.length() - keepLast));
+                }
+                return sb.toString();
+            case "email":
+                int atIndex = original.indexOf('@');
+                if (atIndex > 0) {
+                    return original.charAt(0) + "***" + original.substring(atIndex);
+                }
+                return applyMask(original, "partial", maskParams);
+            case "phone":
+                if (original.length() >= 7) {
+                    return original.substring(0, 3) + "****" + original.substring(original.length() - 4);
+                }
+                return applyMask(original, "partial", maskParams);
+            case "idcard":
+                if (original.length() >= 8) {
+                    int maskLen = original.length() - 8;
+                    return original.substring(0, 4) + "*".repeat(maskLen) + original.substring(original.length() - 4);
+                }
+                return applyMask(original, "partial", maskParams);
+            default:
+                return applyMask(original, "partial", maskParams);
+        }
     }
 
     @Override

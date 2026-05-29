@@ -46,4 +46,10 @@ public class SecurityUtils {
                 && authentication.isAuthenticated()
                 && authentication.getPrincipal() instanceof CustomUserDetails;
     }
+
+    public static boolean isAdmin() {
+        List<String> roles = getCurrentUserRoles();
+        return roles != null && roles.stream()
+                .anyMatch("ROLE_ADMIN"::equalsIgnoreCase);
+    }
 }

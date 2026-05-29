@@ -65,22 +65,29 @@ public class SysUserService implements UserDetailsService {
         user.setLastLoginTime(LocalDateTime.now());
         sysUserMapper.updateById(user);
 
+        boolean isSuperAdmin = Integer.valueOf(1).equals(user.getIsAdmin());
+
         Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(user.getId());
         List<Long> roleIds = Collections.emptyList();
         if (tenantId != null) {
             roleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
         }
 
-        String role = "ROLE_USER";
+        Set<String> roleSet = new LinkedHashSet<>();
+        if (isSuperAdmin) {
+            roleSet.add("ROLE_ADMIN");
+        }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
             if (!CollectionUtils.isEmpty(roles)) {
-                role = roles.stream()
-                        .map(r -> "ROLE_" + r.getRoleCode().toUpperCase())
-                        .collect(Collectors.joining(","));
+                roles.forEach(r -> roleSet.add("ROLE_" + r.getRoleCode().toUpperCase()));
             }
         }
+        if (roleSet.isEmpty()) {
+            roleSet.add("ROLE_USER");
+        }
 
+        String role = String.join(",", roleSet);
         return jwtTokenUtils.generateToken(user.getId(), user.getUsername(), role, tenantId);
     }
 

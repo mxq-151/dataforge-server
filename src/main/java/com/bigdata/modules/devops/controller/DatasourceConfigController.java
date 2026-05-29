@@ -1,5 +1,6 @@
 package com.bigdata.modules.devops.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.dto.DatasourceConfigDTO;
@@ -49,6 +50,7 @@ public class DatasourceConfigController {
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module = "数据源管理", operation = "创建数据源", targetType = "Datasource")
     public Result<Void> save(@Valid @RequestBody DatasourceConfigDTO dto) {
         DatasourceConfig config = new DatasourceConfig();
         BeanUtils.copyProperties(dto, config);
@@ -58,6 +60,7 @@ public class DatasourceConfigController {
 
     @PutMapping
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module = "数据源管理", operation = "更新数据源", targetType = "Datasource")
     public Result<Void> update(@Valid @RequestBody DatasourceConfigDTO dto) {
         DatasourceConfig config = new DatasourceConfig();
         BeanUtils.copyProperties(dto, config);
@@ -67,6 +70,7 @@ public class DatasourceConfigController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module = "数据源管理", operation = "删除数据源", targetType = "Datasource")
     public Result<Void> delete(@PathVariable Long id) {
         datasourceConfigService.deleteDatasource(id);
         return Result.success();

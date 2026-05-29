@@ -108,10 +108,6 @@ public class SysTenantService {
         if (dto.getUserId() != null) {
             bindUser(tenant.getId(), dto.getUserId());
         }
-
-        if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
-            saveTenantRoles(tenant.getId(), dto.getRoleIds());
-        }
     }
 
     @Transactional
@@ -156,13 +152,6 @@ public class SysTenantService {
         if (dto.getUserId() != null) {
             unbindAllUsers(tenant.getId());
             bindUser(tenant.getId(), dto.getUserId());
-        }
-
-        if (dto.getRoleIds() != null) {
-            sysTenantRoleMapper.deleteByTenantId(tenant.getId());
-            if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
-                saveTenantRoles(tenant.getId(), dto.getRoleIds());
-            }
         }
     }
 

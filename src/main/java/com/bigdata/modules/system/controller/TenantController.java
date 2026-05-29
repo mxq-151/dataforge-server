@@ -1,5 +1,6 @@
 package com.bigdata.modules.system.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.TenantDTO;
@@ -58,6 +59,7 @@ public class TenantController {
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="租户管理", operation="创建租户", targetType="Tenant")
     public Result<Void> save(@Valid @RequestBody TenantDTO dto) {
         sysTenantService.saveTenant(dto);
         return Result.success();
@@ -65,6 +67,7 @@ public class TenantController {
 
     @PutMapping
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="租户管理", operation="更新租户", targetType="Tenant")
     public Result<Void> update(@Valid @RequestBody TenantDTO dto) {
         sysTenantService.updateTenant(dto);
         return Result.success();
@@ -72,6 +75,7 @@ public class TenantController {
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="租户管理", operation="删除租户", targetType="Tenant")
     public Result<Void> delete(@PathVariable Long id) {
         sysTenantService.deleteTenant(id);
         return Result.success();
@@ -86,6 +90,7 @@ public class TenantController {
 
     @PostMapping("/{tenantId}/bind-user/{userId}")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="租户管理", operation="绑定用户到租户", targetType="Tenant")
     public Result<Void> bindUser(@PathVariable Long tenantId, @PathVariable Long userId) {
         sysTenantService.bindUser(tenantId, userId);
         return Result.success();
@@ -93,6 +98,7 @@ public class TenantController {
 
     @DeleteMapping("/{tenantId}/unbind-user/{userId}")
     @PreAuthorize("hasRole('ADMIN')")
+    @AuditLog(module="租户管理", operation="解绑用户与租户", targetType="Tenant")
     public Result<Void> unbindUser(@PathVariable Long tenantId, @PathVariable Long userId) {
         sysTenantService.unbindUser(tenantId, userId);
         return Result.success();
@@ -111,9 +117,6 @@ public class TenantController {
             vo.setUsername(user.getUsername());
             vo.setUserRealName(user.getRealName());
         }
-
-        List<Long> roleIds = sysTenantService.getRoleIdsByTenantId(entity.getId());
-        vo.setRoleIds(roleIds);
 
         return vo;
     }

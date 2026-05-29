@@ -1,5 +1,6 @@
 package com.bigdata.modules.system.controller;
 
+import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.MenuRoleBindDTO;
 import com.bigdata.modules.system.entity.SysMenuPermission;
@@ -30,6 +31,7 @@ public class MenuRoleBindController {
         return Result.success(voList);
     }
 
+    @AuditLog(module = "权限管理", operation = "绑定菜单角色", targetType = "MenuRole")
     @PostMapping("/bind")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> bind(@Valid @RequestBody List<MenuRoleBindDTO> dto) {
@@ -41,6 +43,7 @@ public class MenuRoleBindController {
         return Result.success();
     }
 
+    @AuditLog(module = "权限管理", operation = "删除菜单角色绑定", targetType = "MenuRole")
     @DeleteMapping("/delete")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<List<MenuPermissionVO>> delete(

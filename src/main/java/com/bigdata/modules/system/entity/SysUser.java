@@ -16,6 +16,7 @@ public class SysUser extends BaseEntity {
     private String phone;
     private String avatar;
     private Integer status;
+    private Integer isAdmin;
     private LocalDateTime lastLoginTime;
 
     @TableField(exist = false)
@@ -78,6 +79,14 @@ public class SysUser extends BaseEntity {
 
     public void setStatus(Integer status) {
         this.status = status;
+    }
+
+    public Integer getIsAdmin() {
+        return isAdmin;
+    }
+
+    public void setIsAdmin(Integer isAdmin) {
+        this.isAdmin = isAdmin;
     }
 
     public LocalDateTime getLastLoginTime() {

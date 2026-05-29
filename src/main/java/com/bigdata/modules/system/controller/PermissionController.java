@@ -1,6 +1,7 @@
 package com.bigdata.modules.system.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.AssignPermissionDTO;
 import com.bigdata.modules.system.dto.FilePermissionDTO;
@@ -35,6 +36,7 @@ public class PermissionController {
         return Result.success(result);
     }
 
+    @AuditLog(module = "权限管理", operation = "创建文件权限", targetType = "FilePermission")
     @PostMapping("/file")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<FilePermissionVO> saveFile(@Valid @RequestBody FilePermissionDTO dto) {
@@ -44,6 +46,7 @@ public class PermissionController {
         return Result.success(vo);
     }
 
+    @AuditLog(module = "权限管理", operation = "更新文件权限", targetType = "FilePermission")
     @PutMapping("/file")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<FilePermissionVO> updateFile(@Valid @RequestBody FilePermissionDTO dto) {
@@ -53,6 +56,7 @@ public class PermissionController {
         return Result.success(vo);
     }
 
+    @AuditLog(module = "权限管理", operation = "删除文件权限", targetType = "FilePermission")
     @DeleteMapping("/file/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> deleteFile(@PathVariable Long id) {
@@ -69,6 +73,7 @@ public class PermissionController {
         return Result.success(result);
     }
 
+    @AuditLog(module = "权限管理", operation = "创建表权限", targetType = "TablePermission")
     @PostMapping("/table")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<TablePermissionVO> saveTable(@Valid @RequestBody TablePermissionDTO dto) {
@@ -91,6 +96,7 @@ public class PermissionController {
         return Result.success(vo);
     }
 
+    @AuditLog(module = "权限管理", operation = "更新表权限", targetType = "TablePermission")
     @PutMapping("/table")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<TablePermissionVO> updateTable(@Valid @RequestBody TablePermissionDTO dto) {
@@ -114,6 +120,7 @@ public class PermissionController {
         return Result.success(vo);
     }
 
+    @AuditLog(module = "权限管理", operation = "删除表权限", targetType = "TablePermission")
     @DeleteMapping("/table/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> deleteTable(@PathVariable Long id) {
@@ -131,6 +138,7 @@ public class PermissionController {
         return Result.success(vo);
     }
 
+    @AuditLog(module = "权限管理", operation = "分配角色权限", targetType = "Role")
     @PostMapping("/role/{roleId}/assign")
     @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> assignRolePermissions(
