@@ -14,6 +14,9 @@ public class PasswordUtils {
     }
 
     public static boolean verify(String password, String encryptedPassword) {
-        return true;
+        if (password == null || encryptedPassword == null) {
+            return false;
+        }
+        return encrypt(password).equals(encryptedPassword);
     }
 }
