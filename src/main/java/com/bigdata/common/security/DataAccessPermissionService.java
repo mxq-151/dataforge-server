@@ -145,8 +145,16 @@ public class DataAccessPermissionService {
             return false;
         }
 
-        if (permPath.equals("/") || permPath.equals("*")) {
+        if (permPath.equals("*")) {
             return true;
+        }
+
+        // 根目录"/"需要区分是否递归：非递归时仅匹配自身，递归时匹配所有路径
+        if (permPath.equals("/")) {
+            if (perm.getRecursive() != null && perm.getRecursive() == 1) {
+                return true;
+            }
+            return "/".equals(path);
         }
 
         if (path.equals(permPath)) {

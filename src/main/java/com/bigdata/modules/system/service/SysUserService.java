@@ -8,7 +8,6 @@ import com.bigdata.common.utils.PasswordUtils;
 import com.bigdata.modules.system.dto.ChangePasswordDTO;
 import com.bigdata.modules.system.dto.UserDTO;
 import com.bigdata.modules.system.entity.SysRole;
-import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysTenantRole;
 import com.bigdata.modules.system.entity.SysUser;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
@@ -204,12 +203,6 @@ public class SysUserService implements UserDetailsService {
         user.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
 
         sysUserMapper.insert(user);
-
-        if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
-            SysTenant tenant = sysTenantService.ensureTenantForUser(user.getId());
-            sysTenantRoleMapper.deleteByTenantId(tenant.getId());
-            sysTenantService.saveTenantRoles(tenant.getId(), dto.getRoleIds());
-        }
     }
 
     @Transactional
@@ -247,14 +240,6 @@ public class SysUserService implements UserDetailsService {
         }
 
         sysUserMapper.updateById(user);
-
-        if (dto.getRoleIds() != null) {
-            SysTenant tenant = sysTenantService.ensureTenantForUser(user.getId());
-            sysTenantRoleMapper.deleteByTenantId(tenant.getId());
-            if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
-                sysTenantService.saveTenantRoles(tenant.getId(), dto.getRoleIds());
-            }
-        }
     }
 
     @Transactional
