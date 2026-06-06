@@ -25,7 +25,7 @@ public class RoleController {
     private SysRoleService sysRoleService;
 
     @GetMapping("/list")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Page<SysRoleVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
@@ -37,7 +37,7 @@ public class RoleController {
     }
 
     @GetMapping("/all")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<SysRoleVO>> getAllRoles() {
         List<SysRole> roles = sysRoleService.getAllRoles();
         List<SysRoleVO> voList = roles.stream().map(this::toRoleVO).collect(Collectors.toList());
@@ -45,7 +45,7 @@ public class RoleController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<RoleDetailVO> getById(@PathVariable Long id) {
         SysRole role = sysRoleService.getRoleById(id);
         List<Long> userIds = sysRoleService.getUserIdsByRoleId(id);
@@ -54,7 +54,7 @@ public class RoleController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="角色管理", operation="创建角色", targetType="Role")
     public Result<Void> save(@Valid @RequestBody RoleDTO dto) {
         sysRoleService.saveRole(dto);
@@ -62,7 +62,7 @@ public class RoleController {
     }
 
     @PutMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="角色管理", operation="更新角色", targetType="Role")
     public Result<Void> update(@Valid @RequestBody RoleDTO dto) {
         sysRoleService.updateRole(dto);
@@ -70,7 +70,7 @@ public class RoleController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="角色管理", operation="删除角色", targetType="Role")
     public Result<Void> delete(@PathVariable Long id) {
         sysRoleService.deleteRole(id);
@@ -78,7 +78,7 @@ public class RoleController {
     }
 
     @PutMapping("/{id}/status")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="角色管理", operation="变更角色状态", targetType="Role")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
         sysRoleService.changeStatus(id, status);

@@ -26,7 +26,7 @@ public class DataAccessPermissionService {
     public static final int PROJECT_PERMISSION_EDIT = 2;
     public static final int PROJECT_PERMISSION_DELETE = 3;
 
-    private static final String ADMIN_ROLE_CODE = "ROLE_ADMIN";
+    private static final String ADMIN_ROLE_CODE = "ROLE_SUPER_ADMIN";
 
     @Autowired
     private SysTenantUserMapper sysTenantUserMapper;

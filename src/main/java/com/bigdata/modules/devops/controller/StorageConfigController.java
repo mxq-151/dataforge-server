@@ -43,7 +43,7 @@ public class StorageConfigController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> save(@Valid @RequestBody StorageConfigDTO dto) {
         StorageConfig config = new StorageConfig();
         BeanUtils.copyProperties(dto, config);
@@ -52,7 +52,7 @@ public class StorageConfigController {
     }
 
     @PutMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> update(@Valid @RequestBody StorageConfigDTO dto) {
         StorageConfig config = new StorageConfig();
         BeanUtils.copyProperties(dto, config);
@@ -61,7 +61,7 @@ public class StorageConfigController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         storageConfigService.deleteStorage(id);
         return Result.success();

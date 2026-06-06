@@ -74,7 +74,7 @@ public class SysUserService implements UserDetailsService {
 
         Set<String> roleSet = new LinkedHashSet<>();
         if (isSuperAdmin) {
-            roleSet.add("ROLE_ADMIN");
+            roleSet.add("ROLE_SUPER_ADMIN");
         }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
@@ -203,6 +203,16 @@ public class SysUserService implements UserDetailsService {
         user.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
 
         sysUserMapper.insert(user);
+
+        // 处理角色分配：角色通过租户关联，用户必须先绑定租户
+        if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
+            Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(user.getId());
+            if (tenantId == null) {
+                throw new BusinessException("该用户未绑定租户，请先为用户分配租户后再分配角色");
+            }
+            sysTenantRoleMapper.deleteByTenantId(tenantId);
+            sysTenantService.saveTenantRoles(tenantId, dto.getRoleIds());
+        }
     }
 
     @Transactional
@@ -240,6 +250,21 @@ public class SysUserService implements UserDetailsService {
         }
 
         sysUserMapper.updateById(user);
+
+        // 处理角色分配变更：用户必须先绑定租户
+        if (dto.getRoleIds() != null) {
+            Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(user.getId());
+            if (tenantId == null) {
+                if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
+                    throw new BusinessException("该用户未绑定租户，请先为用户分配租户后再分配角色");
+                }
+            } else {
+                sysTenantRoleMapper.deleteByTenantId(tenantId);
+                if (!CollectionUtils.isEmpty(dto.getRoleIds())) {
+                    sysTenantService.saveTenantRoles(tenantId, dto.getRoleIds());
+                }
+            }
+        }
     }
 
     @Transactional

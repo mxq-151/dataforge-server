@@ -38,7 +38,7 @@ public class DevJarDependencyController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> save(@Valid @RequestBody DevJarDependencyDTO dto) {
         DevJarDependency jar = new DevJarDependency();
         BeanUtils.copyProperties(dto, jar);
@@ -47,7 +47,7 @@ public class DevJarDependencyController {
     }
 
     @PutMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> update(@Valid @RequestBody DevJarDependencyDTO dto) {
         DevJarDependency jar = new DevJarDependency();
         BeanUtils.copyProperties(dto, jar);
@@ -56,7 +56,7 @@ public class DevJarDependencyController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         devJarDependencyService.deleteJar(id);
         return Result.success();

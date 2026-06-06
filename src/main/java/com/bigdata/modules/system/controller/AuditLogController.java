@@ -32,7 +32,7 @@ public class AuditLogController {
     private SysTenantService sysTenantService;
 
     @GetMapping("/list")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Page<OperationAuditLogVO>> getAuditLogList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "20") int size,
@@ -59,7 +59,7 @@ public class AuditLogController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<OperationAuditLogVO> getAuditLogDetail(@PathVariable Long id) {
         OperationAuditLog log = auditLogService.getAuditLogById(id);
         if (log == null) {
@@ -69,28 +69,28 @@ public class AuditLogController {
     }
 
     @GetMapping("/modules")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<String>> getModules() {
         List<String> modules = auditLogService.getModules();
         return Result.success(modules);
     }
 
     @GetMapping("/operations")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<String>> getOperations() {
         List<String> operations = auditLogService.getOperations();
         return Result.success(operations);
     }
 
     @GetMapping("/operation-types")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<String>> getOperationTypes() {
         List<String> types = auditLogService.getOperationTypes();
         return Result.success(types);
     }
 
     @GetMapping("/statistics")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<AuditStatisticsVO> getStatistics(
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
@@ -106,7 +106,7 @@ public class AuditLogController {
     }
 
     @GetMapping("/export")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public void exportAuditLogs(
             HttpServletResponse response,
             @RequestParam(required = false) String module,
@@ -157,7 +157,7 @@ public class AuditLogController {
     }
 
     @DeleteMapping("/cleanup")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Integer> cleanupOldLogs(@RequestParam(defaultValue = "90") int days) {
         LocalDateTime beforeTime = LocalDateTime.now().minusDays(days);
         int deletedCount = auditLogService.deleteLogsBefore(beforeTime);

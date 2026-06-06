@@ -33,7 +33,7 @@ public class MenuRoleBindController {
 
     @AuditLog(module = "权限管理", operation = "绑定菜单角色", targetType = "MenuRole")
     @PostMapping("/bind")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> bind(@Valid @RequestBody List<MenuRoleBindDTO> dto) {
         for(MenuRoleBindDTO dt:dto)
         {
@@ -45,7 +45,7 @@ public class MenuRoleBindController {
 
     @AuditLog(module = "权限管理", operation = "删除菜单角色绑定", targetType = "MenuRole")
     @DeleteMapping("/delete")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<MenuPermissionVO>> delete(
             @RequestParam(required = false) Long id) {
         this.menuRoleBindService.deleteByPermissionId(id);

@@ -12,6 +12,7 @@ import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysRoleProjectPermission;
 import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysUser;
+import com.bigdata.modules.system.enums.RoleType;
 import com.bigdata.modules.system.mapper.SysMenuPermissionMapper;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
@@ -89,7 +90,7 @@ public class AuthController {
 
         Set<String> roleSet = new LinkedHashSet<>();
         if (Integer.valueOf(1).equals(user.getIsAdmin())) {
-            roleSet.add("ROLE_ADMIN");
+            roleSet.add("ROLE_SUPER_ADMIN");
         }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
@@ -149,6 +150,17 @@ public class AuthController {
             roleNameSet.add("普通用户");
         }
         vo.setRoles(new ArrayList<>(roleNameSet));
+
+        if (!CollectionUtils.isEmpty(roleIds)) {
+            List<SysRole> roleList = sysRoleMapper.selectBatchIds(roleIds);
+            if (!CollectionUtils.isEmpty(roleList)) {
+                vo.setRoleType(roleList.get(0).getRoleType());
+            }
+        }
+        if (SecurityUtils.isAdmin())
+        {
+            vo.setRoleType(RoleType.SUPER_ADMIN.getCode());
+        }
 
         SysTenant tenant = tenantId != null ? sysTenantService.getTenantById(tenantId) : null;
         if (tenant != null) {

@@ -2,7 +2,6 @@ package com.bigdata.modules.system.vo;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
-import java.util.List;
 
 public class SysRoleVO implements Serializable {
 

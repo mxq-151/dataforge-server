@@ -60,7 +60,7 @@ public class DevProjectController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> save(@Valid @RequestBody DevProjectDTO dto) {
         try {
             DevProject project = new DevProject();
@@ -84,7 +84,7 @@ public class DevProjectController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         dataAccessPermissionService.checkProjectPermission(id, DataAccessPermissionService.PROJECT_PERMISSION_DELETE);
         try {

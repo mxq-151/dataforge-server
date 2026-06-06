@@ -15,6 +15,7 @@ public class CurrentUserInfoVO implements Serializable {
     private String avatar;
     private List<String> roles;
     private List<Long> roleIds;
+    private String roleType;
     private List<String> menuTags;
     private List<String> projectCodes;
     private Long tenantId;
@@ -85,6 +86,14 @@ public class CurrentUserInfoVO implements Serializable {
 
     public void setRoleIds(List<Long> roleIds) {
         this.roleIds = roleIds;
+    }
+
+    public String getRoleType() {
+        return roleType;
+    }
+
+    public void setRoleType(String roleType) {
+        this.roleType = roleType;
     }
 
     public List<String> getMenuTags() {

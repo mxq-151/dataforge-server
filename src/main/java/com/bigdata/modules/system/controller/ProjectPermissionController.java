@@ -34,7 +34,7 @@ public class ProjectPermissionController {
     private DevProjectMapper devProjectMapper;
 
     @GetMapping("/role/{roleId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<ProjectPermissionVO>> getPermissionsByRoleId(@PathVariable Long roleId) {
         List<SysRoleProjectPermission> permissions = sysRoleProjectPermissionService.getPermissionsByRoleId(roleId);
         List<ProjectPermissionVO> voList = toVOList(permissions);
@@ -42,7 +42,7 @@ public class ProjectPermissionController {
     }
 
     @GetMapping("/project/{projectId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<ProjectPermissionVO>> getPermissionsByProjectId(@PathVariable Long projectId) {
         List<SysRoleProjectPermission> permissions = sysRoleProjectPermissionService.getPermissionsByProjectId(projectId);
         List<ProjectPermissionVO> voList = toVOList(permissions);
@@ -60,7 +60,7 @@ public class ProjectPermissionController {
 
     @AuditLog(module = "权限管理", operation = "分配项目权限", targetType = "ProjectPermission")
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> assignPermission(@Valid @RequestBody ProjectPermissionDTO dto) {
         sysRoleProjectPermissionService.assignPermission(dto.getRoleId(), dto.getProjectId(), dto.getPermissionType());
         return Result.success();
@@ -68,7 +68,7 @@ public class ProjectPermissionController {
 
     @AuditLog(module = "权限管理", operation = "批量分配项目权限", targetType = "ProjectPermission")
     @PostMapping("/batch")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> batchAssignPermissions(@Valid @RequestBody BatchProjectPermissionDTO dto) {
         List<SysRoleProjectPermissionService.ProjectPermissionItem> items = dto.getItems().stream()
                 .map(item -> {
@@ -84,7 +84,7 @@ public class ProjectPermissionController {
 
     @AuditLog(module = "权限管理", operation = "移除项目权限", targetType = "ProjectPermission")
     @DeleteMapping("/{roleId}/{projectId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> removePermission(@PathVariable Long roleId, @PathVariable Long projectId) {
         sysRoleProjectPermissionService.removePermission(roleId, projectId);
         return Result.success();
@@ -92,7 +92,7 @@ public class ProjectPermissionController {
 
     @AuditLog(module = "权限管理", operation = "按角色移除项目权限", targetType = "ProjectPermission")
     @DeleteMapping("/role/{roleId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> removePermissionsByRoleId(@PathVariable Long roleId) {
         sysRoleProjectPermissionService.removePermissionsByRoleId(roleId);
         return Result.success();
@@ -100,7 +100,7 @@ public class ProjectPermissionController {
 
     @AuditLog(module = "权限管理", operation = "按项目移除项目权限", targetType = "ProjectPermission")
     @DeleteMapping("/project/{projectId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> removePermissionsByProjectId(@PathVariable Long projectId) {
         sysRoleProjectPermissionService.removePermissionsByProjectId(projectId);
         return Result.success();

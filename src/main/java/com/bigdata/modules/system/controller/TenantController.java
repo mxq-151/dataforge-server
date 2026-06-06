@@ -25,7 +25,7 @@ public class TenantController {
     private SysTenantService sysTenantService;
 
     @GetMapping("/list")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Page<TenantVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
@@ -38,7 +38,7 @@ public class TenantController {
     }
 
     @GetMapping("/all")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<List<TenantVO>> getAllTenants() {
         List<SysTenant> tenants = sysTenantService.getAllTenants();
         List<TenantVO> voList = tenants.stream().map(this::toVO).collect(Collectors.toList());
@@ -58,7 +58,7 @@ public class TenantController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="租户管理", operation="创建租户", targetType="Tenant")
     public Result<Void> save(@Valid @RequestBody TenantDTO dto) {
         sysTenantService.saveTenant(dto);
@@ -66,7 +66,7 @@ public class TenantController {
     }
 
     @PutMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="租户管理", operation="更新租户", targetType="Tenant")
     public Result<Void> update(@Valid @RequestBody TenantDTO dto) {
         sysTenantService.updateTenant(dto);
@@ -74,7 +74,7 @@ public class TenantController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="租户管理", operation="删除租户", targetType="Tenant")
     public Result<Void> delete(@PathVariable Long id) {
         sysTenantService.deleteTenant(id);
@@ -82,14 +82,14 @@ public class TenantController {
     }
 
     @PutMapping("/{id}/status")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
         sysTenantService.changeStatus(id, status);
         return Result.success();
     }
 
     @PostMapping("/{tenantId}/bind-user/{userId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="租户管理", operation="绑定用户到租户", targetType="Tenant")
     public Result<Void> bindUser(@PathVariable Long tenantId, @PathVariable Long userId) {
         sysTenantService.bindUser(tenantId, userId);
@@ -97,7 +97,7 @@ public class TenantController {
     }
 
     @DeleteMapping("/{tenantId}/unbind-user/{userId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @AuditLog(module="租户管理", operation="解绑用户与租户", targetType="Tenant")
     public Result<Void> unbindUser(@PathVariable Long tenantId, @PathVariable Long userId) {
         sysTenantService.unbindUser(tenantId, userId);

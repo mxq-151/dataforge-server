@@ -7,6 +7,7 @@ import com.bigdata.modules.system.dto.RoleDTO;
 import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysTenantUser;
 import com.bigdata.modules.system.entity.SysUser;
+import com.bigdata.modules.system.enums.RoleType;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
@@ -34,8 +35,6 @@ public class SysRoleService {
     @Autowired
     private SysTenantUserMapper sysTenantUserMapper;
 
-    @Autowired
-    private SysTenantService sysTenantService;
 
     public Page<SysRole> getRoleList(int current, int size, String roleName) {
         Page<SysRole> page = new Page<>(current, size);
@@ -71,6 +70,10 @@ public class SysRoleService {
             throw new BusinessException("角色编码已存在");
         }
 
+        if (RoleType.fromCode(dto.getRoleType()) == null) {
+            throw new BusinessException("无效的角色类型");
+        }
+
         SysRole role = new SysRole();
         role.setRoleName(dto.getRoleName());
         role.setRoleCode(dto.getRoleCode());
@@ -104,6 +107,9 @@ public class SysRoleService {
             role.setRoleName(dto.getRoleName());
         }
         if (dto.getRoleType() != null) {
+            if (RoleType.fromCode(dto.getRoleType()) == null) {
+                throw new BusinessException("无效的角色类型");
+            }
             role.setRoleType(dto.getRoleType());
         }
         if (dto.getDescription() != null) {

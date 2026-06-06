@@ -50,6 +50,6 @@ public class SecurityUtils {
     public static boolean isAdmin() {
         List<String> roles = getCurrentUserRoles();
         return roles != null && roles.stream()
-                .anyMatch("ROLE_ADMIN"::equalsIgnoreCase);
+                .anyMatch("ROLE_SUPER_ADMIN"::equalsIgnoreCase);
     }
 }

@@ -29,7 +29,7 @@ public class UserController {
     private SysUserService sysUserService;
 
     @GetMapping("/list")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Page<SysUserVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
@@ -43,7 +43,7 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN') or #id == authentication.principal.userId")
+    @PreAuthorize("hasRole('SUPER_ADMIN') or #id == authentication.principal.userId")
     public Result<UserInfoVO> getById(@PathVariable Long id) {
         SysUser user = sysUserService.getUserById(id);
         List<Long> roleIds = sysUserService.getUserRoleIds(id);
@@ -53,7 +53,7 @@ public class UserController {
 
     @AuditLog(module = "用户管理", operation = "创建用户", targetType = "User")
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> save(@Validated(UserDTO.Create.class) @RequestBody UserDTO dto) {
         sysUserService.saveUser(dto);
         return Result.success();
@@ -61,7 +61,7 @@ public class UserController {
 
     @AuditLog(module = "用户管理", operation = "更新用户", targetType = "User")
     @PutMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> update(@Validated({UserDTO.Update.class, Default.class}) @RequestBody UserDTO dto) {
         sysUserService.updateUser(dto);
         return Result.success();
@@ -69,14 +69,14 @@ public class UserController {
 
     @AuditLog(module = "用户管理", operation = "删除用户", targetType = "User")
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         sysUserService.deleteUser(id);
         return Result.success();
     }
 
     @PutMapping("/{id}/status")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> changeStatus(@PathVariable Long id, @RequestParam Integer status) {
         sysUserService.changeStatus(id, status);
         return Result.success();
@@ -90,7 +90,7 @@ public class UserController {
     }
 
     @PutMapping("/{id}/reset-password")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> resetPassword(@PathVariable Long id) {
         sysUserService.resetPassword(id);
         return Result.success();

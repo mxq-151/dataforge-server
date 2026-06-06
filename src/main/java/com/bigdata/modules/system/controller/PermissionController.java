@@ -28,7 +28,7 @@ public class PermissionController {
 
 
     @GetMapping("/file/list")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Page<FilePermissionVO>> getFileList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size) {
@@ -38,7 +38,7 @@ public class PermissionController {
 
     @AuditLog(module = "权限管理", operation = "创建文件权限", targetType = "FilePermission")
     @PostMapping("/file")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<FilePermissionVO> saveFile(@Valid @RequestBody FilePermissionDTO dto) {
         SysFilePermission permission = new SysFilePermission();
         BeanUtils.copyProperties(dto, permission);
@@ -48,7 +48,7 @@ public class PermissionController {
 
     @AuditLog(module = "权限管理", operation = "更新文件权限", targetType = "FilePermission")
     @PutMapping("/file")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<FilePermissionVO> updateFile(@Valid @RequestBody FilePermissionDTO dto) {
         SysFilePermission permission = new SysFilePermission();
         BeanUtils.copyProperties(dto, permission);
@@ -58,14 +58,14 @@ public class PermissionController {
 
     @AuditLog(module = "权限管理", operation = "删除文件权限", targetType = "FilePermission")
     @DeleteMapping("/file/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> deleteFile(@PathVariable Long id) {
         permissionService.deleteFilePermission(id);
         return Result.success();
     }
 
     @GetMapping("/table/list")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Page<TablePermissionVO>> getTableList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size) {
@@ -75,7 +75,7 @@ public class PermissionController {
 
     @AuditLog(module = "权限管理", operation = "创建表权限", targetType = "TablePermission")
     @PostMapping("/table")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<TablePermissionVO> saveTable(@Valid @RequestBody TablePermissionDTO dto) {
         SysTablePermission permission = new SysTablePermission();
         permission.setPermissionName(dto.getPermissionName());
@@ -98,7 +98,7 @@ public class PermissionController {
 
     @AuditLog(module = "权限管理", operation = "更新表权限", targetType = "TablePermission")
     @PutMapping("/table")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<TablePermissionVO> updateTable(@Valid @RequestBody TablePermissionDTO dto) {
         SysTablePermission permission = new SysTablePermission();
         permission.setId(dto.getId());
@@ -122,14 +122,14 @@ public class PermissionController {
 
     @AuditLog(module = "权限管理", operation = "删除表权限", targetType = "TablePermission")
     @DeleteMapping("/table/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> deleteTable(@PathVariable Long id) {
         permissionService.deleteTablePermission(id);
         return Result.success();
     }
 
     @GetMapping("/role/{roleId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<RolePermissionsVO> getRolePermissions(@PathVariable Long roleId) {
         RolePermissionsVO vo = new RolePermissionsVO();
         vo.setMenuPermissionIds(permissionService.getMenuPermissionIdsByRoleId(roleId));
@@ -140,7 +140,7 @@ public class PermissionController {
 
     @AuditLog(module = "权限管理", operation = "分配角色权限", targetType = "Role")
     @PostMapping("/role/{roleId}/assign")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> assignRolePermissions(
             @PathVariable Long roleId,
             @Valid @RequestBody AssignPermissionDTO dto) {
