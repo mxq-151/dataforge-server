@@ -229,7 +229,7 @@ class AuthControllerIntegrationTest {
             LoginVO vo = result.getData();
             assertNotNull(vo.getRoles(), "角色列表不应为null");
             assertFalse(vo.getRoles().isEmpty(), "角色列表不应为空");
-            assertTrue(vo.getRoles().contains("ROLE_ADMIN"), "应包含ROLE_ADMIN角色");
+            assertTrue(vo.getRoles().contains("ROLE_SUPER_ADMIN"), "应包含ROLE_SUPER_ADMIN角色");
 
             System.out.println("  角色: " + vo.getRoles());
         }
@@ -440,7 +440,7 @@ class AuthControllerIntegrationTest {
             bindUserToTenant(adminUser.getId(), tenant.getId());
 
             setUpSecurityContext(adminUser.getId(), "test_info_admin", tenant.getId(),
-                    Arrays.asList("ROLE_ADMIN"));
+                    Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<CurrentUserInfoVO> result = authController.getUserInfo();
 
@@ -449,7 +449,7 @@ class AuthControllerIntegrationTest {
             assertNotNull(result.getData(), "CurrentUserInfoVO不应为null");
 
             CurrentUserInfoVO vo = result.getData();
-            assertTrue(vo.getRoles().contains("超级管理员"), "应包含'超级管理员'角色");
+            assertTrue(vo.getRoles().stream().anyMatch(r -> "超级管理员".equals(r.getRoleName())), "应包含'超级管理员'角色");
 
             System.out.println("  Roles: " + vo.getRoles());
         }

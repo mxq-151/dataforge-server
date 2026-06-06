@@ -4,12 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.system.dto.TenantDTO;
-import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysTenantRole;
 import com.bigdata.modules.system.entity.SysTenantUser;
 import com.bigdata.modules.system.entity.SysUser;
-import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
@@ -37,9 +35,6 @@ public class SysTenantService {
 
     @Autowired
     private SysUserMapper sysUserMapper;
-
-    @Autowired
-    private SysRoleMapper sysRoleMapper;
 
     public Page<SysTenant> getTenantList(int current, int size, String tenantName, Integer status) {
         Page<SysTenant> page = new Page<>(current, size);
@@ -237,19 +232,6 @@ public class SysTenantService {
 
     @Transactional
     public void saveTenantRoles(Long tenantId, List<Long> roleIds) {
-        List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
-        if (roles.size() != roleIds.size()) {
-            throw new BusinessException("部分角色不存在");
-        }
-
-        long distinctTypeCount = roles.stream()
-                .map(SysRole::getRoleType)
-                .distinct()
-                .count();
-        if (distinctTypeCount > 1) {
-            throw new BusinessException("同一租户下的角色必须为同一种角色类型");
-        }
-
         LocalDateTime now = LocalDateTime.now();
         List<SysTenantRole> list = new ArrayList<>(roleIds.size());
         for (Long roleId : roleIds) {

@@ -12,7 +12,6 @@ import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysRoleProjectPermission;
 import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysUser;
-import com.bigdata.modules.system.enums.RoleType;
 import com.bigdata.modules.system.mapper.SysMenuPermissionMapper;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
@@ -23,6 +22,7 @@ import com.bigdata.modules.system.service.SysTenantService;
 import com.bigdata.modules.system.service.SysUserService;
 import com.bigdata.modules.system.vo.CurrentUserInfoVO;
 import com.bigdata.modules.system.vo.LoginVO;
+import com.bigdata.modules.system.vo.SysRoleVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.CollectionUtils;
@@ -136,31 +136,34 @@ public class AuthController {
             roleIds = sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId);
         }
 
-        vo.setRoleIds(roleIds);
-
-        Set<String> roleNameSet = new LinkedHashSet<>();
+        List<SysRoleVO> roleVOList = new ArrayList<>();
         if (Integer.valueOf(1).equals(user.getIsAdmin())) {
-            roleNameSet.add("超级管理员");
+            SysRoleVO adminRole = new SysRoleVO();
+            adminRole.setRoleName("超级管理员");
+            adminRole.setRoleCode("SUPER_ADMIN");
+            adminRole.setRoleType("SUPER_ADMIN");
+            roleVOList.add(adminRole);
         }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
-            roles.forEach(r -> roleNameSet.add(r.getRoleName()));
+            roles.forEach(r -> {
+                SysRoleVO roleVO = new SysRoleVO();
+                roleVO.setId(r.getId());
+                roleVO.setRoleName(r.getRoleName());
+                roleVO.setRoleCode(r.getRoleCode());
+                roleVO.setRoleType(r.getRoleType());
+                roleVO.setDescription(r.getDescription());
+                roleVO.setStatus(r.getStatus());
+                roleVOList.add(roleVO);
+            });
         }
-        if (roleNameSet.isEmpty()) {
-            roleNameSet.add("普通用户");
+        if (roleVOList.isEmpty()) {
+            SysRoleVO userRole = new SysRoleVO();
+            userRole.setRoleName("普通用户");
+            userRole.setRoleCode("USER");
+            roleVOList.add(userRole);
         }
-        vo.setRoles(new ArrayList<>(roleNameSet));
-
-        if (!CollectionUtils.isEmpty(roleIds)) {
-            List<SysRole> roleList = sysRoleMapper.selectBatchIds(roleIds);
-            if (!CollectionUtils.isEmpty(roleList)) {
-                vo.setRoleType(roleList.get(0).getRoleType());
-            }
-        }
-        if (SecurityUtils.isAdmin())
-        {
-            vo.setRoleType(RoleType.SUPER_ADMIN.getCode());
-        }
+        vo.setRoles(roleVOList);
 
         SysTenant tenant = tenantId != null ? sysTenantService.getTenantById(tenantId) : null;
         if (tenant != null) {
