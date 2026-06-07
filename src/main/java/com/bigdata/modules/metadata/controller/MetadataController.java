@@ -22,7 +22,9 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -62,15 +64,22 @@ public class MetadataController {
             }
 
             Set<String> accessibleDbNames = dataAccessPermissionService.getAccessibleDatabaseNames(datasourceName);
-            Set<String> accessibleTableNames = null;
 
+            // 构建每个库的表级权限映射，即使 databaseName 未传入也要做表级过滤
+            Map<String, Set<String>> dbTableMap = new HashMap<>();
             if (databaseName != null && datasourceName != null) {
-                accessibleTableNames = dataAccessPermissionService.getAccessibleTableNames(datasourceName, databaseName);
+                Set<String> tables = dataAccessPermissionService.getAccessibleTableNames(datasourceName, databaseName);
+                dbTableMap.put(databaseName, tables);
+            } else if (accessibleDbNames != null && !accessibleDbNames.isEmpty()) {
+                for (String dbName : accessibleDbNames) {
+                    Set<String> tables = dataAccessPermissionService.getAccessibleTableNames(datasourceName, dbName);
+                    dbTableMap.put(dbName, tables);
+                }
             }
 
             final String dsName = datasourceName;
             final Set<String> dbNames = accessibleDbNames;
-            final Set<String> tblNames = accessibleTableNames;
+            final Map<String, Set<String>> tblMap = dbTableMap;
 
             List<TableMetadata> filtered = page.getRecords().stream()
                     .filter(t -> {
@@ -87,8 +96,10 @@ public class MetadataController {
                                 return false;
                             }
                         }
-                        if (tblNames != null && !tblNames.isEmpty()) {
-                            if (t.getTableName() == null || !tblNames.contains(t.getTableName())) {
+                        // 表级权限过滤：null 表示该库下所有表都可访问
+                        Set<String> accessibleTables = t.getDatabaseName() != null ? tblMap.get(t.getDatabaseName()) : null;
+                        if (accessibleTables != null && !accessibleTables.isEmpty()) {
+                            if (t.getTableName() == null || !accessibleTables.contains(t.getTableName())) {
                                 return false;
                             }
                         }

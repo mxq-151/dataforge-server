@@ -233,7 +233,8 @@ public class DataAccessPermissionService {
     }
 
     private boolean matchesTablePermission(SysTablePermission perm, String datasourceName, String databaseName, String tableName) {
-        if (perm.getDatasourceName() != null && !perm.getDatasourceName().isEmpty()
+        // 调用方未指定数据源时，跳过数据源维度的匹配
+        if (datasourceName != null && perm.getDatasourceName() != null && !perm.getDatasourceName().isEmpty()
                 && !perm.getDatasourceName().equals(datasourceName)) {
             return false;
         }
@@ -295,7 +296,8 @@ public class DataAccessPermissionService {
         List<SysTablePermission> permissions = sysTablePermissionMapper.selectBatchIds(tablePermissionIds);
         Set<String> dbNames = new HashSet<>();
         for (SysTablePermission perm : permissions) {
-            if (perm.getDatasourceName() != null && !perm.getDatasourceName().isEmpty()
+            // 调用方未指定数据源时，跳过数据源维度的匹配
+            if (datasourceName != null && perm.getDatasourceName() != null && !perm.getDatasourceName().isEmpty()
                     && !perm.getDatasourceName().equals(datasourceName)) {
                 continue;
             }
@@ -342,7 +344,8 @@ public class DataAccessPermissionService {
     }
 
     private boolean matchesDatasourceAndDatabase(SysTablePermission perm, String datasourceName, String databaseName) {
-        if (perm.getDatasourceName() != null && !perm.getDatasourceName().isEmpty()
+        // 调用方未指定数据源时，跳过数据源维度的匹配
+        if (datasourceName != null && perm.getDatasourceName() != null && !perm.getDatasourceName().isEmpty()
                 && !perm.getDatasourceName().equals(datasourceName)) {
             return false;
         }

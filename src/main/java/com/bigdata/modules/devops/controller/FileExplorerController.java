@@ -3,7 +3,9 @@ package com.bigdata.modules.devops.controller;
 import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
+import com.bigdata.modules.devops.service.FileDataReaderService;
 import com.bigdata.modules.devops.service.FileExplorerService;
+import com.bigdata.modules.devops.vo.FileDataVO;
 import com.bigdata.modules.devops.vo.FileInfoVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
@@ -23,6 +25,9 @@ public class FileExplorerController {
 
     @Autowired
     private FileExplorerService fileExplorerService;
+
+    @Autowired
+    private FileDataReaderService fileDataReaderService;
 
     @Autowired
     private DataAccessPermissionService dataAccessPermissionService;
@@ -203,5 +208,11 @@ public class FileExplorerController {
     public Result<List<String>> getStorageTypes() {
         List<String> types = fileExplorerService.getSupportedStorageTypes();
         return Result.success(types);
+    }
+
+    @GetMapping("/data/read")
+    public Result<FileDataVO> readFileData(@RequestParam String directoryPath) {
+        FileDataVO vo = fileDataReaderService.readFileData(directoryPath);
+        return Result.success(vo);
     }
 }
