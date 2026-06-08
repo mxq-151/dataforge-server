@@ -1,6 +1,7 @@
 package com.bigdata.modules.devops.service;
 
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.modules.devops.filesystem.FileSystemFactory;
 import com.bigdata.modules.devops.vo.FileDataVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.avro.generic.GenericRecord;
@@ -17,9 +18,11 @@ import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.schema.MessageType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -42,6 +45,9 @@ public class FileDataReaderService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Autowired
+    private FileSystemFactory fileSystemFactory;
+
     public FileDataVO readFileData(String directoryPath) {
         try {
             URI uri = new URI(directoryPath);
@@ -50,9 +56,11 @@ public class FileDataReaderService {
                 throw new BusinessException("路径必须包含文件系统协议，例如 hdfs://、file://、jfs://");
             }
 
-            Configuration conf = new Configuration();
-            org.apache.hadoop.fs.FileSystem fs = org.apache.hadoop.fs.FileSystem.get(uri, conf);
-
+            // 通过FileSystemFactory获取Hadoop FileSystem实例
+            org.apache.hadoop.fs.FileSystem fs = fileSystemFactory.getHadoopFileSystem(directoryPath);
+            if (fs==null){
+                throw new IOException("找不到文件系统实例");
+            }
             Path dirPath = new Path(uri);
             if (!fs.exists(dirPath) || !fs.getFileStatus(dirPath).isDirectory()) {
                 throw new BusinessException("目录不存在或不是目录: " + directoryPath);
@@ -115,7 +123,6 @@ public class FileDataReaderService {
             vo.setColumns(columns);
             vo.setRecords(records);
 
-            fs.close();
             return vo;
 
         } catch (BusinessException e) {

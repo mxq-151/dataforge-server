@@ -15,7 +15,6 @@ import com.bigdata.modules.metadata.vo.TableMetadataVO;
 import com.bigdata.modules.system.entity.SysTablePermission;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.sql.Connection;

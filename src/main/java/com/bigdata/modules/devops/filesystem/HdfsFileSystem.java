@@ -17,10 +17,11 @@ public class HdfsFileSystem implements FileSystem {
 
     private org.apache.hadoop.fs.FileSystem fs;
     private String defaultPath;
+    private String endpoint;
 
     @Override
     public void initialize(Map<String, String> config) throws Exception {
-        String endpoint = "jfs://myjfs/";
+        endpoint = config.getOrDefault("endpoint", "jfs://myjfs/");
         String user = config.getOrDefault("user", "mxq");
 
         Configuration hadoopConfig = new Configuration();
@@ -44,6 +45,20 @@ public class HdfsFileSystem implements FileSystem {
             ex.printStackTrace();
         }
         
+    }
+
+    /**
+     * 获取内部的Hadoop FileSystem实例
+     */
+    public org.apache.hadoop.fs.FileSystem getHadoopFs() {
+        return fs;
+    }
+
+    /**
+     * 获取endpoint（协议+卷名）
+     */
+    public String getEndpoint() {
+        return endpoint;
     }
 
     @Override

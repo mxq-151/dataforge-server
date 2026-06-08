@@ -2,6 +2,7 @@ package com.bigdata.common.config;
 
 import com.bigdata.modules.knowledge.converter.StringToDocTypeConverter;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -42,6 +43,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerModule(new JavaTimeModule());
         mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         mapper.configure(JsonGenerator.Feature.ESCAPE_NON_ASCII, false);
         return mapper;
     }
