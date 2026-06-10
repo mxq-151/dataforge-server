@@ -66,6 +66,10 @@ public class CodeExecutionService {
 
             log.info("📋 使用执行策略: {}, executionId={}, context.executionId={}",
                     strategy.getClass().getSimpleName(), executionId, context.getExecutionId());
+
+            // 在请求线程中执行权限检查
+            strategy.checkPermission(context);
+
             CodeExecutionResult result = strategy.execute(context);
             result.setExecutionId(executionId);
             resultCache.put(executionId, result);
@@ -114,10 +118,17 @@ public class CodeExecutionService {
 
         log.info("📋 使用执行策略: {}, executionId={}", strategy.getClass().getSimpleName(), executionId);
 
+        // 在请求线程中执行权限检查（SecurityContext可用）
+        log.info("🔒 执行权限检查: executionId={}", executionId);
+        strategy.checkPermission(context);
+        log.info("✅ 权限检查通过: executionId={}", executionId);
+
         final String finalExecutionId = executionId;
         // 传播 SecurityContext 到异步线程
+        var scontext=SecurityContextHolder.getContext();
         executorService.submit(() -> {
             try {
+                SecurityContextHolder.setContext(scontext);
                 CodeExecutionResult result = strategy.execute(context);
                 result.setExecutionId(finalExecutionId);
                 resultCache.put(finalExecutionId, result);

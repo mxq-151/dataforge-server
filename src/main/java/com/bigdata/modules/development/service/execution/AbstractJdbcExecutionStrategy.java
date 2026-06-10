@@ -86,6 +86,28 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
     protected abstract StorageEngineType resolveStorageEngineType(CodeExecutionContext context);
 
     @Override
+    public void checkPermission(CodeExecutionContext context) {
+        String sql = context.getCodeContent();
+        if (sql == null || sql.trim().isEmpty()) {
+            return;
+        }
+        sql = sql.trim();
+
+        // DDL权限检查
+        DdlInfo ddlInfo = detectDdlStatement(sql);
+        if (ddlInfo != null) {
+            if (!hasDdlPermission(context.getSubmitBy())) {
+                getLog().warn("用户[{}]无DDL执行权限, 拒绝执行: {}", context.getSubmitBy(), context.getSubmitByName());
+                throw new SecurityException("权限不足：只有超级管理员和运维人员才能执行DDL语句（CREATE/ALTER/DROP/TRUNCATE）");
+            }
+            return;
+        }
+
+        // DML表级权限检查
+        checkDmlTablePermission(context, sql, null);
+    }
+
+    @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
         String executionId = context.getExecutionId();
         getLog().info("🔄 [{}] 策略开始执行, executionId={}", getEngineName(), executionId);
@@ -114,7 +136,6 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
             getLog().info("{}执行SQL: {}", getEngineName(),
                     sql.length() > 200 ? sql.substring(0, 200) + "..." : sql);
 
-            // 推送执行开始日志
             executionLogListener.publishLog(executionId, "[" + getEngineName() + "] 开始执行SQL");
 
             int affectedRows = 0;
@@ -122,24 +143,14 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
             List<List<String>> rows = null;
 
             try {
+                // 权限检查已移至 checkPermission()，在异步提交前的请求线程中执行
+                // 此处仅保留DDL检测用于后续元数据同步
                 DdlInfo ddlInfo = detectDdlStatement(sql);
-                if (ddlInfo != null) {
-                    if (!hasDdlPermission(context.getSubmitBy())) {
-                        getLog().warn("用户[{}]无DDL执行权限, 拒绝执行: {}", context.getSubmitBy(), context.getSubmitByName());
-                        String permErr = "权限不足：只有超级管理员和运维人员才能执行DDL语句（CREATE/ALTER/DROP/TRUNCATE）";
-                        executionLogListener.publishLog(executionId, "[拒绝] " + permErr);
-                        long duration = System.currentTimeMillis() - startTime;
-                        CodeExecutionResult failResult = CodeExecutionResult.failure(executionId, permErr);
-                        failResult.setStartTime(new java.util.Date(startTime));
-                        failResult.setEndTime(new java.util.Date());
-                        failResult.setDurationMs((int) duration);
-                        return failResult;
-                    }
-                } else {
-                    checkDmlTablePermission(context, sql, executionId);
-                }
 
                 boolean hasResultSet = stmt.execute(sql);
+                getLog().info("📊 SQL执行结果: hasResultSet={}, SQL={}",
+                        hasResultSet, sql.length() > 80 ? sql.substring(0, 80) + "..." : sql);
+
                 if (ddlInfo != null) {
                     String ddlMsg = "DDL语句执行成功: " + ddlInfo.ddlType + " " +
                             (ddlInfo.databaseName != null ? ddlInfo.databaseName + "." : "") + ddlInfo.tableName;
@@ -210,6 +221,8 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
                         }
                     }
 
+                    getLog().info("📊 查询结果详情: executionId={}, 列数={}, 行数={}, 列名={}",
+                            executionId, colCount, rowCount, columns);
                     executionLogListener.publishLog(executionId, "[结果] 查询返回 " + rowCount + " 行, " + colCount + " 列 (" +
                             String.join(", ", columns) + ")");
                 } else {
@@ -276,7 +289,7 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
     protected void executeSetting(Statement stmt, String settingSql) throws Exception {
         try {
             stmt.execute(settingSql);
-            // 消费所有残留结果，防止干扰后续SQL的ResultSet
+            // 消费所有残留结果
             while (true) {
                 ResultSet rs = stmt.getResultSet();
                 if (rs != null) {
@@ -415,6 +428,11 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
 
     protected void checkDmlTablePermission(CodeExecutionContext context, String sql, String executionId) {
         try {
+            // 平台超级管理员跳过表权限检查（数据库查询，不依赖SecurityContext）
+            if (hasDdlPermission(context.getSubmitBy())) {
+                return;
+            }
+
             net.sf.jsqlparser.statement.Statement jsqlStmt = CCJSqlParserUtil.parse(sql);
 
             String operation = null;
