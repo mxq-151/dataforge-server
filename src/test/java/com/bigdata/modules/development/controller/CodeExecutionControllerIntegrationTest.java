@@ -47,7 +47,7 @@ class CodeExecutionControllerIntegrationTest {
                 new SimpleGrantedAuthority("ROLE_ADMIN")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), authorities, true);
+                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -58,7 +58,7 @@ class CodeExecutionControllerIntegrationTest {
                 new SimpleGrantedAuthority("ROLE_USER")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                2L, "normaluser", 1L, Arrays.asList("ROLE_USER"), authorities, true);
+                2L, "normaluser", 1L, Arrays.asList("ROLE_USER"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -126,13 +126,13 @@ class CodeExecutionControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("❌ 未登录用户获取运行中任务 - 返回401错误")
-        void testGetRunningProcesses_NotLoggedIn_Returns401() {
-            System.out.println("\n=== 场景1.3: 未登录用户获取运行中任务 ===");
+        @DisplayName("❌ 未登录用户获取执行日志 - 返回401错误")
+        void testGetExecutionLogs_NotLoggedIn_Returns401() {
+            System.out.println("\n=== 场景1.3: 未登录用户获取执行日志 ===");
 
             SecurityContextHolder.clearContext();
 
-            Result<List<Map<String, Object>>> result = codeExecutionController.getRunningProcesses();
+            Result<Map<String, Object>> result = codeExecutionController.getExecutionLogs("EXEC_test_123", 0);
 
             assertNotNull(result, "结果不应为null");
             assertEquals(401, result.getCode(), "未登录应返回401");
@@ -513,63 +513,7 @@ class CodeExecutionControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("场景6: 获取运行中的任务列表")
-    class RunningTasksListTests {
-
-        @Test
-        @DisplayName("✅ 获取运行中任务 - 已登录用户可访问")
-        void testGetRunningProcesses_LoggedInUser_Success() {
-            System.out.println("\n=== 场景6.1: 获取运行中的任务列表 ===");
-            setUpAdminSecurityContext();
-
-            Result<List<Map<String, Object>>> result = codeExecutionController.getRunningProcesses();
-
-            assertNotNull(result, "结果不应为null");
-            assertEquals(200, result.getCode(), "已登录用户应返回200");
-            assertNotNull(result.getData(), "data不应为null");
-            System.out.println("  返回码: " + result.getCode());
-            System.out.println("  运行中任务数: " + result.getData().size());
-            if (!result.getData().isEmpty()) {
-                for (Map<String, Object> process : result.getData()) {
-                    System.out.println("    - 任务: " + process);
-                }
-            }
-        }
-
-        @Test
-        @DisplayName("✅ 获取运行中任务 - 无任务时返回空列表")
-        void testGetRunningProcesses_NoRunningTasks_ReturnsEmptyList() {
-            System.out.println("\n=== 场景6.2: 无运行中任务时返回空列表 ===");
-            setUpUserSecurityContext();
-
-            Result<List<Map<String, Object>>> result = codeExecutionController.getRunningProcesses();
-
-            assertNotNull(result, "结果不应为null");
-            assertEquals(200, result.getCode(), "应返回200");
-            assertNotNull(result.getData(), "data不应为null，应为空List或包含运行中的任务");
-            System.out.println("  返回码: " + result.getCode());
-            System.out.println("  任务数: " + result.getData().size());
-        }
-
-        @Test
-        @DisplayName("✅ 普通用户和管理员都能获取自己的任务列表")
-        void testGetRunningProcesses_DifferentRoles_AllCanAccess() {
-            System.out.println("\n=== 场景6.3: 不同角色都可获取任务列表 ===");
-
-            setUpUserSecurityContext();
-            Result<List<Map<String, Object>>> userResult = codeExecutionController.getRunningProcesses();
-            assertEquals(200, userResult.getCode(), "普通用户应能访问");
-            System.out.println("  普通用户访问: 成功, 任务数=" + userResult.getData().size());
-
-            setUpAdminSecurityContext();
-            Result<List<Map<String, Object>>> adminResult = codeExecutionController.getRunningProcesses();
-            assertEquals(200, adminResult.getCode(), "管理员应能访问");
-            System.out.println("  管理员访问: 成功, 任务数=" + adminResult.getData().size());
-        }
-    }
-
-    @Nested
-    @DisplayName("场景7: JAR文件上传验证")
+    @DisplayName("场景6: JAR文件上传验证")
     class JarUploadValidationTests {
 
         @Test

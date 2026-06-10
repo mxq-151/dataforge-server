@@ -39,10 +39,51 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
     private static final int MAX_RESULT_ROWS = 10000;
     private static final String DEFAULT_COLUMN_FAMILY = "info";
 
+    private static class HBaseExecResult {
+        private final boolean success;
+        private final String message;
+        private final List<String> columns;
+        private final List<List<String>> rows;
+        private final int affectedRows;
+
+        HBaseExecResult(boolean success, String message, List<String> columns,
+                        List<List<String>> rows, int affectedRows) {
+            this.success = success;
+            this.message = message;
+            this.columns = columns;
+            this.rows = rows;
+            this.affectedRows = affectedRows;
+        }
+
+        static HBaseExecResult querySuccess(int index, String sql, List<String> columns,
+                                            List<List<String>> rows, int rowCount) {
+            return new HBaseExecResult(true,
+                    "查询完成，返回" + rowCount + "行数据", columns, rows, rowCount);
+        }
+
+        static HBaseExecResult dmlSuccess(int index, String sql, int affectedRows) {
+            return new HBaseExecResult(true,
+                    "执行完成，影响" + affectedRows + "行", null, null, affectedRows);
+        }
+
+        static HBaseExecResult failure(int index, String sql, String errorMessage) {
+            return new HBaseExecResult(false, errorMessage, null, null, 0);
+        }
+
+        boolean isSuccess() { return success; }
+        String getMessage() { return message; }
+        List<String> getColumns() { return columns; }
+        List<List<String>> getRows() { return rows; }
+        int getAffectedRows() { return affectedRows; }
+    }
+
     private final ConcurrentHashMap<String, Connection> connectionCache = new ConcurrentHashMap<>();
 
     @Autowired
     private TableMetadataService tableMetadataService;
+
+    @Autowired
+    private ExecutionLogListener executionLogListener;
 
     @Override
     public EngineType getEngineType() {
@@ -56,7 +97,7 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
 
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
-        String executionId = UUID.randomUUID().toString().replace("-", "");
+        String executionId = context.getExecutionId();
         long startTime = System.currentTimeMillis();
 
         DatasourceConfig datasourceConfig = context.getPrimaryDatasourceConfig();
@@ -77,83 +118,101 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
             List<String> sqlStatements = splitSqlStatements(sql);
             log.info("拆分出{}条SQL语句", sqlStatements.size());
 
-            List<CodeExecutionResult.SqlResultItem> results = new ArrayList<>();
+            // 推送执行开始日志
+            executionLogListener.publishLog(executionId, "[HBase] 开始执行, 共" + sqlStatements.size() + "条SQL");
+
             List<String> lastQueryColumns = null;
             List<List<String>> lastQueryRows = null;
             int totalAffectedRows = 0;
+            String firstErrorMessage = null;
 
             for (int i = 0; i < sqlStatements.size(); i++) {
                 String singleSql = sqlStatements.get(i).trim();
-                log.info("执行第{}/{}条SQL: {}", i + 1, sqlStatements.size(),
-                        singleSql.length() > 100 ? singleSql.substring(0, 100) + "..." : singleSql);
+                String logMsg = "执行第" + (i + 1) + "/" + sqlStatements.size() + "条SQL: " +
+                        (singleSql.length() > 100 ? singleSql.substring(0, 100) + "..." : singleSql);
+                log.info(logMsg);
+                executionLogListener.publishLog(executionId, logMsg);
 
                 try {
                     String sqlUpper = singleSql.toUpperCase();
 
                     if (sqlUpper.startsWith("CREATE TABLE")) {
-                        CodeExecutionResult.SqlResultItem result = handleCreateTable(
+                        HBaseExecResult result = handleCreateTable(
                                 singleSql, calciteService, schema, datasourceConfig, i);
-                        results.add(result);
                         if (!result.isSuccess()) {
+                            firstErrorMessage = result.getMessage();
+                            executionLogListener.publishLog(executionId, "[错误] " + result.getMessage());
                             break;
                         }
+                        executionLogListener.publishLog(executionId, "[结果] CREATE TABLE 成功");
                     } else if (sqlUpper.startsWith("SELECT")) {
-                        CodeExecutionResult.SqlResultItem result = handleSelect(
+                        HBaseExecResult result = handleSelect(
                                 singleSql, calciteService, schema, i);
-                        results.add(result);
                         if (result.isSuccess()) {
                             lastQueryColumns = result.getColumns();
                             lastQueryRows = result.getRows();
                             totalAffectedRows += result.getAffectedRows();
+                            executionLogListener.publishLog(executionId,
+                                    "[结果] 查询返回 " + result.getAffectedRows() + " 行");
                         } else {
+                            firstErrorMessage = result.getMessage();
+                            executionLogListener.publishLog(executionId, "[错误] " + result.getMessage());
                             break;
                         }
                     } else if (sqlUpper.startsWith("SHOW TABLES") || sqlUpper.startsWith("LIST TABLES")) {
-                        CodeExecutionResult.SqlResultItem result = handleShowTables(schema, i);
-                        results.add(result);
+                        HBaseExecResult result = handleShowTables(schema, i);
                         if (result.isSuccess()) {
                             lastQueryColumns = result.getColumns();
                             lastQueryRows = result.getRows();
+                            executionLogListener.publishLog(executionId,
+                                    "[结果] SHOW TABLES 返回 " + result.getRows().size() + " 张表");
+                        } else {
+                            firstErrorMessage = result.getMessage();
+                            executionLogListener.publishLog(executionId, "[错误] " + result.getMessage());
+                            break;
                         }
                     } else if (sqlUpper.startsWith("DESC") || sqlUpper.startsWith("DESCRIBE")) {
-                        CodeExecutionResult.SqlResultItem result = handleDescribe(
-                                singleSql, schema, i);
-                        results.add(result);
+                        HBaseExecResult result = handleDescribe(singleSql, schema, i);
                         if (result.isSuccess()) {
                             lastQueryColumns = result.getColumns();
                             lastQueryRows = result.getRows();
+                            executionLogListener.publishLog(executionId,
+                                    "[结果] DESCRIBE 返回 " + result.getRows().size() + " 列信息");
+                        } else {
+                            firstErrorMessage = result.getMessage();
+                            executionLogListener.publishLog(executionId, "[错误] " + result.getMessage());
+                            break;
                         }
                     } else {
-                        results.add(CodeExecutionResult.SqlResultItem.failure(i, singleSql,
-                                "不支持的SQL类型，HBase仅支持: SELECT, CREATE TABLE, SHOW TABLES, DESC"));
+                        firstErrorMessage = "不支持的SQL类型，HBase仅支持: SELECT, CREATE TABLE, SHOW TABLES, DESC";
+                        executionLogListener.publishLog(executionId, "[错误] " + firstErrorMessage);
                         break;
                     }
                 } catch (Exception e) {
                     log.error("第{}条SQL执行失败: {}", i + 1, e.getMessage());
-                    results.add(CodeExecutionResult.SqlResultItem.failure(i, singleSql, e.getMessage()));
+                    firstErrorMessage = e.getMessage();
+                    executionLogListener.publishLog(executionId, "[错误] 第" + (i+1) + "条SQL执行失败: " + e.getMessage());
                     break;
                 }
             }
 
             long duration = System.currentTimeMillis() - startTime;
-            boolean allSuccess = results.stream().allMatch(CodeExecutionResult.SqlResultItem::isSuccess);
 
             CodeExecutionResult result;
-            if (allSuccess) {
+            if (firstErrorMessage == null) {
                 String outputLog = sqlStatements.size() == 1
-                        ? results.get(0).getMessage()
+                        ? "执行成功"
                         : "共" + sqlStatements.size() + "条SQL全部执行成功";
                 result = CodeExecutionResult.success(executionId, outputLog,
                         lastQueryColumns, lastQueryRows, totalAffectedRows);
+                executionLogListener.publishLog(executionId, "[完成] " + outputLog + ", 耗时" + duration + "ms");
             } else {
-                result = CodeExecutionResult.failure(executionId,
-                        "第" + results.size() + "条SQL执行失败: "
-                                + results.get(results.size() - 1).getMessage());
+                result = CodeExecutionResult.failure(executionId, firstErrorMessage);
                 result.setColumns(lastQueryColumns);
                 result.setRows(lastQueryRows);
                 result.setAffectedRows(totalAffectedRows);
+                executionLogListener.publishLog(executionId, "[失败] " + firstErrorMessage + ", 耗时" + duration + "ms");
             }
-            result.setResults(results);
             result.setStartTime(new Date(startTime));
             result.setEndTime(new Date());
             result.setDurationMs((int) duration);
@@ -162,8 +221,9 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
         } catch (Exception e) {
             log.error("HBase执行失败", e);
             long duration = System.currentTimeMillis() - startTime;
-            CodeExecutionResult result = CodeExecutionResult.failure(executionId,
-                    "HBase执行异常: " + e.getMessage());
+            String errMsg = "HBase执行异常: " + e.getMessage();
+            executionLogListener.publishLog(executionId, "[异常] " + errMsg);
+            CodeExecutionResult result = CodeExecutionResult.failure(executionId, errMsg);
             result.setStartTime(new Date(startTime));
             result.setEndTime(new Date());
             result.setDurationMs((int) duration);
@@ -171,22 +231,22 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
         }
     }
 
-    private CodeExecutionResult.SqlResultItem handleCreateTable(String sql,
-                                                                 HBaseCalciteService calciteService,
-                                                                 HBaseSchema schema,
-                                                                 DatasourceConfig datasourceConfig,
-                                                                 int index) throws Exception {
+    private HBaseExecResult handleCreateTable(String sql,
+                                               HBaseCalciteService calciteService,
+                                               HBaseSchema schema,
+                                               DatasourceConfig datasourceConfig,
+                                               int index) throws Exception {
         try {
             net.sf.jsqlparser.statement.Statement stmt = CCJSqlParserUtil.parse(sql);
             if (!(stmt instanceof CreateTable)) {
-                return CodeExecutionResult.SqlResultItem.failure(index, sql, "无法解析CREATE TABLE语句");
+                return HBaseExecResult.failure(index, sql, "无法解析CREATE TABLE语句");
             }
 
             CreateTable createTable = (CreateTable) stmt;
             String tableName = createTable.getTable().getName();
 
             if (createTable.getColumnDefinitions() == null || createTable.getColumnDefinitions().isEmpty()) {
-                return CodeExecutionResult.SqlResultItem.failure(index, sql,
+                return HBaseExecResult.failure(index, sql,
                         "HBase表必须包含至少一个列定义，且必须有rowkey字段");
             }
 
@@ -198,7 +258,7 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
                 }
             }
             if (!hasRowkey) {
-                return CodeExecutionResult.SqlResultItem.failure(index, sql,
+                return HBaseExecResult.failure(index, sql,
                         "HBase表必须包含一个rowkey字段作为主键，例如: CREATE TABLE xxx (rowkey VARCHAR, name VARCHAR)");
             }
 
@@ -226,11 +286,11 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
             schema.registerTable(tableName, meta);
             syncCreateTableToMetadata(datasourceConfig, tableName, createTable);
 
-            return CodeExecutionResult.SqlResultItem.dmlSuccess(index, sql, created ? 1 : 0);
+            return HBaseExecResult.dmlSuccess(index, sql, created ? 1 : 0);
 
         } catch (Exception e) {
             log.error("CREATE TABLE执行失败", e);
-            return CodeExecutionResult.SqlResultItem.failure(index, sql, e.getMessage());
+            return HBaseExecResult.failure(index, sql, e.getMessage());
         }
     }
 
@@ -282,14 +342,14 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
         }
     }
 
-    private CodeExecutionResult.SqlResultItem handleSelect(String sql,
-                                                            HBaseCalciteService calciteService,
-                                                            HBaseSchema schema,
-                                                            int index) throws Exception {
+    private HBaseExecResult handleSelect(String sql,
+                                          HBaseCalciteService calciteService,
+                                          HBaseSchema schema,
+                                          int index) throws Exception {
         try {
             String rowkeyFilterError = validateRowkeyFilter(sql);
             if (rowkeyFilterError != null) {
-                return CodeExecutionResult.SqlResultItem.failure(index, sql, rowkeyFilterError);
+                return HBaseExecResult.failure(index, sql, rowkeyFilterError);
             }
 
             List<HBaseRowkeyCondition> rowkeyConditions = HBaseRowkeyFilterExtractor.extract(sql);
@@ -308,11 +368,11 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
                 count++;
             }
 
-            return CodeExecutionResult.SqlResultItem.querySuccess(index, sql,
+            return HBaseExecResult.querySuccess(index, sql,
                     queryResult.columns, rows, count);
         } catch (Exception e) {
             log.error("SELECT执行失败", e);
-            return CodeExecutionResult.SqlResultItem.failure(index, sql, e.getMessage());
+            return HBaseExecResult.failure(index, sql, e.getMessage());
         }
     }
 
@@ -342,7 +402,7 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
         }
     }
 
-    private CodeExecutionResult.SqlResultItem handleShowTables(HBaseSchema schema, int index) {
+    private HBaseExecResult handleShowTables(HBaseSchema schema, int index) {
         try {
             schema.loadMetadataFromDb();
             List<String> tableNames = new ArrayList<>();
@@ -356,15 +416,15 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
                 rows.add(Arrays.asList(name));
             }
 
-            return CodeExecutionResult.SqlResultItem.querySuccess(index, "SHOW TABLES",
+            return HBaseExecResult.querySuccess(index, "SHOW TABLES",
                     columns, rows, rows.size());
         } catch (Exception e) {
             log.error("SHOW TABLES执行失败", e);
-            return CodeExecutionResult.SqlResultItem.failure(index, "SHOW TABLES", e.getMessage());
+            return HBaseExecResult.failure(index, "SHOW TABLES", e.getMessage());
         }
     }
 
-    private CodeExecutionResult.SqlResultItem handleDescribe(String sql, HBaseSchema schema, int index) {
+    private HBaseExecResult handleDescribe(String sql, HBaseSchema schema, int index) {
         try {
             String sqlUpper = sql.toUpperCase().trim();
             String tableName = null;
@@ -375,7 +435,7 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
             }
 
             if (tableName == null) {
-                return CodeExecutionResult.SqlResultItem.failure(index, sql, "无法解析表名");
+                return HBaseExecResult.failure(index, sql, "无法解析表名");
             }
 
             List<String> columns = Arrays.asList("COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE");
@@ -401,10 +461,10 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
                 }
             }
 
-            return CodeExecutionResult.SqlResultItem.querySuccess(index, sql, columns, rows, rows.size());
+            return HBaseExecResult.querySuccess(index, sql, columns, rows, rows.size());
         } catch (Exception e) {
             log.error("DESCRIBE执行失败", e);
-            return CodeExecutionResult.SqlResultItem.failure(index, sql, e.getMessage());
+            return HBaseExecResult.failure(index, sql, e.getMessage());
         }
     }
 

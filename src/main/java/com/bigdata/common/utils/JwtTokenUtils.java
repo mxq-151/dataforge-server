@@ -26,11 +26,12 @@ public class JwtTokenUtils {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public String generateToken(Long userId, String username, String role, Long tenantId) {
+    public String generateToken(Long userId, String username, String role, Long tenantId, boolean isAdmin) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
         claims.put("username", username);
         claims.put("role", role);
+        claims.put("isAdmin", isAdmin);
         if (tenantId != null) {
             claims.put("tenantId", tenantId);
         }
@@ -82,6 +83,18 @@ public class JwtTokenUtils {
             return ((Integer) tenantId).longValue();
         }
         return Long.valueOf(tenantId.toString());
+    }
+
+    public boolean getIsAdminFromToken(String token) {
+        Claims claims = getTokenClaims(token);
+        Object isAdmin = claims.get("isAdmin");
+        if (isAdmin == null) {
+            return false;
+        }
+        if (isAdmin instanceof Boolean) {
+            return (Boolean) isAdmin;
+        }
+        return Boolean.parseBoolean(isAdmin.toString());
     }
 
     public boolean validateToken(String token) {

@@ -45,7 +45,7 @@ class FileExplorerControllerIntegrationTest {
                 new SimpleGrantedAuthority("ROLE_ADMIN")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), authorities, true);
+                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -56,7 +56,7 @@ class FileExplorerControllerIntegrationTest {
                 new SimpleGrantedAuthority("ROLE_USER")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                2L, "normaluser", 1L, Arrays.asList("ROLE_USER"), authorities, true);
+                2L, "normaluser", 1L, Arrays.asList("ROLE_USER"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -67,7 +67,7 @@ class FileExplorerControllerIntegrationTest {
                 new SimpleGrantedAuthority("ROLE_GUEST")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                99L, "guest", 1L, Arrays.asList("ROLE_GUEST"), authorities, true);
+                99L, "guest", 1L, Arrays.asList("ROLE_GUEST"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);

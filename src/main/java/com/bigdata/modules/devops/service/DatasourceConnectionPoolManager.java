@@ -265,15 +265,13 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         DatasourceType type = config.getDatasourceType();
 
         Long currentUserId = SecurityUtils.getCurrentUserId();
-        List<String> currentUserRoles = SecurityUtils.getCurrentUserRoles();
-        boolean isAdmin = currentUserRoles != null && currentUserRoles.stream()
-                .anyMatch("ROLE_ADMIN"::equalsIgnoreCase);
+        boolean isAdmin = SecurityUtils.isAdmin();
 
-        String tenantName = "";
+        String tenantCode = "";
         if (currentUserId != null) {
             SysTenant tenant = sysTenantService.getTenantByUserId(currentUserId);
             if (tenant != null) {
-                tenantName = tenant.getTenantName();
+                tenantCode = tenant.getTenantCode();
             }
         }
 
@@ -289,8 +287,9 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
                     tenantPassword = tenant.getPassword();
                 }
             }
-            hc.setPoolName("ds-" + config.getId() + "-" + tenantName);
-            hc.setUsername(tenantName);
+            log.info("create connect for {}",tenantCode);
+            hc.setPoolName("ds-" + config.getId() + "-" + tenantCode);
+            hc.setUsername(tenantCode);
             hc.setPassword(tenantPassword);
         }
 

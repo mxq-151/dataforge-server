@@ -10,6 +10,7 @@ import java.util.Map;
 
 public class CodeExecutionContext {
 
+    private String executionId;
     private String codeContent;
     private CodeType codeType;
     private EngineType engineType;
@@ -24,6 +25,14 @@ public class CodeExecutionContext {
     private String mainClass;
     private String fileName;
 
+
+    public String getExecutionId() {
+        return executionId;
+    }
+
+    public void setExecutionId(String executionId) {
+        this.executionId = executionId;
+    }
 
     public String getCodeContent() {
         return codeContent;

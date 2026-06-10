@@ -9,6 +9,8 @@ import com.bigdata.modules.system.entity.SysTablePermission;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
+import com.bigdata.modules.system.mapper.SysUserMapper;
+import com.bigdata.modules.system.entity.SysUser;
 import org.slf4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -17,7 +19,6 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.expression.Expression;
@@ -68,6 +69,12 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
     @Autowired
     protected SysRoleMapper sysRoleMapper;
 
+    @Autowired
+    protected SysUserMapper sysUserMapper;
+
+    @Autowired
+    protected ExecutionLogListener executionLogListener;
+
     protected abstract Logger getLog();
 
     protected abstract String getEngineName();
@@ -80,7 +87,8 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
 
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
-        String executionId = UUID.randomUUID().toString().replace("-", "");
+        String executionId = context.getExecutionId();
+        getLog().info("🔄 [{}] 策略开始执行, executionId={}", getEngineName(), executionId);
         long startTime = System.currentTimeMillis();
 
         if (context.getPrimaryDatasourceConfig() == null) {
@@ -97,140 +105,151 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
             stmt = connection.createStatement();
             registeredId = processManager.registerStatement(stmt, context.getSubmitBy(), getEngineCode());
             applySessionSettings(stmt, context);
+
             String sql = context.getCodeContent();
+            if (sql == null || sql.trim().isEmpty()) {
+                return CodeExecutionResult.failure(executionId, "SQL语句不能为空");
+            }
+            sql = sql.trim();
             getLog().info("{}执行SQL: {}", getEngineName(),
                     sql.length() > 200 ? sql.substring(0, 200) + "..." : sql);
 
-            List<String> sqlStatements = splitSqlStatements(sql);
-            getLog().info("拆分出{}条SQL语句", sqlStatements.size());
+            // 推送执行开始日志
+            executionLogListener.publishLog(executionId, "[" + getEngineName() + "] 开始执行SQL");
 
-            List<CodeExecutionResult.SqlResultItem> results = new ArrayList<>();
-            int totalAffectedRows = 0;
-            List<String> lastQueryColumns = null;
-            List<List<String>> lastQueryRows = null;
+            int affectedRows = 0;
+            List<String> columns = null;
+            List<List<String>> rows = null;
 
-            for (int i = 0; i < sqlStatements.size(); i++) {
-                String singleSql = sqlStatements.get(i);
-                getLog().info("执行第{}/{}条SQL: {}", i + 1, sqlStatements.size(),
-                        singleSql.length() > 100 ? singleSql.substring(0, 100) + "..." : singleSql);
-
-                try {
-                    DdlInfo ddlInfo = detectDdlStatement(singleSql);
-                    if (ddlInfo != null) {
-                        if (!hasDdlPermission(context.getSubmitBy())) {
-                            getLog().warn("用户[{}]无DDL执行权限, 拒绝执行: {}", context.getSubmitBy(), context.getSubmitByName());
-                            results.add(CodeExecutionResult.SqlResultItem.failure(i, singleSql,
-                                    "权限不足：只有超级管理员和运维人员才能执行DDL语句（CREATE/ALTER/DROP/TRUNCATE）"));
-                            break;
-                        }
-                    } else {
-                        checkDmlTablePermission(context, singleSql, executionId);
+            try {
+                DdlInfo ddlInfo = detectDdlStatement(sql);
+                if (ddlInfo != null) {
+                    if (!hasDdlPermission(context.getSubmitBy())) {
+                        getLog().warn("用户[{}]无DDL执行权限, 拒绝执行: {}", context.getSubmitBy(), context.getSubmitByName());
+                        String permErr = "权限不足：只有超级管理员和运维人员才能执行DDL语句（CREATE/ALTER/DROP/TRUNCATE）";
+                        executionLogListener.publishLog(executionId, "[拒绝] " + permErr);
+                        long duration = System.currentTimeMillis() - startTime;
+                        CodeExecutionResult failResult = CodeExecutionResult.failure(executionId, permErr);
+                        failResult.setStartTime(new java.util.Date(startTime));
+                        failResult.setEndTime(new java.util.Date());
+                        failResult.setDurationMs((int) duration);
+                        return failResult;
                     }
-
-                    boolean hasResultSet = stmt.execute(singleSql);
-
-                    if (ddlInfo != null) {
-                        getLog().info("DDL语句执行成功, 开始同步元数据: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
-                        try {
-                            StorageEngineType storageEngine = resolveStorageEngineType(context);
-                            boolean syncSuccess = metadataSyncService.syncSingleTableMetadata(
-                                    context.getPrimaryDatasourceConfig().getId(),
-                                    storageEngine,
-                                    ddlInfo.databaseName,
-                                    ddlInfo.tableName,
-                                    ddlInfo.ddlType
-                            );
-                            if (syncSuccess) {
-                                getLog().info("元数据同步成功: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
-                            } else {
-                                getLog().warn("元数据同步失败: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
-                            }
-                        } catch (Exception syncEx) {
-                            getLog().error("元数据同步异常: {}.{}", ddlInfo.databaseName, ddlInfo.tableName, syncEx);
-                        }
-                    }
-
-                    if (hasResultSet) {
-                        ResultSet rs = stmt.getResultSet();
-                        List<String> columns = new ArrayList<>();
-                        int colCount = rs.getMetaData().getColumnCount();
-                        for (int c = 1; c <= colCount; c++) {
-                            columns.add(rs.getMetaData().getColumnLabel(c));
-                        }
-
-                        List<List<String>> rows = new ArrayList<>();
-                        int rowCount = 0;
-                        while (rs.next() && rowCount < MAX_RESULT_ROWS) {
-                            List<String> row = new ArrayList<>();
-                            for (int c = 1; c <= colCount; c++) {
-                                String val = rs.getString(c);
-                                row.add(val != null ? val : "NULL");
-                            }
-                            rows.add(row);
-                            rowCount++;
-                        }
-
-                        String datasourceName = context.getPrimaryDatasourceConfig().getDatasourceName();
-                        String defaultDatabase = context.getPrimaryDatasourceDatabaseName();
-
-                        SelectPermissionInfo permInfo = extractSelectPermissionInfo(singleSql, datasourceName, defaultDatabase);
-                        if (permInfo != null && permInfo.tableRef != null) {
-                            String dbName = permInfo.tableRef.databaseName != null ? permInfo.tableRef.databaseName : defaultDatabase;
-                            SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
-                                    datasourceName, dbName, permInfo.tableRef.tableName);
-                            if (mergedPerm != null) {
-                                if (mergedPerm.getRowFilterSql() != null && !mergedPerm.getRowFilterSql().isBlank()) {
-                                    int beforeSize = rows.size();
-                                    rows = applyRowFilter(rows, columns, mergedPerm.getRowFilterSql());
-                                    rowCount = rows.size();
-                                    getLog().info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rowCount, mergedPerm.getRowFilterSql());
-                                }
-                                if (mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
-                                    applyDataMasking(rows, columns, mergedPerm.getDataMaskingRule());
-                                    getLog().info("已应用数据脱敏规则, 表: {}.{}", dbName, permInfo.tableRef.tableName);
-                                }
-                            }
-                        }
-
-                        results.add(CodeExecutionResult.SqlResultItem.querySuccess(i, singleSql, columns, rows, rowCount));
-                        lastQueryColumns = columns;
-                        lastQueryRows = rows;
-                        totalAffectedRows += rowCount;
-                    } else {
-                        int affected = stmt.getUpdateCount();
-                        results.add(CodeExecutionResult.SqlResultItem.dmlSuccess(i, singleSql, affected));
-                        totalAffectedRows += affected;
-                    }
-                } catch (SecurityException e) {
-                    results.add(CodeExecutionResult.SqlResultItem.failure(i, singleSql, e.getMessage()));
-                    break;
-                } catch (Exception e) {
-                    getLog().error("第{}条SQL执行失败: {}", i + 1, e.getMessage());
-                    results.add(CodeExecutionResult.SqlResultItem.failure(i, singleSql, e.getMessage()));
-                    break;
+                } else {
+                    checkDmlTablePermission(context, sql, executionId);
                 }
+
+                boolean hasResultSet = stmt.execute(sql);
+                if (ddlInfo != null) {
+                    String ddlMsg = "DDL语句执行成功: " + ddlInfo.ddlType + " " +
+                            (ddlInfo.databaseName != null ? ddlInfo.databaseName + "." : "") + ddlInfo.tableName;
+                    getLog().info(ddlMsg + ", 开始同步元数据");
+                    executionLogListener.publishLog(executionId, "[DDL] " + ddlMsg);
+                    try {
+                        StorageEngineType storageEngine = resolveStorageEngineType(context);
+                        boolean syncSuccess = metadataSyncService.syncSingleTableMetadata(
+                                context.getPrimaryDatasourceConfig().getId(),
+                                storageEngine,
+                                ddlInfo.databaseName,
+                                ddlInfo.tableName,
+                                ddlInfo.ddlType
+                        );
+                        if (syncSuccess) {
+                            getLog().info("元数据同步成功: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
+                            executionLogListener.publishLog(executionId, "[元数据] 同步成功: " + ddlInfo.tableName);
+                        } else {
+                            getLog().warn("元数据同步失败: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
+                            executionLogListener.publishLog(executionId, "[元数据] 同步失败: " + ddlInfo.tableName);
+                        }
+                    } catch (Exception syncEx) {
+                        getLog().error("元数据同步异常: {}.{}", ddlInfo.databaseName, ddlInfo.tableName, syncEx);
+                        executionLogListener.publishLog(executionId, "[元数据] 同步异常: " + syncEx.getMessage());
+                    }
+                }
+
+                if (hasResultSet) {
+                    ResultSet rs = stmt.getResultSet();
+                    columns = new ArrayList<>();
+                    int colCount = rs.getMetaData().getColumnCount();
+                    for (int c = 1; c <= colCount; c++) {
+                        columns.add(rs.getMetaData().getColumnLabel(c));
+                    }
+
+                    rows = new ArrayList<>();
+                    int rowCount = 0;
+                    while (rs.next() && rowCount < MAX_RESULT_ROWS) {
+                        List<String> row = new ArrayList<>();
+                        for (int c = 1; c <= colCount; c++) {
+                            String val = rs.getString(c);
+                            row.add(val != null ? val : "NULL");
+                        }
+                        rows.add(row);
+                        rowCount++;
+                    }
+                    affectedRows += rowCount;
+
+                    String datasourceName = context.getPrimaryDatasourceConfig().getDatasourceName();
+                    String defaultDatabase = context.getPrimaryDatasourceDatabaseName();
+
+                    SelectPermissionInfo permInfo = extractSelectPermissionInfo(sql, datasourceName, defaultDatabase);
+                    if (permInfo != null && permInfo.tableRef != null) {
+                        String dbName = permInfo.tableRef.databaseName != null ? permInfo.tableRef.databaseName : defaultDatabase;
+                        SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
+                                datasourceName, dbName, permInfo.tableRef.tableName);
+                        if (mergedPerm != null) {
+                            if (mergedPerm.getRowFilterSql() != null && !mergedPerm.getRowFilterSql().isBlank()) {
+                                int beforeSize = rows.size();
+                                rows = applyRowFilter(rows, columns, mergedPerm.getRowFilterSql());
+                                rowCount = rows.size();
+                                getLog().info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rowCount, mergedPerm.getRowFilterSql());
+                            }
+                            if (mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
+                                applyDataMasking(rows, columns, mergedPerm.getDataMaskingRule());
+                                getLog().info("已应用数据脱敏规则, 表: {}.{}", dbName, permInfo.tableRef.tableName);
+                            }
+                        }
+                    }
+
+                    executionLogListener.publishLog(executionId, "[结果] 查询返回 " + rowCount + " 行, " + colCount + " 列 (" +
+                            String.join(", ", columns) + ")");
+                } else {
+                    int affected = stmt.getUpdateCount();
+                    affectedRows += affected;
+                    executionLogListener.publishLog(executionId, "[结果] 影响行数: " + affected);
+                }
+            } catch (SecurityException e) {
+                getLog().error("SQL执行权限异常: {}", e.getMessage());
+                executionLogListener.publishLog(executionId, "[错误] " + e.getMessage());
+                long duration = System.currentTimeMillis() - startTime;
+                CodeExecutionResult failResult = CodeExecutionResult.failure(executionId, e.getMessage());
+                failResult.setStartTime(new java.util.Date(startTime));
+                failResult.setEndTime(new java.util.Date());
+                failResult.setDurationMs((int) duration);
+                return failResult;
+            } catch (Exception e) {
+                getLog().error("SQL执行失败: {}", e.getMessage());
+                executionLogListener.publishLog(executionId, "[错误] " + e.getMessage());
+                long duration = System.currentTimeMillis() - startTime;
+                CodeExecutionResult failResult = CodeExecutionResult.failure(executionId, e.getMessage());
+                failResult.setColumns(columns);
+                failResult.setRows(rows);
+                failResult.setAffectedRows(affectedRows);
+                failResult.setStartTime(new java.util.Date(startTime));
+                failResult.setEndTime(new java.util.Date());
+                failResult.setDurationMs((int) duration);
+                return failResult;
             }
 
             long duration = System.currentTimeMillis() - startTime;
 
-            boolean allSuccess = results.stream().allMatch(CodeExecutionResult.SqlResultItem::isSuccess);
-            long successCount = results.stream().filter(CodeExecutionResult.SqlResultItem::isSuccess).count();
-
-            CodeExecutionResult result;
-            if (allSuccess) {
-                String outputLog = sqlStatements.size() == 1
-                        ? results.get(0).getMessage()
-                        : "共" + sqlStatements.size() + "条SQL全部执行成功";
-                result = CodeExecutionResult.success(executionId, outputLog,
-                        lastQueryColumns, lastQueryRows, totalAffectedRows);
-            } else {
-                result = CodeExecutionResult.failure(executionId,
-                        "第" + (results.size()) + "条SQL执行失败: " + results.get(results.size() - 1).getMessage());
-                result.setColumns(lastQueryColumns);
-                result.setRows(lastQueryRows);
-                result.setAffectedRows(totalAffectedRows);
-            }
-            result.setResults(results);
+            CodeExecutionResult result = CodeExecutionResult.success(executionId, "执行成功",
+                    columns, rows, affectedRows);
+            getLog().info("📊 构建成功结果: executionId={}, columns={}, rows={}, affectedRows={}",
+                    executionId,
+                    columns != null ? columns.size() : 0,
+                    rows != null ? rows.size() : 0,
+                    affectedRows);
+            executionLogListener.publishLog(executionId, "[完成] 执行成功, 耗时" + duration + "ms");
             result.setStartTime(new java.util.Date(startTime));
             result.setEndTime(new java.util.Date());
             result.setDurationMs((int) duration);
@@ -238,7 +257,9 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
         } catch (Exception e) {
             getLog().error("{}执行失败", getEngineName(), e);
             long duration = System.currentTimeMillis() - startTime;
-            CodeExecutionResult result = CodeExecutionResult.failure(executionId, getEngineName() + "执行异常: " + e.getMessage());
+            String errMsg = getEngineName() + "执行异常: " + e.getMessage();
+            executionLogListener.publishLog(executionId, "[异常] " + errMsg);
+            CodeExecutionResult result = CodeExecutionResult.failure(executionId, errMsg);
             result.setStartTime(new java.util.Date(startTime));
             result.setEndTime(new java.util.Date());
             result.setDurationMs((int) duration);
@@ -252,80 +273,19 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
         }
     }
 
-    protected List<String> splitSqlStatements(String sql) {
-        List<String> statements = new ArrayList<>();
-        if (sql == null || sql.trim().isEmpty()) {
-            return statements;
-        }
-
-        StringBuilder current = new StringBuilder();
-        int length = sql.length();
-        int i = 0;
-
-        while (i < length) {
-            char ch = sql.charAt(i);
-
-            if (ch == '\'') {
-                current.append(ch);
-                i++;
-                while (i < length) {
-                    char inner = sql.charAt(i);
-                    current.append(inner);
-                    i++;
-                    if (inner == '\'') {
-                        if (i < length && sql.charAt(i) == '\'') {
-                            current.append(sql.charAt(i));
-                            i++;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            } else if (ch == '"') {
-                current.append(ch);
-                i++;
-                while (i < length) {
-                    char inner = sql.charAt(i);
-                    current.append(inner);
-                    i++;
-                    if (inner == '"') {
-                        break;
-                    }
-                }
-            } else if (ch == '-' && i + 1 < length && sql.charAt(i + 1) == '-') {
-                while (i < length && sql.charAt(i) != '\n') {
-                    i++;
-                }
-            } else if (ch == '/' && i + 1 < length && sql.charAt(i + 1) == '*') {
-                i += 2;
-                while (i + 1 < length && !(sql.charAt(i) == '*' && sql.charAt(i + 1) == '/')) {
-                    i++;
-                }
-                i += 2;
-            } else if (ch == ';') {
-                String trimmed = current.toString().trim();
-                if (!trimmed.isEmpty()) {
-                    statements.add(trimmed);
-                }
-                current = new StringBuilder();
-                i++;
-            } else {
-                current.append(ch);
-                i++;
-            }
-        }
-
-        String trimmed = current.toString().trim();
-        if (!trimmed.isEmpty()) {
-            statements.add(trimmed);
-        }
-
-        return statements;
-    }
-
     protected void executeSetting(Statement stmt, String settingSql) throws Exception {
         try {
             stmt.execute(settingSql);
+            // 消费所有残留结果，防止干扰后续SQL的ResultSet
+            while (true) {
+                ResultSet rs = stmt.getResultSet();
+                if (rs != null) {
+                    rs.close();
+                }
+                if ((stmt.getMoreResults() == false) && (stmt.getUpdateCount() == -1)) {
+                    break;
+                }
+            }
             getLog().debug("应用{}会话设置: {}", getEngineName(), settingSql);
         } catch (Exception e) {
             getLog().warn("应用{}会话设置失败: {}, 错误: {}", getEngineName(), settingSql, e.getMessage());
@@ -418,6 +378,13 @@ public abstract class AbstractJdbcExecutionStrategy implements ExecutionStrategy
         }
 
         try {
+            // 平台超级管理员直接拥有DDL权限
+            SysUser user = sysUserMapper.selectById(userId);
+            if (user != null && Integer.valueOf(1).equals(user.getIsAdmin())) {
+                getLog().debug("用户[{}]是平台超级管理员, 直接拥有DDL权限", userId);
+                return true;
+            }
+
             Long tenantId = sysTenantUserMapper.selectTenantIdByUserId(userId);
             List<Long> roleIds = tenantId != null ? sysTenantRoleMapper.selectRoleIdsByTenantId(tenantId) : null;
             if (roleIds == null || roleIds.isEmpty()) {

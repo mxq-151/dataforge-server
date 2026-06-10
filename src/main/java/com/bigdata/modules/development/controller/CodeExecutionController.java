@@ -75,9 +75,6 @@ public class CodeExecutionController {
 
             CodeExecutionResult result = codeExecutionService.executeCode(request, userId, username);
 
-            log.info("返回执行结果: executionId={}, success={}",
-                    result.getExecutionId(), result.isSuccess());
-
             return Result.success(result);
         } catch (BusinessException e) {
             return Result.error(e.getCode(), e.getMessage());
@@ -86,6 +83,104 @@ public class CodeExecutionController {
         } catch (Exception e) {
             log.error("代码执行接口异常", e);
             return Result.error("代码执行失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 提交任务（异步执行），立即返回 executionId
+     */
+    @PostMapping(value = "/submit", consumes = {MediaType.APPLICATION_JSON_VALUE, MediaType.MULTIPART_FORM_DATA_VALUE})
+    @AuditLog(module = "SQL执行", operation = "提交执行任务", targetType = "SQL")
+    public Result<CodeExecutionResult> submitTask(
+            @RequestPart(value = "request", required = false) CodeExecutionRequest request,
+            @RequestParam(value = "file", required = false) MultipartFile file) {
+        try {
+            Long userId = SecurityUtils.getCurrentUserId();
+            String username = SecurityUtils.getCurrentUsername();
+            if (userId == null) {
+                return Result.error(401, "未登录或登录已过期");
+            }
+
+            if (request == null) {
+                return Result.error(400, "请求参数不能为空");
+            }
+
+            if (file != null && !file.isEmpty()) {
+                String jarPath = saveUploadedJar(file, userId);
+                request.setUploadedJarPath(jarPath);
+                if (request.getFileName() == null || request.getFileName().trim().isEmpty()) {
+                    request.setFileName(file.getOriginalFilename());
+                }
+                log.info("JAR文件已上传: {}", jarPath);
+            }
+
+            validateExecuteRequest(request);
+            checkDatasourceAccess(request.getDatasources());
+
+            CodeExecutionResult result = codeExecutionService.submitCode(request, userId, username);
+
+            log.info("任务已提交: executionId={}", result.getExecutionId());
+
+            return Result.success(result);
+        } catch (BusinessException e) {
+            return Result.error(e.getCode(), e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return Result.error(400, e.getMessage());
+        } catch (Exception e) {
+            log.error("提交任务异常", e);
+            return Result.error("提交任务失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取执行结果
+     */
+    @GetMapping("/result/{executionId}")
+    public Result<CodeExecutionResult> getExecutionResult(@PathVariable String executionId) {
+        try {
+            Long userId = SecurityUtils.getCurrentUserId();
+            if (userId == null) {
+                return Result.error(401, "未登录或登录已过期");
+            }
+
+            if (executionId == null || executionId.isEmpty()) {
+                return Result.error(400, "executionId不能为空");
+            }
+
+            log.debug("查询执行结果: executionId={}", executionId);
+            CodeExecutionResult result = codeExecutionService.getResult(executionId);
+
+            return Result.success(result);
+        } catch (Exception e) {
+            log.error("查询执行结果异常: executionId={}", executionId, e);
+            return Result.error("查询执行结果失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取执行日志（增量拉取）
+     */
+    @GetMapping("/logs/{executionId}")
+    public Result<Map<String, Object>> getExecutionLogs(
+            @PathVariable String executionId,
+            @RequestParam(defaultValue = "0") int offset) {
+        try {
+            Long userId = SecurityUtils.getCurrentUserId();
+            if (userId == null) {
+                return Result.error(401, "未登录或登录已过期");
+            }
+
+            if (executionId == null || executionId.isEmpty()) {
+                return Result.error(400, "executionId不能为空");
+            }
+
+            log.debug("拉取执行日志: executionId={}, offset={}", executionId, offset);
+            Map<String, Object> logResult = codeExecutionService.getExecutionLogs(executionId, offset);
+
+            return Result.success(logResult);
+        } catch (Exception e) {
+            log.error("拉取执行日志异常: executionId={}", executionId, e);
+            return Result.error("拉取执行日志失败: " + e.getMessage());
         }
     }
 
@@ -108,22 +203,6 @@ public class CodeExecutionController {
         } catch (Exception e) {
             log.error("取消任务接口异常: executionId={}", executionId, e);
             return Result.error("取消任务失败: " + e.getMessage());
-        }
-    }
-
-    @GetMapping("/running")
-    public Result<List<Map<String, Object>>> getRunningProcesses() {
-        try {
-            Long userId = SecurityUtils.getCurrentUserId();
-            if (userId == null) {
-                return Result.error(401, "未登录或登录已过期");
-            }
-
-            List<Map<String, Object>> processes = codeExecutionService.getRunningProcesses(userId);
-            return Result.success(processes);
-        } catch (Exception e) {
-            log.error("获取运行中任务列表异常", e);
-            return Result.error("获取运行中任务列表失败: " + e.getMessage());
         }
     }
 

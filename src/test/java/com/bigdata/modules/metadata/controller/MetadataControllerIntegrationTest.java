@@ -81,7 +81,7 @@ class MetadataControllerIntegrationTest {
                 new SimpleGrantedAuthority("ROLE_ADMIN")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), authorities, true);
+                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -92,7 +92,7 @@ class MetadataControllerIntegrationTest {
                 new SimpleGrantedAuthority("ROLE_USER")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                userId, username, tenantId, Arrays.asList("ROLE_USER"), authorities, true);
+                userId, username, tenantId, Arrays.asList("ROLE_USER"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);

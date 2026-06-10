@@ -48,6 +48,10 @@ public class SecurityUtils {
     }
 
     public static boolean isAdmin() {
+        CustomUserDetails userDetails = getCurrentUserDetails();
+        if (userDetails != null && userDetails.isSuperAdmin()) {
+            return true;
+        }
         List<String> roles = getCurrentUserRoles();
         return roles != null && roles.stream()
                 .anyMatch("ROLE_SUPER_ADMIN"::equalsIgnoreCase);

@@ -71,7 +71,7 @@ class UserControllerIntegrationTest {
         }
 
         CustomUserDetails userDetails = new CustomUserDetails(
-                userId, username, null, roles, authorities, true);
+                userId, username, null, roles, false, authorities, true);
 
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);

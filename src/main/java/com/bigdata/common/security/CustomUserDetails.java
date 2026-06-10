@@ -15,6 +15,7 @@ public class CustomUserDetails implements UserDetails {
     private String password;
     private Long tenantId;
     private List<String> roles;
+    private boolean superAdmin;
     private Collection<? extends GrantedAuthority> authorities;
     private boolean enabled;
 
@@ -22,11 +23,13 @@ public class CustomUserDetails implements UserDetails {
     }
 
     public CustomUserDetails(Long userId, String username, Long tenantId, List<String> roles,
+                             boolean superAdmin,
                              Collection<? extends GrantedAuthority> authorities, boolean enabled) {
         this.userId = userId;
         this.username = username;
         this.tenantId = tenantId;
         this.roles = roles;
+        this.superAdmin = superAdmin;
         this.authorities = authorities;
         this.enabled = enabled;
     }
@@ -53,6 +56,14 @@ public class CustomUserDetails implements UserDetails {
 
     public void setRoles(List<String> roles) {
         this.roles = roles;
+    }
+
+    public boolean isSuperAdmin() {
+        return superAdmin;
+    }
+
+    public void setSuperAdmin(boolean superAdmin) {
+        this.superAdmin = superAdmin;
     }
 
     @Override

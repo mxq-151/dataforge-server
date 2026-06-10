@@ -74,7 +74,7 @@ class DataAccessPermissionRealDataTest {
         }
 
         CustomUserDetails userDetails = new CustomUserDetails(
-                userId, username, tenantId, roles, authorities, true);
+                userId, username, tenantId, roles, false, authorities, true);
 
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);

@@ -87,7 +87,7 @@ public class SysUserService implements UserDetailsService {
         }
 
         String role = String.join(",", roleSet);
-        return jwtTokenUtils.generateToken(user.getId(), user.getUsername(), role, tenantId);
+        return jwtTokenUtils.generateToken(user.getId(), user.getUsername(), role, tenantId, isSuperAdmin);
     }
 
     @Override

@@ -36,7 +36,7 @@ class JwtTokenUtilsRealDataTest {
         void testGenerateValidToken_WithAllClaims() {
             System.out.println("\n=== 场景1.1: 生成包含完整Claims的Token ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
 
             assertNotNull(token, "生成的token不应为null");
             assertFalse(token.isEmpty(), "token不应为空字符串");
@@ -51,7 +51,7 @@ class JwtTokenUtilsRealDataTest {
         void testGenerateValidToken_WithoutTenantId() {
             System.out.println("\n=== 场景1.2: 生成不含tenantId的Token ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, null);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, null, false);
 
             assertNotNull(token, "token不应为null");
             assertTrue(jwtTokenUtils.validateToken(token), "token应有效");
@@ -67,7 +67,7 @@ class JwtTokenUtilsRealDataTest {
         void testValidateToken_ValidToken_ReturnsTrue() {
             System.out.println("\n=== 场景1.3: 验证有效Token ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
 
             boolean isValid = jwtTokenUtils.validateToken(token);
             assertTrue(isValid, "有效token应返回true");
@@ -80,7 +80,7 @@ class JwtTokenUtilsRealDataTest {
         void testValidateToken_TamperedToken_ReturnsFalse() {
             System.out.println("\n=== 场景1.4: 验证被篡改的Token ===");
 
-            String validToken = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String validToken = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
 
             String[] parts = validToken.split("\\.");
             assertEquals(3, parts.length, "JWT应有3部分");
@@ -120,7 +120,7 @@ class JwtTokenUtilsRealDataTest {
         void testGetUserIdFromToken() {
             System.out.println("\n=== 场景2.1: 提取userId ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             Long extractedUserId = jwtTokenUtils.getUserIdFromToken(token);
 
             assertNotNull(extractedUserId, "提取的userId不应为null");
@@ -135,7 +135,7 @@ class JwtTokenUtilsRealDataTest {
         void testGetUsernameFromToken() {
             System.out.println("\n=== 场景2.2: 提取username ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             String extractedUsername = jwtTokenUtils.getUsernameFromToken(token);
 
             assertNotNull(extractedUsername, "提取的username不应为null");
@@ -150,7 +150,7 @@ class JwtTokenUtilsRealDataTest {
         void testGetRoleFromToken() {
             System.out.println("\n=== 场景2.3: 提取role（多角色）===" );
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             String extractedRole = jwtTokenUtils.getRoleFromToken(token);
 
             assertNotNull(extractedRole, "提取的role不应为null");
@@ -167,7 +167,7 @@ class JwtTokenUtilsRealDataTest {
         void testGetTenantIdFromToken_WithLongValue() {
             System.out.println("\n=== 场景2.4: 提取tenantId (Long类型) ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             Long extractedTenantId = jwtTokenUtils.getTenantIdFromToken(token);
 
             assertNotNull(extractedTenantId, "提取的tenantId不应为null");
@@ -183,7 +183,7 @@ class JwtTokenUtilsRealDataTest {
         void testGetTokenClaims_CompleteObject() {
             System.out.println("\n=== 场景2.5: 获取完整Claims对象 ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             Claims claims = jwtTokenUtils.getTokenClaims(token);
 
             assertNotNull(claims, "Claims对象不应为null");
@@ -221,7 +221,7 @@ class JwtTokenUtilsRealDataTest {
             System.out.println("\n=== 场景3.1: Token签发时间验证 ===");
 
             long beforeGenerate = System.currentTimeMillis();
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             long afterGenerate = System.currentTimeMillis();
 
             Claims claims = jwtTokenUtils.getTokenClaims(token);
@@ -243,7 +243,7 @@ class JwtTokenUtilsRealDataTest {
         void testTokenExpiration_AfterIssuedAt() {
             System.out.println("\n=== 场景3.2: Token过期时间 > 签发时间 ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             Claims claims = jwtTokenUtils.getTokenClaims(token);
 
             Date issuedAt = claims.getIssuedAt();
@@ -267,13 +267,13 @@ class JwtTokenUtilsRealDataTest {
         void testMultipleTokens_HaveDifferentIssuedAt() {
             System.out.println("\n=== 场景3.3: 多次生成Token的签发时间不同 ===");
 
-            String token1 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token1 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
             try {
                 Thread.sleep(1100); // 确保跨秒(JWT的iat精度为秒级)
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            String token2 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token2 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
 
             Claims claims1 = jwtTokenUtils.getTokenClaims(token1);
             Claims claims2 = jwtTokenUtils.getTokenClaims(token2);
@@ -297,8 +297,8 @@ class JwtTokenUtilsRealDataTest {
         void testDifferentUsers_GenerateDifferentTokens() {
             System.out.println("\n=== 场景4.1: 不同用户生成不同Token ===");
 
-            String token1 = jwtTokenUtils.generateToken(1001L, "user1", "ROLE_USER", 2001L);
-            String token2 = jwtTokenUtils.generateToken(1002L, "user2", "ROLE_ADMIN", 2002L);
+            String token1 = jwtTokenUtils.generateToken(1001L, "user1", "ROLE_USER", 2001L, false);
+            String token2 = jwtTokenUtils.generateToken(1002L, "user2", "ROLE_ADMIN", 2002L, false);
 
             assertNotEquals(token1, token2, "不同用户应生成不同的Token");
 
@@ -321,8 +321,8 @@ class JwtTokenUtilsRealDataTest {
         void testSameUserSameParams_MultipleGenerations() {
             System.out.println("\n=== 场景4.2: 同一用户多次生成Token ===");
 
-            String token1 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
-            String token2 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token1 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
+            String token2 = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
 
             Claims claims1 = jwtTokenUtils.getTokenClaims(token1);
             Claims claims2 = jwtTokenUtils.getTokenClaims(token2);
@@ -347,7 +347,7 @@ class JwtTokenUtilsRealDataTest {
             String specialUsername = "张三@#$%";
             String specialRole = "ROLE_用户,ROLE_管理员";
 
-            String token = jwtTokenUtils.generateToken(testUserId, specialUsername, specialRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, specialUsername, specialRole, testTenantId, false);
 
             assertTrue(jwtTokenUtils.validateToken(token), "特殊字符Token应有效");
 
@@ -371,7 +371,7 @@ class JwtTokenUtilsRealDataTest {
             Long largeUserId = Long.MAX_VALUE / 1000;  // 约9百万亿
             Long largeTenantId = Long.MAX_VALUE / 1000;
 
-            String token = jwtTokenUtils.generateToken(largeUserId, "big_user", "ROLE_BIG", largeTenantId);
+            String token = jwtTokenUtils.generateToken(largeUserId, "big_user", "ROLE_BIG", largeTenantId, false);
 
             assertTrue(jwtTokenUtils.validateToken(token), "大数值Token应有效");
 
@@ -404,7 +404,7 @@ class JwtTokenUtilsRealDataTest {
             }
             String veryLongRole = longRole.substring(0, longRole.length() - 1);
 
-            String token = jwtTokenUtils.generateToken(testUserId, veryLongUsername, veryLongRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, veryLongUsername, veryLongRole, testTenantId, false);
 
             assertTrue(jwtTokenUtils.validateToken(token), "极长字符串Token应有效");
 
@@ -429,7 +429,7 @@ class JwtTokenUtilsRealDataTest {
         void testSigningAlgorithm_IsHmacSha() {
             System.out.println("\n=== 场景5.1: 签名算法验证 ===");
 
-            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String token = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
 
             String[] parts = token.split("\\.");
             assertEquals(3, parts.length, "JWT应有3部分");
@@ -445,7 +445,7 @@ class JwtTokenUtilsRealDataTest {
         void testCannotForgeWithDifferentKey() {
             System.out.println("\n=== 场景5.2: Token防伪造验证 ===");
 
-            String validToken = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId);
+            String validToken = jwtTokenUtils.generateToken(testUserId, testUsername, testRole, testTenantId, false);
 
             SecretKey differentKey = Keys.hmacShaKeyFor(
                     "completely-different-secret-key-for-testing".getBytes(StandardCharsets.UTF_8));

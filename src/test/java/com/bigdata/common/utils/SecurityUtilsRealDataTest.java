@@ -49,6 +49,7 @@ class SecurityUtilsRealDataTest {
                 TEST_USERNAME,
                 TEST_TENANT_ID,
                 TEST_ROLES,
+                false,
                 Arrays.asList(
                         new SimpleGrantedAuthority("ROLE_USER"),
                         new SimpleGrantedAuthority("ROLE_ADMIN")
@@ -102,6 +103,7 @@ class SecurityUtilsRealDataTest {
                         "user_" + expectedId,
                         100L,
                         Collections.singletonList("ROLE_USER"),
+                        false,
                         Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
                         true
                 );
@@ -172,6 +174,7 @@ class SecurityUtilsRealDataTest {
                         specialUsername,
                         100L,
                         Collections.emptyList(),
+                        false,
                         Collections.emptyList(),
                         true
                 );
@@ -316,6 +319,7 @@ class SecurityUtilsRealDataTest {
                                 username,
                                 tenantId,
                                 Collections.singletonList("ROLE_USER"),
+                                false,
                                 Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
                                 true
                         );
@@ -433,6 +437,7 @@ class SecurityUtilsRealDataTest {
                     "multi_role_user",
                     100L,
                     roles,
+                    false,
                     Arrays.asList(
                             new SimpleGrantedAuthority("ROLE_USER"),
                             new SimpleGrantedAuthority("ROLE_ADMIN"),
@@ -467,6 +472,7 @@ class SecurityUtilsRealDataTest {
                         "tenant_user",
                         expectedTenantId,
                         Collections.singletonList("ROLE_USER"),
+                        false,
                         Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
                         true
                 );
@@ -491,6 +497,7 @@ class SecurityUtilsRealDataTest {
                     "admin",
                     100L,
                     Arrays.asList("ROLE_USER", "ROLE_ADMIN"),
+                    false,
                     Arrays.asList(
                             new SimpleGrantedAuthority("ROLE_USER"),
                             new SimpleGrantedAuthority("ROLE_ADMIN")
@@ -506,6 +513,7 @@ class SecurityUtilsRealDataTest {
                     "normal_user",
                     100L,
                     Collections.singletonList("ROLE_USER"),
+                    false,
                     Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
                     true
             );
@@ -518,6 +526,7 @@ class SecurityUtilsRealDataTest {
                     "case_admin",
                     100L,
                     Collections.singletonList("role_admin"),
+                    false,
                     Collections.singletonList(new SimpleGrantedAuthority("role_admin")),
                     true
             );
@@ -566,6 +575,7 @@ class SecurityUtilsRealDataTest {
                     "no_role_user",
                     100L,
                     Collections.emptyList(),
+                    false,
                     Collections.emptyList(),
                     true
             );
@@ -600,6 +610,7 @@ class SecurityUtilsRealDataTest {
                         "extreme_user",
                         extremeValue,
                         Collections.singletonList("ROLE_USER"),
+                        false,
                         Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
                         true
                 );
@@ -626,6 +637,7 @@ class SecurityUtilsRealDataTest {
                         "switch_user_" + i,
                         (long) (i * 10),
                         Collections.singletonList("ROLE_USER"),
+                        false,
                         Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
                         true
                 );
@@ -685,6 +697,7 @@ class SecurityUtilsRealDataTest {
                                     "writer_" + writerId + "_" + j,
                                     (long) (writerId * 100),
                                     Collections.singletonList("ROLE_USER"),
+                                    false,
                                     Collections.singletonList(new SimpleGrantedAuthority("ROLE_USER")),
                                     true
                             );

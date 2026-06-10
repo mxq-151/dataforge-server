@@ -12,12 +12,16 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class FlinkExecutionStrategy implements ExecutionStrategy {
@@ -30,9 +34,12 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     @Autowired
     private ProcessManager processManager;
 
+    @Autowired
+    private ExecutionLogListener executionLogListener;
+
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
-        String executionId = UUID.randomUUID().toString().replace("-", "");
+        String executionId = context.getExecutionId();
         long startTime = System.currentTimeMillis();
 
         try {
@@ -71,16 +78,38 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
         if (context.isJarExecutionMode() || context.getCodeType() == CodeType.PYTHON) {
             Process process = pb.start();
             String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "flink");
+
+            // 推送进程启动日志
+            executionLogListener.publishLog(executionId, "[Flink] 进程已启动, PID=" + process.pid());
+
             StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                    log.debug("Flink输出: {}", line);
+            CountDownLatch readLatch = new CountDownLatch(1);
+
+            Thread readerThread = new Thread(() -> {
+                log.info("📖 开始读取Flink进程输出: executionId={}, pid={}", executionId, process.pid());
+                int lineCount = 0;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        output.append(line).append("\n");
+                        lineCount++;
+                        executionLogListener.publishLog(executionId, line);
+                    }
+                } catch (Exception e) {
+                    log.error("读取Flink输出异常", e);
+                } finally {
+                    log.info("📖 Flink进程输出读取完毕: executionId={}, 共{}行, output长度={}",
+                            executionId, lineCount, output.length());
+                    readLatch.countDown();
                 }
-            }
+            }, "flink-output-reader-" + executionId);
+            readerThread.setDaemon(true);
+            readerThread.start();
 
             int exitCode = process.waitFor();
+            log.info("⏳ Flink进程已退出: exitCode={}, 等待读线程排空...", exitCode);
+            readLatch.await(5, TimeUnit.SECONDS);
             processManager.unregister(registeredId);
 
             if (exitCode == 0) {
@@ -103,16 +132,37 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
                 writer.flush();
             }
 
+            // 推送进程启动日志
+            executionLogListener.publishLog(executionId, "[Flink] stdin模式进程已启动, PID=" + process.pid());
+
             StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                    log.debug("Flink输出: {}", line);
+            CountDownLatch readLatch = new CountDownLatch(1);
+
+            Thread readerThread = new Thread(() -> {
+                log.info("📖 开始读取Flink stdin模式输出: executionId={}, pid={}", executionId, process.pid());
+                int lineCount = 0;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        output.append(line).append("\n");
+                        lineCount++;
+                        executionLogListener.publishLog(executionId, line);
+                    }
+                } catch (Exception e) {
+                    log.error("读取Flink stdin模式输出异常", e);
+                } finally {
+                    log.info("📖 Flink stdin模式输出读取完毕: executionId={}, 共{}行, output长度={}",
+                            executionId, lineCount, output.length());
+                    readLatch.countDown();
                 }
-            }
+            }, "flink-stdin-reader-" + executionId);
+            readerThread.setDaemon(true);
+            readerThread.start();
 
             int exitCode = process.waitFor();
+            log.info("⏳ Flink stdin进程已退出: exitCode={}, 等待读线程排空...", exitCode);
+            readLatch.await(5, TimeUnit.SECONDS);
             processManager.unregister(registeredId);
 
             if (exitCode == 0) {
@@ -142,17 +192,38 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
             writer.flush();
         }
 
-        StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
-                log.debug("Flink SQL输出: {}", line);
-            }
-        }
+        // 推送进程启动日志
+        executionLogListener.publishLog(executionId, "[Flink SQL] 进程已启动, PID=" + process.pid());
 
-        int exitCode = process.waitFor();
-        processManager.unregister(registeredId);
+        StringBuilder output = new StringBuilder();
+            CountDownLatch readLatch2 = new CountDownLatch(1);
+
+            Thread readerThread2 = new Thread(() -> {
+                log.info("📖 开始读取Flink SQL进程输出: executionId={}, pid={}", executionId, process.pid());
+                int lineCount = 0;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        output.append(line).append("\n");
+                        lineCount++;
+                        executionLogListener.publishLog(executionId, line);
+                    }
+                } catch (Exception e) {
+                    log.error("读取Flink SQL输出异常", e);
+                } finally {
+                    log.info("📖 Flink SQL进程输出读取完毕: executionId={}, 共{}行, output长度={}",
+                            executionId, lineCount, output.length());
+                    readLatch2.countDown();
+                }
+            }, "flink-sql-output-reader-" + executionId);
+            readerThread2.setDaemon(true);
+            readerThread2.start();
+
+            int exitCode = process.waitFor();
+            log.info("⏳ Flink SQL进程已退出: exitCode={}, 等待读线程排空...", exitCode);
+            readLatch2.await(5, TimeUnit.SECONDS);
+            processManager.unregister(registeredId);
 
         if (exitCode == 0) {
             return CodeExecutionResult.success(executionId, output.toString());

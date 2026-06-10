@@ -11,12 +11,16 @@ import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 public class SparkExecutionStrategy implements ExecutionStrategy {
@@ -29,9 +33,12 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     @Autowired
     private ProcessManager processManager;
 
+    @Autowired
+    private ExecutionLogListener executionLogListener;
+
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
-        String executionId = UUID.randomUUID().toString().replace("-", "");
+        String executionId = context.getExecutionId();
         long startTime = System.currentTimeMillis();
 
         try {
@@ -51,16 +58,40 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
             String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "spark");
 
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                    log.debug("Spark输出: {}", line);
-                }
-            }
+            // 推送进程启动日志，确保 buffer 中立即有内容
+            executionLogListener.publishLog(executionId, "[Spark] 进程已启动, PID=" + process.pid());
 
+            StringBuilder output = new StringBuilder();
+            CountDownLatch readLatch = new CountDownLatch(1);
+
+            // 异步线程：实时读取进程输出并发布日志
+            Thread readerThread = new Thread(() -> {
+                log.info("📖 开始读取Spark进程输出: executionId={}, pid={}", executionId, process.pid());
+                int lineCount = 0;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        output.append(line).append("\n");
+                        lineCount++;
+                        executionLogListener.publishLog(executionId, line);
+                    }
+                } catch (Exception e) {
+                    log.error("读取Spark输出异常", e);
+                } finally {
+                    log.info("📖 Spark进程输出读取完毕: executionId={}, 共{}行, output长度={}",
+                            executionId, lineCount, output.length());
+                    readLatch.countDown();
+                }
+            }, "spark-output-reader-" + executionId);
+            readerThread.setDaemon(true);
+            readerThread.start();
+
+            // 主线程：等待进程结束，然后等待读线程排空剩余缓冲区
             int exitCode = process.waitFor();
+            log.info("⏳ Spark进程已退出: exitCode={}, 等待读线程排空...", exitCode);
+            readLatch.await(5, TimeUnit.SECONDS);
+
             long duration = System.currentTimeMillis() - startTime;
 
             processManager.unregister(registeredId);

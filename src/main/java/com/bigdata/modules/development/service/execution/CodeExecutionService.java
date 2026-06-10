@@ -8,17 +8,25 @@ import com.bigdata.modules.devops.service.DatasourceConfigService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Service
 public class CodeExecutionService {
 
     private static final Logger log = LoggerFactory.getLogger(CodeExecutionService.class);
+
+    private static final ExecutorService executorService = Executors.newCachedThreadPool();
+
+    private final ConcurrentHashMap<String, CodeExecutionResult> resultCache = new ConcurrentHashMap<>();
 
     @Autowired
     private ExecutionStrategyFactory strategyFactory;
@@ -29,7 +37,12 @@ public class CodeExecutionService {
     @Autowired
     private ProcessManager processManager;
 
-    
+    @Autowired
+    private ExecutionLogListener executionLogListener;
+
+    /**
+     * 同步执行代码（兼容旧接口）
+     */
     public CodeExecutionResult executeCode(CodeExecutionRequest request, Long submitBy, String submitByName) {
         log.info("🚀 开始执行代码任务");
         log.info("   - 代码类型: {}", request.getCodeType());
@@ -38,10 +51,11 @@ public class CodeExecutionService {
         log.info("   - 代码长度: {} 字符", request.getCodeContent() != null ? request.getCodeContent().length() : 0);
         log.info("   - 提交人: {} ({})", submitByName, submitBy);
 
-        CodeExecutionContext context = buildContext(request, submitBy, submitByName);
-        validateContext(context);
+        String executionId = generateExecutionId();
 
-        DevScriptExecution executionRecord = createExecutionRecord(context);
+        CodeExecutionContext context = buildContext(request, submitBy, submitByName);
+        context.setExecutionId(executionId);
+        validateContext(context);
 
         try {
             ExecutionStrategy strategy = strategyFactory.getStrategy(context.getEngineType(), context.getCodeType());
@@ -50,8 +64,11 @@ public class CodeExecutionService {
                         ", codeType=" + context.getCodeType());
             }
 
-            log.info("📋 使用执行策略: {}", strategy.getClass().getSimpleName());
+            log.info("📋 使用执行策略: {}, executionId={}, context.executionId={}",
+                    strategy.getClass().getSimpleName(), executionId, context.getExecutionId());
             CodeExecutionResult result = strategy.execute(context);
+            result.setExecutionId(executionId);
+            resultCache.put(executionId, result);
 
             log.info("✅ 代码执行完成: engine={}, status={}, duration={}ms",
                     request.getEngineType(),
@@ -60,11 +77,99 @@ public class CodeExecutionService {
             return result;
         } catch (BusinessException e) {
             log.error("❌ 代码执行业务异常: {}", e.getMessage());
-            return CodeExecutionResult.failure(executionRecord.getExecutionId(), e.getMessage());
+            CodeExecutionResult failResult = CodeExecutionResult.failure(executionId, e.getMessage());
+            resultCache.put(executionId, failResult);
+            return failResult;
         } catch (Exception e) {
             log.error("💥 代码执行系统异常", e);
-            return CodeExecutionResult.failure(executionRecord.getExecutionId(), "系统异常: " + e.getMessage());
+            CodeExecutionResult failResult = CodeExecutionResult.failure(executionId, "系统异常: " + e.getMessage());
+            resultCache.put(executionId, failResult);
+            return failResult;
         }
+    }
+
+    /**
+     * 提交任务（异步执行），立即返回 executionId
+     */
+    public CodeExecutionResult submitCode(CodeExecutionRequest request, Long submitBy, String submitByName) {
+        log.info("📤 提交代码任务");
+        log.info("   - 代码类型: {}", request.getCodeType());
+        log.info("   - 引擎类型: {}", request.getEngineType());
+        log.info("   - 提交人: {} ({})", submitByName, submitBy);
+
+        CodeExecutionContext context = buildContext(request, submitBy, submitByName);
+        validateContext(context);
+
+        String executionId = generateExecutionId();
+        context.setExecutionId(executionId);
+
+        ExecutionStrategy strategy = strategyFactory.getStrategy(context.getEngineType(), context.getCodeType());
+        if (strategy == null) {
+            throw new BusinessException("未找到匹配的执行策略: engine=" + context.getEngineType() +
+                    ", codeType=" + context.getCodeType());
+        }
+
+        CodeExecutionResult submitted = CodeExecutionResult.submitted(executionId, "任务已提交");
+        resultCache.put(executionId, submitted);
+
+        log.info("📋 使用执行策略: {}, executionId={}", strategy.getClass().getSimpleName(), executionId);
+
+        final String finalExecutionId = executionId;
+        // 传播 SecurityContext 到异步线程
+        executorService.submit(() -> {
+            try {
+                CodeExecutionResult result = strategy.execute(context);
+                result.setExecutionId(finalExecutionId);
+                resultCache.put(finalExecutionId, result);
+            } catch (BusinessException e) {
+                log.error("❌ 异步执行业务异常: executionId={}, error={}", finalExecutionId, e.getMessage());
+                resultCache.put(finalExecutionId,
+                        CodeExecutionResult.failure(finalExecutionId, e.getMessage()));
+            } catch (Exception e) {
+                log.error("💥 异步执行系统异常: executionId={}", finalExecutionId, e);
+                resultCache.put(finalExecutionId,
+                        CodeExecutionResult.failure(finalExecutionId, "系统异常: " + e.getMessage()));
+            } finally {
+                SecurityContextHolder.clearContext();
+            }
+        });
+
+        return submitted;
+    }
+
+    /**
+     * 获取执行结果
+     */
+    public CodeExecutionResult getResult(String executionId) {
+        CodeExecutionResult result = resultCache.get(executionId);
+        if (result == null) {
+            return CodeExecutionResult.failure(executionId, "任务不存在或已过期: " + executionId);
+        }
+        return result;
+    }
+
+    /**
+     * 获取执行日志（增量拉取）
+     */
+    public Map<String, Object> getExecutionLogs(String executionId, int offset) {
+        List<String> logs = executionLogListener.pullLogs(executionId, offset);
+        int totalCount = executionLogListener.getLogCount(executionId);
+        int nextOffset = offset + logs.size();
+
+        CodeExecutionResult result = resultCache.get(executionId);
+        String status = (result != null) ? result.getStatus() : "UNKNOWN";
+        boolean isComplete = result != null && !"RUNNING".equals(result.getStatus());
+
+        Map<String, Object> logResult = new ConcurrentHashMap<>();
+        logResult.put("executionId", executionId);
+        logResult.put("status", status);
+        logResult.put("logs", logs);
+        logResult.put("offset", offset);
+        logResult.put("nextOffset", nextOffset);
+        logResult.put("totalCount", totalCount);
+        logResult.put("isComplete", isComplete);
+
+        return logResult;
     }
 
     private CodeExecutionContext buildContext(CodeExecutionRequest request, Long submitBy, String submitByName) {
