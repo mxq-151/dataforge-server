@@ -396,6 +396,13 @@
             <version>1.13.1</version>
         </dependency>
 
+        <!-- Source: https://mvnrepository.com/artifact/commons-collections/commons-collections -->
+<dependency>
+    <groupId>commons-collections</groupId>
+    <artifactId>commons-collections</artifactId>
+    <version>3.2.2</version>
+</dependency>
+
         <!-- Apache ORC (nohive: 使用shaded的hive-storage-api，避免依赖完整Hive) -->
         <dependency>
             <groupId>org.apache.orc</groupId>

@@ -16,6 +16,7 @@ public class ProcessManager {
     private static final Logger log = LoggerFactory.getLogger(ProcessManager.class);
 
     private final ConcurrentHashMap<String, ManagedProcess> processMap = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ManagedCancellable> cancellableMap = new ConcurrentHashMap<>();
 
     public String registerProcess(Process process, Long userId, String engineType) {
         String executionId = generateExecutionId();
@@ -33,7 +34,42 @@ public class ProcessManager {
         return executionId;
     }
 
+    /**
+     * 注册可取消的任务（用于非Process/Statement类型的资源，如REST API调用）
+     * @param cancelTask 取消时执行的回调
+     * @param userId 用户ID
+     * @param engineType 引擎类型
+     * @return 注册ID
+     */
+    public String registerCancellable(Runnable cancelTask, Long userId, String engineType) {
+        String executionId = generateExecutionId();
+        ManagedCancellable mc = new ManagedCancellable(executionId, cancelTask, userId, engineType);
+        cancellableMap.put(executionId, mc);
+        log.info("注册可取消任务: executionId={}, userId={}, engine={}", executionId, userId, engineType);
+        return executionId;
+    }
+
     public boolean cancel(String executionId, Long userId) {
+        // 先检查可取消任务
+        ManagedCancellable mc = cancellableMap.get(executionId);
+        if (mc != null) {
+            if (userId != null && !userId.equals(mc.getUserId())) {
+                log.warn("用户无权取消此任务: executionId={}, requestUserId={}, ownerUserId={}",
+                        executionId, userId, mc.getUserId());
+                return false;
+            }
+            try {
+                mc.getCancelTask().run();
+                log.info("已执行取消回调: executionId={}", executionId);
+                cancellableMap.remove(executionId);
+                return true;
+            } catch (Exception e) {
+                log.error("取消任务异常: executionId={}", executionId, e);
+                return false;
+            }
+        }
+
+        // 再检查进程/Statement
         ManagedProcess mp = processMap.get(executionId);
         if (mp == null) {
             log.warn("未找到执行任务: executionId={}", executionId);
@@ -74,8 +110,9 @@ public class ProcessManager {
 
     public void unregister(String executionId) {
         ManagedProcess removed = processMap.remove(executionId);
-        if (removed != null) {
-            log.debug("注销进程: executionId={}", executionId);
+        ManagedCancellable removedC = cancellableMap.remove(executionId);
+        if (removed != null || removedC != null) {
+            log.debug("注销任务: executionId={}", executionId);
         }
     }
 
@@ -145,6 +182,25 @@ public class ProcessManager {
         public String getExecutionId() { return executionId; }
         public Process getProcess() { return process; }
         public Statement getStatement() { return statement; }
+        public Long getUserId() { return userId; }
+        public String getEngineType() { return engineType; }
+    }
+
+    private static class ManagedCancellable {
+        private final String executionId;
+        private final Runnable cancelTask;
+        private final Long userId;
+        private final String engineType;
+
+        public ManagedCancellable(String executionId, Runnable cancelTask, Long userId, String engineType) {
+            this.executionId = executionId;
+            this.cancelTask = cancelTask;
+            this.userId = userId;
+            this.engineType = engineType;
+        }
+
+        public String getExecutionId() { return executionId; }
+        public Runnable getCancelTask() { return cancelTask; }
         public Long getUserId() { return userId; }
         public String getEngineType() { return engineType; }
     }
