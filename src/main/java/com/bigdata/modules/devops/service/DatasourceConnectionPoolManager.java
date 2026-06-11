@@ -2,6 +2,7 @@ package com.bigdata.modules.devops.service;
 
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.system.entity.SysTenant;
@@ -52,6 +53,8 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
     }
 
     public Connection getConnection(Long datasourceId) throws SQLException {
+        DatasourceConfig config = getDatasourceConfig(datasourceId);
+        ensureJdbcType(config);
         HikariDataSource pool = getOrCreatePool(datasourceId);
         return pool.getConnection();
     }
@@ -61,14 +64,17 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
             return getConnection(datasourceId);
         }
 
+        DatasourceConfig config = getDatasourceConfig(datasourceId);
+        ensureJdbcType(config);
+
         Long userId = SecurityUtils.getCurrentUserId();
         String poolKey = buildPoolKey(userId, datasourceId, databaseName);
         HikariDataSource pool = poolMapWithDb.computeIfAbsent(poolKey, key -> {
             try {
-                DatasourceConfig config = getDatasourceConfig(datasourceId);
+                DatasourceConfig rawConfig = getDatasourceConfig(datasourceId);
                 DatasourceConfig configWithDb = new DatasourceConfig();
-                org.springframework.beans.BeanUtils.copyProperties(config, configWithDb);
-                configWithDb.setUrl(buildUrlWithDatabase(config.getUrl(), config.getDatasourceType(), databaseName));
+                org.springframework.beans.BeanUtils.copyProperties(rawConfig, configWithDb);
+                configWithDb.setUrl(buildUrlWithDatabase(rawConfig.getUrl(), rawConfig.getDatasourceType(), databaseName));
                 HikariDataSource ds = createPoolFromConfig(configWithDb);
                 ds.setPoolName("ds-" + userId + "-" + datasourceId + "-" + databaseName);
                 return ds;
@@ -158,11 +164,22 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
     }
 
     public HikariDataSource getOrCreatePool(Long datasourceId) {
+        DatasourceConfig config = getDatasourceConfig(datasourceId);
+        if (config.getConnectionType() != null && !config.getConnectionType().isJdbcBased()) {
+            log.debug("数据源[{}]连接方式为{}，跳过JDBC连接池创建", datasourceId, config.getConnectionType());
+            return null;
+        }
         return poolMap.computeIfAbsent(datasourceId, this::createPool);
     }
 
     public void refreshPool(Long datasourceId) {
         synchronized (this) {
+            DatasourceConfig config = getDatasourceConfig(datasourceId);
+            if (config.getConnectionType() != null && !config.getConnectionType().isJdbcBased()) {
+                log.debug("数据源[{}]连接方式为{}，跳过JDBC连接池刷新", datasourceId, config.getConnectionType());
+                return;
+            }
+
             HikariDataSource oldPool = poolMap.remove(datasourceId);
             if (oldPool != null && !oldPool.isClosed()) {
                 oldPool.close();
@@ -408,6 +425,27 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
             throw new RuntimeException("数据源不存在: id=" + datasourceId);
         }
         return config;
+    }
+
+    /**
+     * 确保数据源是JDBC连接方式，否则抛出异常
+     */
+    private void ensureJdbcType(DatasourceConfig config) {
+        ConnectionType connType = config.getConnectionType();
+        if (connType != null && !connType.isJdbcBased()) {
+            throw new UnsupportedOperationException(
+                    "数据源[" + config.getDatasourceName() + "]的连接方式为" + connType.getDescription()
+                            + "，不支持JDBC连接池操作。请使用对应的" + connType.getDescription() + "客户端进行连接。");
+        }
+    }
+
+    /**
+     * 判断指定数据源是否支持JDBC连接池
+     */
+    public boolean isJdbcSupported(Long datasourceId) {
+        DatasourceConfig config = getDatasourceConfig(datasourceId);
+        ConnectionType connType = config.getConnectionType();
+        return connType == null || connType.isJdbcBased();
     }
 
     @Override

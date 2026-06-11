@@ -5,10 +5,12 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.dto.DatasourceConfigDTO;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.devops.vo.ConnectionTestResult;
 import com.bigdata.modules.devops.vo.DatasourceConfigVO;
+import com.bigdata.modules.development.service.execution.ExecutionStrategyFactory;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
@@ -16,7 +18,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+
 import java.util.List;
+
 import java.util.stream.Collectors;
 
 @RestController
@@ -28,6 +32,11 @@ public class DatasourceConfigController {
 
     @Autowired
     private MetadataSyncService metadataSyncService;
+
+    @Autowired
+    private ExecutionStrategyFactory executionStrategyFactory;
+
+
 
     @GetMapping("/list")
     public Result<Page<DatasourceConfigVO>> getList(
@@ -95,7 +104,13 @@ public class DatasourceConfigController {
 
     @PostMapping("/test")
     public Result<ConnectionTestResult> testConnectionByConfig(@Valid @RequestBody DatasourceConfigDTO dto) {
-        ConnectionTestResult result = datasourceConfigService.testConnectionByConfig(dto);
+        DatasourceConfig config = new DatasourceConfig();
+        BeanUtils.copyProperties(dto, config);
+        long start = System.currentTimeMillis();
+        boolean success = executionStrategyFactory.getStrategy(config).testConnection(config);
+        long cost = System.currentTimeMillis() - start;
+        ConnectionTestResult result = new ConnectionTestResult(success,
+                success ? "连接成功" : "连接失败", cost + "ms");
         return Result.success(result);
     }
 
@@ -103,6 +118,20 @@ public class DatasourceConfigController {
     public Result<List<DatasourceType>> getDatasourceTypes() {
         return Result.success(DatasourceType.allTypes());
     }
+
+    @GetMapping("/connection-types")
+    public Result<List<ConnectionType>> getConnectionTypes() {
+        return Result.success(ConnectionType.allTypes());
+    }
+
+    @PostMapping("/databases")
+    public Result<List<String>> getDatabases(@Valid @RequestBody DatasourceConfigDTO dto) {
+        DatasourceConfig config =new DatasourceConfig();
+        BeanUtils.copyProperties(dto, config);
+        List<String> databases = executionStrategyFactory.getStrategy(config).listDatabases(config);
+        return Result.success(databases);
+    }
+
 
     private DatasourceConfigVO toVO(DatasourceConfig entity) {
         DatasourceConfigVO vo = new DatasourceConfigVO();

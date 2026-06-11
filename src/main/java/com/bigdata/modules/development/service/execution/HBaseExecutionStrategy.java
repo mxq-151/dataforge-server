@@ -10,6 +10,7 @@ import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.service.TableMetadataService;
+import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.create.table.ColumnDefinition;
@@ -571,5 +572,100 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
         }
 
         return statements;
+    }
+
+    // ==================== 数据源元数据查询方法 ====================
+
+    @Override
+    public boolean testConnection(DatasourceConfig datasourceConfig) {
+        try {
+            Connection conn = getOrCreateConnection(datasourceConfig);
+            return conn != null && !conn.isClosed();
+        } catch (Exception e) {
+            log.warn("测试HBase连接失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    public List<String> listDatabases(DatasourceConfig datasourceConfig) {
+        // HBase没有数据库概念，返回配置中的databaseName列表
+        if (datasourceConfig.getDatabaseName() != null && !datasourceConfig.getDatabaseName().isEmpty()) {
+            return new ArrayList<>(datasourceConfig.getDatabaseName());
+        }
+        List<String> result = new ArrayList<>();
+        result.add("default");
+        return result;
+    }
+
+    @Override
+    public List<TableMetadata> listTables(DatasourceConfig datasourceConfig, String databaseName) {
+        List<TableMetadata> tables = new ArrayList<>();
+        try {
+            Connection hbaseConn = getOrCreateConnection(datasourceConfig);
+            org.apache.hadoop.hbase.client.Admin admin = hbaseConn.getAdmin();
+            try {
+                org.apache.hadoop.hbase.TableName[] tableNames = admin.listTableNames();
+                for (org.apache.hadoop.hbase.TableName tn : tableNames) {
+                    TableMetadata tableMeta = new TableMetadata();
+                    tableMeta.setTableName(tn.getNameAsString());
+                    tableMeta.setTableType("TABLE");
+                    tableMeta.setDatabaseName(databaseName);
+                    tables.add(tableMeta);
+                }
+            } finally {
+                admin.close();
+            }
+        } catch (Exception e) {
+            log.warn("获取HBase表列表失败: {}", e.getMessage());
+        }
+        return tables;
+    }
+
+    @Override
+    public List<ColumnMetadataVO> listColumns(DatasourceConfig datasourceConfig, String databaseName, String tableName) {
+        List<ColumnMetadataVO> columns = new ArrayList<>();
+        try {
+            HBaseSchema schema = new HBaseSchema(
+                    getOrCreateConnection(datasourceConfig), tableMetadataService, datasourceConfig.getId());
+            schema.loadMetadataFromDb();
+
+            ColumnMetadataVO rowkeyCol = new ColumnMetadataVO();
+            rowkeyCol.setColumnName("ROWKEY");
+            rowkeyCol.setColumnType("VARCHAR");
+            rowkeyCol.setIsPrimaryKey(1);
+            rowkeyCol.setOrdinalPosition(1);
+            rowkeyCol.setNullable(0);
+            rowkeyCol.setDatabaseName(databaseName);
+            rowkeyCol.setTableName(tableName);
+            columns.add(rowkeyCol);
+
+            org.apache.calcite.schema.Table calciteTable = schema.getTable(tableName.toUpperCase());
+            if (calciteTable instanceof com.bigdata.modules.development.service.execution.hbase.HBaseTable) {
+                com.bigdata.modules.development.service.execution.hbase.HBaseTable hbaseTable =
+                        (com.bigdata.modules.development.service.execution.hbase.HBaseTable) calciteTable;
+                HBaseTableMeta meta = hbaseTable.getTableMeta();
+                if (meta.getColumnNames() != null) {
+                    int pos = 2;
+                    for (int i = 0; i < meta.getColumnNames().size(); i++) {
+                        String colName = meta.getColumnNames().get(i);
+                        if ("ROWKEY".equalsIgnoreCase(colName)) {
+                            continue;
+                        }
+                        ColumnMetadataVO col = new ColumnMetadataVO();
+                        col.setColumnName(colName);
+                        col.setColumnType(i < meta.getColumnTypes().size() ? meta.getColumnTypes().get(i) : "VARCHAR");
+                        col.setOrdinalPosition(pos++);
+                        col.setNullable(1);
+                        col.setDatabaseName(databaseName);
+                        col.setTableName(tableName);
+                        columns.add(col);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("获取HBase表字段信息失败[{}]: {}", tableName, e.getMessage());
+        }
+        return columns;
     }
 }

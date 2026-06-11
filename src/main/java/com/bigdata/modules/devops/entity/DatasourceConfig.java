@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.common.config.JsonStringListTypeHandler;
 import com.bigdata.common.entity.BaseEntity;
+import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 import java.time.LocalDateTime;
@@ -14,6 +15,7 @@ public class DatasourceConfig extends BaseEntity {
 
     private String datasourceName;
     private DatasourceType datasourceType;
+    private ConnectionType connectionType;
     private StorageEngineType storageEngine;
     private String url;
     @TableField(typeHandler = JsonStringListTypeHandler.class)
@@ -40,6 +42,14 @@ public class DatasourceConfig extends BaseEntity {
 
     public void setDatasourceType(DatasourceType datasourceType) {
         this.datasourceType = datasourceType;
+    }
+
+    public ConnectionType getConnectionType() {
+        return connectionType;
+    }
+
+    public void setConnectionType(ConnectionType connectionType) {
+        this.connectionType = connectionType;
     }
 
     public StorageEngineType getStorageEngine() {

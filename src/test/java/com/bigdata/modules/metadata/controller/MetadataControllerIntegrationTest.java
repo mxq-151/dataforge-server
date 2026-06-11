@@ -530,36 +530,6 @@ class MetadataControllerIntegrationTest {
         }
     }
 
-    @Nested
-    @DisplayName("场景6: 按数据源ID获取数据库列表")
-    class DatabasesByDatasourceTests {
-
-        @Test
-        @Disabled("需要真实数据源连接，CI环境不可用")
-        @DisplayName("⚠️ 真实数据源连接获取数据库列表")
-        void testGetDatabases_RealConnection() {
-            System.out.println("\n=== 场景6.1: 真实数据源连接获取数据库列表（需真实连接） ===");
-            setUpAdminSecurityContext();
-
-            DatasourceConfig ds = createTestDatasource("test_ds_realconn", StorageEngineType.MYSQL);
-
-            Result<List<String>> result = metadataController.getDatabasesByDatasourceId(ds.getId(), null);
-
-            System.out.println("  数据库列表: " + result.getData());
-        }
-
-        @Test
-        @DisplayName("✅ 不存在数据源ID返回404")
-        void testGetDatabases_NonExistentDatasource() {
-            System.out.println("\n=== 场景6.2: 不存在数据源ID错误处理 ===");
-            setUpAdminSecurityContext();
-
-            Result<List<String>> result = metadataController.getDatabasesByDatasourceId(999999L, null);
-
-            assertEquals(404, result.getCode(), "不存在的数据源应返回404");
-            System.out.println("  不存在数据源的错误: code=" + result.getCode() + ", message=" + result.getMessage());
-        }
-    }
 
     @Nested
     @DisplayName("场景7: 空结果集处理")

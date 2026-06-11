@@ -1,5 +1,6 @@
 package com.bigdata.modules.devops.vo;
 
+import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 
@@ -14,6 +15,7 @@ public class DatasourceConfigVO implements Serializable {
     private Long id;
     private String datasourceName;
     private DatasourceType datasourceType;
+    private ConnectionType connectionType;
     private StorageEngineType storageEngine;
     private String url;
     private List<String> databaseName;
@@ -47,6 +49,14 @@ public class DatasourceConfigVO implements Serializable {
 
     public void setDatasourceType(DatasourceType datasourceType) {
         this.datasourceType = datasourceType;
+    }
+
+    public ConnectionType getConnectionType() {
+        return connectionType;
+    }
+
+    public void setConnectionType(ConnectionType connectionType) {
+        this.connectionType = connectionType;
     }
 
     public StorageEngineType getStorageEngine() {

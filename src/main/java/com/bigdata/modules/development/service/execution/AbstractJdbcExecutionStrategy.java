@@ -1,12 +1,16 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
+import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
+import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import com.bigdata.modules.system.entity.SysTablePermission;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -258,5 +262,109 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
             } catch (Exception ignored) {
             }
         }
+    }
+
+    // ==================== 数据源元数据查询方法 ====================
+
+    @Override
+    public boolean testConnection(DatasourceConfig datasourceConfig) {
+        Connection connection = null;
+        try {
+            String dbName = (datasourceConfig.getDatabaseName() != null && !datasourceConfig.getDatabaseName().isEmpty())
+                    ? datasourceConfig.getDatabaseName().get(0) : null;
+            connection = datasourceConfigService.getConnection(datasourceConfig.getId(), dbName);
+            return connection != null && !connection.isClosed();
+        } catch (Exception e) {
+            getLog().warn("测试数据源连接失败: {}", e.getMessage());
+            return false;
+        } finally {
+            closeQuietly(connection);
+        }
+    }
+
+    @Override
+    public List<String> listDatabases(DatasourceConfig datasourceConfig) {
+        List<String> databases = new ArrayList<>();
+        Connection connection = null;
+        try {
+            connection = datasourceConfigService.getConnection(datasourceConfig.getId(), null);
+            DatabaseMetaData metaData = connection.getMetaData();
+            try (ResultSet rs = metaData.getCatalogs()) {
+                while (rs.next()) {
+                    databases.add(rs.getString("TABLE_CAT"));
+                }
+            }
+        } catch (Exception e) {
+            getLog().warn("获取数据库列表失败: {}", e.getMessage());
+        } finally {
+            closeQuietly(connection);
+        }
+        return databases;
+    }
+
+    @Override
+    public List<TableMetadata> listTables(DatasourceConfig datasourceConfig, String databaseName) {
+        List<TableMetadata> tables = new ArrayList<>();
+        Connection connection = null;
+        try {
+            connection = datasourceConfigService.getConnection(datasourceConfig.getId(), databaseName);
+            DatabaseMetaData metaData = connection.getMetaData();
+            try (ResultSet rs = metaData.getTables(databaseName, null, "%", new String[]{"TABLE", "VIEW"})) {
+                while (rs.next()) {
+                    TableMetadata tableMeta = new TableMetadata();
+                    tableMeta.setTableName(rs.getString("TABLE_NAME"));
+                    tableMeta.setTableType(rs.getString("TABLE_TYPE"));
+                    tableMeta.setTableComment(rs.getString("REMARKS"));
+                    tableMeta.setDatabaseName(databaseName);
+                    tables.add(tableMeta);
+                }
+            }
+        } catch (Exception e) {
+            getLog().warn("获取表列表失败[database={}]: {}", databaseName, e.getMessage());
+        } finally {
+            closeQuietly(connection);
+        }
+        return tables;
+    }
+
+    @Override
+    public List<ColumnMetadataVO> listColumns(DatasourceConfig datasourceConfig, String databaseName, String tableName) {
+        List<ColumnMetadataVO> columns = new ArrayList<>();
+        Connection connection = null;
+        try {
+            connection = datasourceConfigService.getConnection(datasourceConfig.getId(), databaseName);
+            DatabaseMetaData metaData = connection.getMetaData();
+            int position = 1;
+            try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, "%")) {
+                while (rs.next()) {
+                    ColumnMetadataVO col = new ColumnMetadataVO();
+                    col.setColumnName(rs.getString("COLUMN_NAME"));
+                    col.setColumnType(rs.getString("TYPE_NAME"));
+                    col.setColumnComment(rs.getString("REMARKS"));
+                    col.setOrdinalPosition(position++);
+                    col.setNullable("YES".equals(rs.getString("IS_NULLABLE")) ? 1 : 0);
+                    col.setDatabaseName(databaseName);
+                    col.setTableName(tableName);
+                    columns.add(col);
+                }
+            }
+            // 补充主键信息
+            try (ResultSet pkRs = metaData.getPrimaryKeys(databaseName, null, tableName)) {
+                while (pkRs.next()) {
+                    String pkColName = pkRs.getString("COLUMN_NAME");
+                    for (ColumnMetadataVO col : columns) {
+                        if (pkColName.equals(col.getColumnName())) {
+                            col.setIsPrimaryKey(1);
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            getLog().warn("获取字段信息失败[{}.{}]: {}", databaseName, tableName, e.getMessage());
+        } finally {
+            closeQuietly(connection);
+        }
+        return columns;
     }
 }

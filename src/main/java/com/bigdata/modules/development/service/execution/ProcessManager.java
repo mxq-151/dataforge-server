@@ -49,6 +49,16 @@ public class ProcessManager {
         return executionId;
     }
 
+    /**
+     * 注册可取消任务（使用指定的executionId）
+     */
+    public String registerCancellable(String executionId, Runnable cancelTask, Long userId, String engineType) {
+        ManagedCancellable mc = new ManagedCancellable(executionId, cancelTask, userId, engineType);
+        cancellableMap.put(executionId, mc);
+        log.info("注册可取消任务: executionId={}, userId={}, engine={}", executionId, userId, engineType);
+        return executionId;
+    }
+
     public boolean cancel(String executionId, Long userId) {
         // 先检查可取消任务
         ManagedCancellable mc = cancellableMap.get(executionId);

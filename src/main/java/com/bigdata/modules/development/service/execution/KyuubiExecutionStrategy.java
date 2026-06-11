@@ -2,7 +2,9 @@ package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
+import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import com.bigdata.modules.system.entity.SysTablePermission;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
@@ -98,9 +100,12 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             }
             executionLogListener.publishLog(executionId, "[Kyuubi] Session创建成功: " + sessionHandle);
 
+            // 用AtomicReference持有operationHandle（提交SQL后才获得），供取消回调使用
+            java.util.concurrent.atomic.AtomicReference<String> operationHandleRef = new java.util.concurrent.atomic.AtomicReference<>();
+
             // 注册到ProcessManager用于取消
-            String registeredId = processManager.registerCancellable(() ->
-                    cancelOperation(baseUrl, sessionHandle, null), context.getSubmitBy(), "kyuubi");
+            String registeredId = processManager.registerCancellable(executionId, () ->
+                    cancelOperation(baseUrl, sessionHandle, operationHandleRef.get()), context.getSubmitBy(), "kyuubi");
 
             try {
                 // 2. 应用会话设置（通过执行SET语句）
@@ -111,6 +116,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                 if (operationHandle == null) {
                     return CodeExecutionResult.failure(executionId, "提交SQL操作失败");
                 }
+                operationHandleRef.set(operationHandle);  // 赋值给取消回调
                 executionLogListener.publishLog(executionId, "[Kyuubi] SQL已提交, operationHandle=" + operationHandle);
 
                 boolean asyncMode = isAsyncMode(context);
@@ -314,12 +320,11 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         try {
             String url = baseUrl + "/api/v1/sessions";
             Map<String, Object> body = new LinkedHashMap<>();
-            body.put("protocolVersion", 13);
-            body.put("catalog", "spark");
-            body.put("configuration", buildSessionConfiguration(context));
+            body.put("configs", buildSessionConfiguration(context));
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, createAuthHeaders(username, password));
             log.info("[Kyuubi REST] 创建Session: {}", url);
+            log.debug("[Kyuubi REST] 请求体: {}", body);
             ResponseEntity<JsonNode> response = restTemplate.exchange(URI.create(url), HttpMethod.POST, request, JsonNode.class);
 
             JsonNode responseBody = response.getBody();
@@ -339,14 +344,27 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     }
 
     private String extractSessionHandle(JsonNode identifier) {
-        return identifier.has("guid") ? identifier.get("guid").asText() : identifier.toString();
+        if (identifier.isTextual()) {
+            return identifier.asText();
+        }
+        if (identifier.has("guid")) {
+            return identifier.get("guid").asText();
+        }
+        // 兜底：去掉首尾引号
+        String raw = identifier.toString().trim();
+        if (raw.startsWith("\"") && raw.endsWith("\"")) {
+            return raw.substring(1, raw.length() - 1);
+        }
+        return raw;
     }
 
     /** 构建Session配置参数（包含存储引擎相关设置） */
     private Map<String, String> buildSessionConfiguration(CodeExecutionContext context) {
         Map<String, String> config = new LinkedHashMap<>();
+        if (context == null || context.getPrimaryStorageEngine() == null) {
+            return config;
+        }
         StorageEngineType storageEngine = context.getPrimaryStorageEngine();
-        if (storageEngine == null) return config;
 
         switch (storageEngine) {
             case HIVE:
@@ -425,10 +443,10 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         return settings;
     }
 
-    /** POST /api/v1/sessions/{session}/operations 提交SQL操作 */
+    /** POST /api/v1/sessions/{session}/operations/statement 提交SQL操作 */
     private String submitOperation(String baseUrl, String sessionHandle, String statement) {
         try {
-            String url = baseUrl + "/api/v1/sessions/" + sessionHandle + "/operations";
+            String url = baseUrl + "/api/v1/sessions/" + sessionHandle + "/operations/statement";
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("statement", statement);
             body.put("runAsync", true);
@@ -450,42 +468,60 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     }
 
     private String extractOperationHandle(JsonNode identifier) {
-        return identifier.has("guid") ? identifier.get("guid").asText() : identifier.toString();
+        if (identifier.isTextual()) {
+            return identifier.asText();
+        }
+        if (identifier.has("guid")) {
+            return identifier.get("guid").asText();
+        }
+        // 兜底：去掉首尾引号
+        String raw = identifier.toString().trim();
+        if (raw.startsWith("\"") && raw.endsWith("\"")) {
+            return raw.substring(1, raw.length() - 1);
+        }
+        return raw;
     }
 
-    /** 轮询操作状态直到完成 GET /api/v1/sessions/{session}/operations/{operation} */
+    /** 轮询操作状态直到完成 GET /api/v1/operations/{operationHandle}/event */
     private OperationResult pollForResult(String baseUrl, String sessionHandle, String operationHandle,
                                            long timeoutMs, long pollIntervalMs, String executionId) {
         long deadline = System.currentTimeMillis() + timeoutMs;
-        String url = baseUrl + "/api/v1/sessions/" + sessionHandle + "/operations/" + operationHandle;
+        String eventUrl = baseUrl + "/api/v1/operations/" + operationHandle + "/event";
 
         while (System.currentTimeMillis() < deadline) {
             try {
-                ResponseEntity<JsonNode> response = restTemplate.exchange(
-                        URI.create(url), HttpMethod.GET,
+                ResponseEntity<JsonNode> eventResponse = restTemplate.exchange(
+                        URI.create(eventUrl), HttpMethod.GET,
                         new HttpEntity<>(createAuthHeaders(null, null)), JsonNode.class);
 
-                JsonNode body = response.getBody();
-                if (body == null) { Thread.sleep(pollIntervalMs); continue; }
+                JsonNode eventBody = eventResponse.getBody();
+                if (eventBody == null) { Thread.sleep(pollIntervalMs); continue; }
 
-                OperationStatus status = parseOperationStatus(body);
-                switch (status) {
-                    case FINISHED:
-                        return parseOperationResult(body);
-                    case ERROR: {
+                String state = parseOperationState(eventBody);
+                log.debug("[Kyuubi REST] 轮询状态: state={}", state);
+                // 兼容两种格式: "FINISHED" / "FINISHED_STATE"
+                String normalizedState = state.replace("_STATE", "");
+                switch (normalizedState) {
+                    case "FINISHED":
+                    case "COMPLETED":
+                        log.info("[Kyuubi REST] 操作完成, state={}", state);
+                        return fetchOperationResult(baseUrl, operationHandle);
+                    case "ERROR": {
                         OperationResult r = new OperationResult();
                         r.status = OperationStatus.ERROR;
-                        r.errorMessage = extractErrorMessage(body);
+                        r.errorMessage = extractErrorMessage(eventBody);
                         return r;
                     }
-                    case CANCELED: {
+                    case "CANCELED": {
                         OperationResult r = new OperationResult();
                         r.status = OperationStatus.CANCELED;
                         r.errorMessage = "操作已被取消";
                         return r;
                     }
                     default:
-                        executionLogListener.publishLog(executionId, "[Kyuubi] 执行中... (" + status + ")");
+                        if (executionLogListener != null) {
+                            executionLogListener.publishLog(executionId, "[Kyuubi] 执行中... (" + state + ")");
+                        }
                         Thread.sleep(pollIntervalMs);
                         break;
                 }
@@ -513,77 +549,112 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         return timeoutResult;
     }
 
-    private OperationStatus parseOperationStatus(JsonNode body) {
-        if (body.has("status") && body.get("status").has("statusCode")) {
-            int code = body.get("status").get("statusCode").asInt();
-            switch (code) {
-                case 0: return OperationStatus.INITIALIZED;
-                case 1: return OperationStatus.RUNNING;
-                case 2: return OperationStatus.FINISHED;
-                case 3: return OperationStatus.CANCELED;
-                case 4: return OperationStatus.ERROR;
-                default: return OperationStatus.RUNNING;
-            }
+    /**
+     * 从KyuubiOperationEvent解析状态字符串
+     * 官方文档: state字段值为 PENDING | RUNNING | FINISHED | ERROR | CANCELED
+     */
+    private String parseOperationState(JsonNode eventBody) {
+        if (eventBody.has("state")) {
+            return eventBody.get("state").asText().toUpperCase();
         }
-        return OperationStatus.RUNNING;
+        return "RUNNING";
     }
 
-    private String extractErrorMessage(JsonNode body) {
-        if (body.has("status") && body.get("status").has("errorMessage")) {
-            String msg = body.get("status").get("errorMessage").asText();
-            if (msg != null && !msg.isEmpty()) return msg;
+    private String extractErrorMessage(JsonNode eventBody) {
+        if (eventBody.has("exception") && !eventBody.get("exception").isNull()) {
+            return eventBody.get("exception").asText();
+        }
+        if (eventBody.has("message")) {
+            return eventBody.get("message").asText();
         }
         return "未知错误";
     }
 
-    /** 解析操作结果（包含结果集） */
-    private OperationResult parseOperationResult(JsonNode body) {
+    /**
+     * 获取操作结果数据（分两步：先取schema，再取rowset）
+     * GET /operations/{handle}/resultsetmetadata → 列信息
+     * GET /operations/{handle}/rowset → 行数据
+     */
+    private OperationResult fetchOperationResult(String baseUrl, String operationHandle) {
         OperationResult result = new OperationResult();
         result.status = OperationStatus.FINISHED;
 
-        if (body.has("results") && body.get("results").isArray()) {
-            List<String> columns = new ArrayList<>();
-            List<List<String>> rows = new ArrayList<>();
-
-            for (JsonNode resultNode : body.get("results")) {
-                if (resultNode.has("schema") && resultNode.get("schema").has("columns")) {
-                    for (JsonNode col : resultNode.get("schema").get("columns")) {
-                        if (col.has("name")) columns.add(col.get("name").asText());
+        // 1. 获取结果集列元数据
+        try {
+            String metaUrl = baseUrl + "/api/v1/operations/" + operationHandle + "/resultsetmetadata";
+            ResponseEntity<JsonNode> metaResponse = restTemplate.exchange(
+                    URI.create(metaUrl), HttpMethod.GET,
+                    new HttpEntity<>(createAuthHeaders(null, null)), JsonNode.class);
+            JsonNode metaBody = metaResponse.getBody();
+            log.debug("[Kyuubi REST] resultsetmetadata原始响应: {}", metaBody);
+            if (metaBody != null && metaBody.has("columns")) {
+                List<String> columnNames = new ArrayList<>();
+                for (JsonNode col : metaBody.get("columns")) {
+                    if (col.has("columnName")) {
+                        columnNames.add(col.get("columnName").asText());
                     }
                 }
-                if (resultNode.has("data") && resultNode.get("data").isArray()) {
-                    int rowCount = 0;
-                    for (JsonNode rowNode : resultNode.get("data")) {
-                        if (rowCount >= MAX_RESULT_ROWS) break;
-                        List<String> row = new ArrayList<>();
-                        if (rowNode.isArray()) {
-                            for (JsonNode cell : rowNode) row.add(cell.isNull() ? "NULL" : cell.asText());
-                        } else if (rowNode.isObject() && rowNode.has("values") && rowNode.get("values").isArray()) {
-                            for (JsonNode cell : rowNode.get("values")) row.add(cell.isNull() ? "NULL" : cell.asText());
-                        }
-                        rows.add(row);
-                        rowCount++;
-                    }
-                }
+                result.columns = columnNames;
+                log.debug("[Kyuubi REST] 列名: {}", columnNames);
             }
-            result.columns = columns;
-            result.rows = rows;
-            result.rowCount = rows.size();
+        } catch (Exception e) {
+            log.warn("[Kyuubi REST] 获取结果集元数据失败", e);
         }
 
-        if (body.has("modifiedRowCount")) result.modifiedRowCount = body.get("modifiedRowCount").asLong();
-        if (body.has("rowCount")) result.rowCount = body.get("rowCount").asLong();
+        // 2. 获取行数据
+        try {
+            String rowsetUrl = baseUrl + "/api/v1/operations/" + operationHandle + "/rowset?maxrows=" + MAX_RESULT_ROWS;
+            ResponseEntity<JsonNode> rowResponse = restTemplate.exchange(
+                    URI.create(rowsetUrl), HttpMethod.GET,
+                    new HttpEntity<>(createAuthHeaders(null, null)), JsonNode.class);
+            JsonNode rowBody = rowResponse.getBody();
+            log.info("[Kyuubi REST] rowset原始响应: {}", rowBody);
+            if (rowBody != null && rowBody.has("rows")) {
+                List<List<String>> rows = new ArrayList<>();
+                for (JsonNode row : rowBody.get("rows")) {
+                    List<String> rowData = new ArrayList<>();
+                    if (row.has("fields")) {
+                        for (JsonNode field : row.get("fields")) {
+                            if (field.has("value")) {
+                                rowData.add(field.get("value").isNull() ? "NULL" : field.get("value").asText());
+                            } else {
+                                rowData.add("");
+                            }
+                        }
+                    }
+                    rows.add(rowData);
+                }
+                result.rows = rows;
+                result.rowCount = rows.size();
+            }
+            if (rowBody != null && rowBody.has("rowCount")) {
+                result.rowCount = rowBody.get("rowCount").asLong();
+            }
+            log.info("[Kyuubi REST] 行数据: columns={}, rows={}, rowCount={}",
+                    result.columns != null ? result.columns.size() : "null",
+                    result.rows != null ? result.rows.size() : "null",
+                    result.rowCount);
+        } catch (Exception e) {
+            log.warn("[Kyuubi REST] 获取结果集数据失败", e);
+        }
 
         return result;
     }
 
-    /** DELETE 取消正在执行的操作 */
+    /** PUT /api/v1/operations/{operationHandle} 取消正在执行的操作 */
     private void cancelOperation(String baseUrl, String sessionHandle, String operationHandle) {
+        if (operationHandle == null) {
+            log.info("[Kyuubi REST] 操作尚未提交，跳过取消（直接关闭Session）");
+            closeSession(baseUrl, sessionHandle);
+            return;
+        }
         try {
-            String url = baseUrl + "/api/v1/sessions/" + sessionHandle + "/operations/" + operationHandle;
-            restTemplate.exchange(URI.create(url), HttpMethod.DELETE,
-                    new HttpEntity<>(createAuthHeaders(null, null)), Void.class);
-            log.info("[Kyuubi REST] 操作已取消: session={}, operation={}", sessionHandle, operationHandle);
+            String url = baseUrl + "/api/v1/operations/" + operationHandle;
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("action", "cancel");
+            restTemplate.exchange(URI.create(url), HttpMethod.PUT,
+                    new HttpEntity<>(body, createAuthHeaders(null, null)), Void.class);
+            log.info("[Kyuubi REST] 操作已取消: operation={}", operationHandle);
         } catch (Exception e) {
             log.warn("[Kyuubi REST] 取消操作异常", e);
         }
@@ -670,5 +741,157 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         List<List<String>> rows;
         long rowCount;
         long modifiedRowCount;
+    }
+
+    // ==================== 数据源元数据查询方法 ====================
+
+    /**
+     * 从DatasourceConfig构建最小化的执行上下文（仅用于Session配置）
+     */
+    private CodeExecutionContext buildMinimalContext(DatasourceConfig datasourceConfig) {
+        CodeExecutionContext ctx = new CodeExecutionContext();
+        ctx.setDatasourceConfigs(java.util.Collections.singletonList(datasourceConfig));
+        return ctx;
+    }
+
+    @Override
+    public boolean testConnection(DatasourceConfig datasourceConfig) {
+        String sessionHandle = null;
+        try {
+            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
+            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            return sessionHandle != null && !sessionHandle.isEmpty();
+        } catch (Exception e) {
+            log.warn("测试Kyuubi连接失败: {}", e.getMessage());
+            return false;
+        } finally {
+            if (sessionHandle != null) {
+                try {
+                    String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+                    closeSession(baseUrl, sessionHandle);
+                } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    @Override
+    public List<String> listDatabases(DatasourceConfig datasourceConfig) {
+        List<String> databases = new ArrayList<>();
+        String sessionHandle = null;
+        try {
+            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
+            log.info("[Kyuubi REST] listDatabases 开始, baseUrl={}", baseUrl);
+            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            log.info("[Kyuubi REST] listDatabases sessionHandle={}", sessionHandle);
+            if (sessionHandle == null) return databases;
+
+            String operationHandle = submitOperation(baseUrl, sessionHandle, "SHOW DATABASES");
+            log.info("[Kyuubi REST] listDatabases operationHandle={}", operationHandle);
+            if (operationHandle == null) return databases;
+
+            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            log.info("[Kyuubi REST] listDatabases 轮询结果: status={}, columns={}, rows={}",
+                    result.status, result.columns != null ? result.columns.size() : "null",
+                    result.rows != null ? result.rows.size() : "null");
+            if (result.rows != null && !result.rows.isEmpty()) {
+                log.debug("[Kyuubi REST] listDatabases 首行数据: {}", result.rows.get(0));
+            }
+            if (result.status == OperationStatus.FINISHED && result.rows != null) {
+                for (List<String> row : result.rows) {
+                    if (!row.isEmpty()) {
+                        databases.add(row.get(0));
+                    }
+                }
+            } else if (result.status == OperationStatus.ERROR) {
+                log.warn("[Kyuubi REST] listDatabases 执行错误: {}", result.errorMessage);
+            }
+        } catch (Exception e) {
+            log.warn("通过Kyuubi获取数据库列表失败: {}", e.getMessage(), e);
+        } finally {
+            if (sessionHandle != null) {
+                try { closeSession(buildBaseUrl(datasourceConfig.getUrl()), sessionHandle); } catch (Exception ignored) {}
+            }
+        }
+        return databases;
+    }
+
+    @Override
+    public List<TableMetadata> listTables(DatasourceConfig datasourceConfig, String databaseName) {
+        List<TableMetadata> tables = new ArrayList<>();
+        String sessionHandle = null;
+        try {
+            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
+            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            if (sessionHandle == null) return tables;
+
+            String sql = "SHOW TABLES IN " + databaseName;
+            String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
+            if (operationHandle == null) return tables;
+
+            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            if (result.status == OperationStatus.FINISHED && result.rows != null) {
+                for (List<String> row : result.rows) {
+                    if (!row.isEmpty()) {
+                        TableMetadata tableMeta = new TableMetadata();
+                        tableMeta.setTableName(row.get(0));
+                        tableMeta.setTableType("TABLE");
+                        tableMeta.setDatabaseName(databaseName);
+                        tables.add(tableMeta);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("通过Kyuubi获取表列表失败[{}]: {}", databaseName, e.getMessage());
+        } finally {
+            if (sessionHandle != null) {
+                try { closeSession(buildBaseUrl(datasourceConfig.getUrl()), sessionHandle); } catch (Exception ignored) {}
+            }
+        }
+        return tables;
+    }
+
+    @Override
+    public List<ColumnMetadataVO> listColumns(DatasourceConfig datasourceConfig, String databaseName, String tableName) {
+        List<ColumnMetadataVO> columns = new ArrayList<>();
+        String sessionHandle = null;
+        try {
+            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
+            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            if (sessionHandle == null) return columns;
+
+            String sql = "DESCRIBE " + databaseName + "." + tableName;
+            String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
+            if (operationHandle == null) return columns;
+
+            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            if (result.status == OperationStatus.FINISHED && result.rows != null) {
+                int position = 1;
+                for (List<String> row : result.rows) {
+                    if (row.size() < 2) continue;
+                    ColumnMetadataVO col = new ColumnMetadataVO();
+                    col.setColumnName(row.get(0));
+                    col.setColumnType(row.get(1));
+                    col.setOrdinalPosition(position++);
+                    col.setNullable(1);
+                    col.setDatabaseName(databaseName);
+                    col.setTableName(tableName);
+                    if (row.size() >= 3) {
+                        col.setColumnComment(row.get(2));
+                    }
+                    columns.add(col);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("通过Kyuubi获取字段信息失败[{}.{}]: {}", databaseName, tableName, e.getMessage());
+        } finally {
+            if (sessionHandle != null) {
+                try { closeSession(buildBaseUrl(datasourceConfig.getUrl()), sessionHandle); } catch (Exception ignored) {}
+            }
+        }
+        return columns;
     }
 }

@@ -1,5 +1,6 @@
 package com.bigdata.modules.devops.dto;
 
+import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 import jakarta.validation.constraints.NotBlank;
@@ -18,6 +19,10 @@ public class DatasourceConfigDTO {
     @NotNull(message = "数据源类型不能为空")
     private DatasourceType datasourceType;
 
+    @NotNull(message = "连接类型不能为空")
+    private ConnectionType connectionType;
+
+    @NotNull(message = "存储引擎不能为空")
     private StorageEngineType storageEngine;
 
     @NotBlank(message = "连接URL不能为空")
@@ -52,6 +57,14 @@ public class DatasourceConfigDTO {
 
     public void setDatasourceType(DatasourceType datasourceType) {
         this.datasourceType = datasourceType;
+    }
+
+    public ConnectionType getConnectionType() {
+        return connectionType;
+    }
+
+    public void setConnectionType(ConnectionType connectionType) {
+        this.connectionType = connectionType;
     }
 
     public StorageEngineType getStorageEngine() {
