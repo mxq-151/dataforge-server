@@ -41,6 +41,110 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     /** 异步执行的任务缓存，用于取消操作 */
     private final ConcurrentHashMap<String, Future<?>> asyncTaskMap = new ConcurrentHashMap<>();
 
+    // ==================== Session 缓存 ====================
+
+    /** Session缓存：同一token（用户名:密码）复用同一Kyuubi Session */
+    private final ConcurrentHashMap<String, SessionEntry> sessionCache = new ConcurrentHashMap<>();
+
+    /** Session最大空闲时间（毫秒），超过此时间未使用的session会被标记为可回收 */
+    private static final long SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000L; // 30分钟
+
+    /**
+     * Session缓存条目
+     */
+    private static class SessionEntry {
+        final String sessionHandle;
+        final String baseUrl;
+        volatile long lastAccessTime;
+
+        SessionEntry(String sessionHandle, String baseUrl) {
+            this.sessionHandle = sessionHandle;
+            this.baseUrl = baseUrl;
+            this.lastAccessTime = System.currentTimeMillis();
+        }
+
+        void touch() {
+            this.lastAccessTime = System.currentTimeMillis();
+        }
+
+        boolean isExpired() {
+            return System.currentTimeMillis() - lastAccessTime > SESSION_IDLE_TIMEOUT_MS;
+        }
+    }
+
+    /**
+     * 根据用户名和密码构建缓存Key（即"token"）
+     */
+    private String buildToken(String username, String password) {
+        return username + ":" + password;
+    }
+
+    /**
+     * 获取或创建Session：优先从缓存取，缓存不存在或已过期则新建。
+     * 同一token（相同用户名+密码）始终返回同一个Session。
+     *
+     * @return SessionEntry（包含sessionHandle和baseUrl），失败返回null
+     */
+    private SessionEntry getOrCreateSession(String baseUrl, String username, String password,
+                                             CodeExecutionContext context) {
+        String token = buildToken(username, password);
+        SessionEntry entry = sessionCache.get(token);
+        if (entry != null && !entry.isExpired()) {
+            entry.touch();
+            log.debug("[Kyuubi Session] 命中缓存: token={}, session={}", maskToken(token), entry.sessionHandle);
+            return entry;
+        }
+
+        // 缓存未命中或已过期，加锁防止并发重复创建
+        synchronized (this) {
+            // 双重检查
+            entry = sessionCache.get(token);
+            if (entry != null && !entry.isExpired()) {
+                entry.touch();
+                return entry;
+            }
+
+            // 过期则先关闭旧session
+            if (entry != null) {
+                log.info("[Kyuubi Session] 清理过期Session: {}", entry.sessionHandle);
+                doCloseSession(entry.baseUrl, entry.sessionHandle);
+                sessionCache.remove(token);
+            }
+
+            // 创建新Session
+            String newHandle = createSession(baseUrl, username, password, context);
+            if (newHandle == null) {
+                return null;
+            }
+
+            SessionEntry newEntry = new SessionEntry(newHandle, baseUrl);
+            sessionCache.put(token, newEntry);
+            log.info("[Kyuubi Session] 新建并缓存: token={}, session={}", maskToken(token), newHandle);
+            return newEntry;
+        }
+    }
+
+    /**
+     * 关闭指定token对应的Session并从缓存中移除（用于显式登出/切换数据源场景）
+     */
+    private void invalidateSession(String username, String password) {
+        String token = buildToken(username, password);
+        SessionEntry entry = sessionCache.remove(token);
+        if (entry != null) {
+            doCloseSession(entry.baseUrl, entry.sessionHandle);
+            log.info("[Kyuubi Session] 已失效并移除: session={}", entry.sessionHandle);
+        }
+    }
+
+    /** 对token脱敏用于日志输出 */
+    private String maskToken(String token) {
+        int colonIdx = token.lastIndexOf(':');
+        if (colonIdx > 0) {
+            return token.substring(0, colonIdx) + ":****";
+        }
+        return "****";
+    }
+
     @Override
     protected Logger getLog() {
         return log;
@@ -85,12 +189,13 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         sql = sql.trim();
 
         try {
-            // 1. 创建Session
-            String sessionHandle = createSession(baseUrl, username, password, context);
-            if (sessionHandle == null) {
+            // 1. 获取或复用Session（同一token缓存复用）
+            SessionEntry sessionEntry = getOrCreateSession(baseUrl, username, password, context);
+            if (sessionEntry == null) {
                 return CodeExecutionResult.failure(executionId, "创建Kyuubi Session失败");
             }
-            executionLogListener.publishLog(executionId, "[Kyuubi] Session创建成功: " + sessionHandle);
+            String sessionHandle = sessionEntry.sessionHandle;
+            executionLogListener.publishLog(executionId, "[Kyuubi] Session就绪(缓存复用): " + sessionHandle);
 
             // 用AtomicReference持有operationHandle（提交SQL后才获得），供取消回调使用
             java.util.concurrent.atomic.AtomicReference<String> operationHandleRef = new java.util.concurrent.atomic.AtomicReference<>();
@@ -123,8 +228,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                             sql, context, startTime, registeredId);
                 }
             } finally {
+                // Session由缓存管理，不在此关闭（同一token复用）
                 if (!isAsyncMode(context)) {
-                    closeSession(baseUrl, sessionHandle);
                     processManager.unregister(registeredId);
                 }
             }
@@ -254,12 +359,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                 log.error("[Kyuubi REST] 异步执行过程异常: executionId={}", executionId, e);
                 executionLogListener.publishLog(executionId, "[异常] 异步执行异常: " + e.getMessage());
             } finally {
-                try {
-                    closeSession(baseUrl, sessionHandle);
-                    log.info("[Kyuubi REST] 异步任务Session已关闭: executionId={}", executionId);
-                } catch (Exception e) {
-                    log.warn("[Kyuubi REST] 关闭异步Session异常", e);
-                }
+                // Session由缓存管理，不在此关闭
                 processManager.unregister(registeredId);
                 asyncTaskMap.remove(executionId);
                 executor.shutdown();
@@ -501,7 +601,17 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                     case "ERROR": {
                         OperationResult r = new OperationResult();
                         r.status = OperationStatus.ERROR;
-                        r.errorMessage = extractErrorMessage(eventBody);
+                        // 从事件中提取基础错误信息
+                        String eventError = extractErrorMessage(eventBody);
+                        // 从操作详情端点补充更详细的错误信息
+                        String detailError = fetchDetailedErrorInfo(baseUrl, operationHandle);
+                        if (detailError != null && !detailError.isEmpty()
+                                && !detailError.equals(eventError)) {
+                            r.errorMessage = eventError + "\n详情: " + detailError;
+                        } else {
+                            r.errorMessage = eventError;
+                        }
+                        log.error("[Kyuubi REST] 操作执行失败: {}", r.errorMessage);
                         return r;
                     }
                     case "CANCELED": {
@@ -552,14 +662,197 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         return "RUNNING";
     }
 
+    /**
+     * 从Kyuubi操作事件中提取完整的错误信息。
+     * <p>
+     * Kyuubi错误事件响应结构（HiveServer2兼容）：
+     * <pre>{
+     *   "state": "ERROR",
+     *   "exception": "org.apache.spark.sql.AnalysisException",
+     *   "message": "Table or view not found: xxx",
+     *   "sqlState": "42000",
+     *   "errorCode": 0,
+     *   "javaClassName": "org.apache.spark.sql.AnalysisException"
+     * }</pre>
+     *
+     * @param eventBody 操作事件JSON
+     * @return 完整的错误信息（多行格式，包含所有可用字段）
+     */
     private String extractErrorMessage(JsonNode eventBody) {
-        if (eventBody.has("exception") && !eventBody.get("exception").isNull()) {
-            return eventBody.get("exception").asText();
+        StringBuilder sb = new StringBuilder();
+
+        // 0. 记录原始响应体用于排查（仅ERROR级别）
+
+        // === 处理 Kyuubi 实际的异常对象结构（最常见情况）===
+        // 真实响应: {"exception": {"message":"...", "sqlstate":"42P01", "errorCode":0, "stackTrace":[...]}}
+        if (eventBody.has("exception") && !eventBody.get("exception").isNull()
+                && eventBody.get("exception").isObject()) {
+            JsonNode excObj = eventBody.get("exception");
+
+            // 1. 从 exception.message 提取核心错误信息
+            if (excObj.has("message") && !excObj.get("message").isNull()) {
+                String rawMsg = excObj.get("message").asText();
+                sb.append(extractCoreError(rawMsg));
+            }
+
+            // 2. SQL状态码
+            if (excObj.has("sqlstate") && !excObj.get("sqlstate").isNull()) {
+                String sqlState = excObj.get("sqlstate").asText();
+                if (!sqlState.isEmpty() && !"null".equals(sqlState)) {
+                    sb.append(" [SQLState: ").append(sqlState).append("]");
+                }
+            }
+
+            // 3. 错误码
+            if (excObj.has("errorCode") && !excObj.get("errorCode").isNull()) {
+                int code = excObj.get("errorCode").asInt();
+                if (code != 0) {
+                    sb.append(" [Code: ").append(code).append("]");
+                }
+            }
         }
-        if (eventBody.has("message")) {
-            return eventBody.get("message").asText();
+
+        // === 兜底：顶层字段匹配（兼容非标准格式）===
+        if (sb.length() == 0) {
+            if (eventBody.has("exception") && eventBody.get("exception").isTextual()) {
+                sb.append("[").append(eventBody.get("exception").asText()).append("] ");
+            } else if (eventBody.has("javaClassName") && !eventBody.get("javaClassName").isNull()) {
+                sb.append("[").append(eventBody.get("javaClassName").asText()).append("] ");
+            }
+
+            if (eventBody.has("message") && !eventBody.get("message").isNull()) {
+                sb.append(eventBody.get("message").asText());
+            } else if (eventBody.has("errorMessage") && !eventBody.get("errorMessage").isNull()) {
+                sb.append(eventBody.get("errorMessage").asText());
+            } else if (eventBody.has("error") && !eventBody.get("error").isNull()) {
+                if (eventBody.get("error").isTextual()) {
+                    sb.append(eventBody.get("error").asText());
+                } else if (eventBody.get("error").isObject() && eventBody.get("error").has("message")) {
+                    sb.append(eventBody.get("error").get("message").asText());
+                }
+            }
+
+            if (eventBody.has("sqlState") && !eventBody.get("sqlState").isNull()) {
+                sb.append(" [SQLState: ").append(eventBody.get("sqlState").asText()).append("]");
+            }
+            if (eventBody.has("errorCode") && !eventBody.get("errorCode").isNull()) {
+                sb.append(" [Code: ").append(eventBody.get("errorCode").asInt()).append("]");
+            }
         }
-        return "未知错误";
+
+        // 最终兜底
+        if (sb.length() == 0) {
+            sb.append("Kyuubi执行错误(详见上方原始响应): ").append(truncateForLog(eventBody.toString(), 500));
+        }
+
+        return sb.toString();
+    }
+
+    /**
+     * 从Kyubi/Spark异常消息中提取核心错误信息。
+     * <p>
+     * 原始消息通常包含多层包装和完整堆栈：
+     * <pre>org.apache.kyuubi.KyuubiSQLException: Error operating ExecuteStatement:
+     * org.apache.spark.sql.AnalysisException: [TABLE_OR_VIEW_NOT_FOUND] The table cannot be found...
+     * \tat org.apache.spark... (几十行堆栈)</pre>
+     * <p>
+     * 提取策略：剥离KyuubiSQLException包装层，保留完整错误信息（含完整堆栈）
+     */
+    private String extractCoreError(String rawMessage) {
+        if (rawMessage == null || rawMessage.isEmpty()) return "";
+
+        // 剥离常见的包装层前缀
+        String msg = rawMessage;
+        String[] wrappers = {
+                "org.apache.kyuubi.KyuubiSQLException: Error operating ExecuteStatement: ",
+                "org.apache.kyuubi.KyuubiSQLException: ",
+                "Error operating ExecuteStatement: ",
+                "org.apache.hive.service.cli.HiveSQLException: "
+        };
+        for (String wrapper : wrappers) {
+            if (msg.startsWith(wrapper)) {
+                msg = msg.substring(wrapper.length());
+                break;
+            }
+        }
+
+        return msg.trim();
+    }
+
+    /** 截断过长字符串用于日志输出 */
+    private String truncateForLog(String str, int maxLen) {
+        if (str == null) return "null";
+        return str.length() > maxLen ? str.substring(0, maxLen) + "...(truncated)" : str;
+    }
+
+    /**
+     * 从操作详情端点获取更详细的错误信息（补充extractErrorMessage）。
+     * 使用 GET /api/v1/operations/{operationHandle}/status 获取操作状态详情。
+     */
+    private String fetchDetailedErrorInfo(String baseUrl, String operationHandle) {
+        try {
+            // 尝试 status 子资源
+            String detailUrl = baseUrl + "/api/v1/operations/" + operationHandle + "/status";
+            ResponseEntity<JsonNode> detailResponse = restTemplate.exchange(
+                    URI.create(detailUrl), HttpMethod.GET,
+                    new HttpEntity<>(createAuthHeaders(null, null)), JsonNode.class);
+            JsonNode detailBody = detailResponse.getBody();
+            if (detailBody != null) {
+                String msg = extractErrorMessageFromNode(detailBody);
+                if (msg != null) return msg;
+            }
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            log.debug("[Kyuubi REST] /status 端点不可用({}), 尝试根端点", e.getStatusCode());
+            // /status 不存在，尝试不带子资源的 GET
+        } catch (Exception e) {
+            log.debug("[Kyuubi REST] 获取/status 失败: {}", e.getMessage());
+        }
+
+        // 兜底：尝试直接 GET /operations/{handle}（部分版本支持）
+        try {
+            String detailUrl = baseUrl + "/api/v1/operations/" + operationHandle;
+            ResponseEntity<JsonNode> detailResponse = restTemplate.exchange(
+                    URI.create(detailUrl), HttpMethod.GET,
+                    new HttpEntity<>(createAuthHeaders(null, null)), JsonNode.class);
+            JsonNode detailBody = detailResponse.getBody();
+            if (detailBody != null) {
+                String msg = extractErrorMessageFromNode(detailBody);
+                if (msg != null) return msg;
+            }
+        } catch (Exception e) {
+            log.debug("[Kyuubi REST] 获取操作详情失败(非致命): {}", e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 从任意 JsonNode 中递归查找错误消息字段
+     */
+    private String extractErrorMessageFromNode(JsonNode node) {
+        if (node == null || node.isNull()) return null;
+
+        // 直接字段匹配
+        String[] errorFields = {"errorMessage", "message", "error", "reason", "error_message"};
+        for (String field : errorFields) {
+            if (node.has(field) && !node.get(field).isNull() && node.get(field).isTextual()) {
+                String val = node.get(field).asText();
+                if (!val.isEmpty()) return val;
+            }
+        }
+
+        // 嵌套在 status 对象中
+        if (node.has("status") && node.get("status").isObject()) {
+            String nested = extractErrorMessageFromNode(node.get("status"));
+            if (nested != null) return nested;
+        }
+
+        // 嵌套在 error 对象中
+        if (node.has("error") && node.get("error").isObject()) {
+            String nested = extractErrorMessageFromNode(node.get("error"));
+            if (nested != null) return nested;
+        }
+
+        return null;
     }
 
     /**
@@ -600,7 +893,6 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                     URI.create(rowsetUrl), HttpMethod.GET,
                     new HttpEntity<>(createAuthHeaders(null, null)), JsonNode.class);
             JsonNode rowBody = rowResponse.getBody();
-            log.info("[Kyuubi REST] rowset原始响应: {}", rowBody);
             if (rowBody != null && rowBody.has("rows")) {
                 List<List<String>> rows = new ArrayList<>();
                 for (JsonNode row : rowBody.get("rows")) {
@@ -637,7 +929,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     private void cancelOperation(String baseUrl, String sessionHandle, String operationHandle) {
         if (operationHandle == null) {
             log.info("[Kyuubi REST] 操作尚未提交，跳过取消（直接关闭Session）");
-            closeSession(baseUrl, sessionHandle);
+            doCloseSession(baseUrl, sessionHandle);
             return;
         }
         try {
@@ -652,8 +944,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         }
     }
 
-    /** DELETE 关闭Session */
-    private void closeSession(String baseUrl, String sessionHandle) {
+    /** DELETE 关闭Session（底层HTTP调用，不操作缓存） */
+    private void doCloseSession(String baseUrl, String sessionHandle) {
         try {
             String url = baseUrl + "/api/v1/sessions/" + sessionHandle;
             restTemplate.exchange(URI.create(url), HttpMethod.DELETE,
@@ -692,36 +984,28 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     @Override
     public boolean testConnection(DatasourceConfig datasourceConfig) {
-        String sessionHandle = null;
         try {
             String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
-            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
-            return sessionHandle != null && !sessionHandle.isEmpty();
+            SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            return entry != null && entry.sessionHandle != null && !entry.sessionHandle.isEmpty();
         } catch (Exception e) {
             log.warn("测试Kyuubi连接失败: {}", e.getMessage());
             return false;
-        } finally {
-            if (sessionHandle != null) {
-                try {
-                    String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
-                    closeSession(baseUrl, sessionHandle);
-                } catch (Exception ignored) {}
-            }
         }
     }
 
     @Override
     public List<String> listDatabases(DatasourceConfig datasourceConfig) {
         List<String> databases = new ArrayList<>();
-        String sessionHandle = null;
         try {
             String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
-            log.info("[Kyuubi REST] listDatabases 开始, baseUrl={}", baseUrl);
-            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
-            log.info("[Kyuubi REST] listDatabases sessionHandle={}", sessionHandle);
-            if (sessionHandle == null) return databases;
+            SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            if (entry == null) return databases;
+            String sessionHandle = entry.sessionHandle;
+
+            log.info("[Kyuubi REST] listDatabases 开始(复用Session), sessionHandle={}", sessionHandle);
 
             String operationHandle = submitOperation(baseUrl, sessionHandle, "SHOW DATABASES");
             log.info("[Kyuubi REST] listDatabases operationHandle={}", operationHandle);
@@ -745,23 +1029,20 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             }
         } catch (Exception e) {
             log.warn("通过Kyuubi获取数据库列表失败: {}", e.getMessage(), e);
-        } finally {
-            if (sessionHandle != null) {
-                try { closeSession(buildBaseUrl(datasourceConfig.getUrl()), sessionHandle); } catch (Exception ignored) {}
-            }
         }
+        // Session由缓存管理，不在此关闭
         return databases;
     }
 
     @Override
     public List<TableMetadata> listTables(DatasourceConfig datasourceConfig, String databaseName) {
         List<TableMetadata> tables = new ArrayList<>();
-        String sessionHandle = null;
         try {
             String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
-            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
-            if (sessionHandle == null) return tables;
+            SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            if (entry == null) return tables;
+            String sessionHandle = entry.sessionHandle;
 
             String sql = "SHOW TABLES IN " + databaseName;
             String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
@@ -781,23 +1062,20 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             }
         } catch (Exception e) {
             log.warn("通过Kyuubi获取表列表失败[{}]: {}", databaseName, e.getMessage());
-        } finally {
-            if (sessionHandle != null) {
-                try { closeSession(buildBaseUrl(datasourceConfig.getUrl()), sessionHandle); } catch (Exception ignored) {}
-            }
         }
+        // Session由缓存管理，不在此关闭
         return tables;
     }
 
     @Override
     public List<ColumnMetadataVO> listColumns(DatasourceConfig datasourceConfig, String databaseName, String tableName) {
         List<ColumnMetadataVO> columns = new ArrayList<>();
-        String sessionHandle = null;
         try {
             String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
-            sessionHandle = createSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
-            if (sessionHandle == null) return columns;
+            SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
+            if (entry == null) return columns;
+            String sessionHandle = entry.sessionHandle;
 
             String sql = "DESCRIBE " + databaseName + "." + tableName;
             String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
@@ -823,11 +1101,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             }
         } catch (Exception e) {
             log.warn("通过Kyuubi获取字段信息失败[{}.{}]: {}", databaseName, tableName, e.getMessage());
-        } finally {
-            if (sessionHandle != null) {
-                try { closeSession(buildBaseUrl(datasourceConfig.getUrl()), sessionHandle); } catch (Exception ignored) {}
-            }
         }
+        // Session由缓存管理，不在此关闭
         return columns;
     }
 }
