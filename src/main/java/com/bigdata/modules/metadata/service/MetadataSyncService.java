@@ -9,10 +9,12 @@ import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
 import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import com.bigdata.modules.development.service.execution.ExecutionStrategy;
 import com.bigdata.modules.development.service.execution.ExecutionStrategyFactory;
+import com.bigdata.modules.development.service.execution.AbstractBaseExecutionStrategy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,10 +35,14 @@ public class MetadataSyncService {
     private TableMetadataMapper tableMetadataMapper;
 
     @Autowired
+    @Lazy
     private ExecutionStrategyFactory executionStrategyFactory;
 
     @Transactional
-    public boolean syncSingleTableMetadata(Long datasourceId, StorageEngineType storageEngine, String databaseName, String tableName, String ddlType) {
+    public boolean syncSingleTableMetadata(Long datasourceId, StorageEngineType storageEngine, String databaseName, String tableName, String ddlType,
+                                            AbstractBaseExecutionStrategy.HiveTableAttributes hiveAttrs) {
+        log.info("[DDL-DEBUG-D3] syncSingleTableMetadata 入口: dsId={}, engine={}, db={}, table={}, type={}",
+                datasourceId, storageEngine, databaseName, tableName, ddlType);
 
         if ("DROP".equalsIgnoreCase(ddlType)) {
             log.info("增量同步: DROP操作, 删除本地元数据 {}.{}", databaseName, tableName);
@@ -46,17 +52,39 @@ public class MetadataSyncService {
         try {
             DatasourceConfig config = datasourceConfigService.getDatasourceById(datasourceId);
             if (config == null) {
-                log.error("数据源配置不存在: datasourceId={}", datasourceId);
+                log.error("[DDL-DEBUG-D3] 数据源配置不存在! datasourceId={}", datasourceId);
                 return false;
             }
+            log.info("[DDL-DEBUG-D3] 数据源配置获取成功: id={}, name={}", config.getId(), config.getDatasourceName());
 
             TableMetadata targetTable = this.tableMetadataMapper.getTableMetadata(storageEngine, databaseName, tableName);
+            if (targetTable == null) {
+                log.info("[DDL-DEBUG-D3] 表不存在(首次建表), 将新建: {}.{}", databaseName, tableName);
+                targetTable = new TableMetadata();
+                targetTable.setTableName(tableName);
+                targetTable.setDatabaseName(databaseName);
+                targetTable.setDatasourceId(datasourceId);
+                targetTable.setStorageEngine(storageEngine);
+            } else {
+                log.info("[DDL-DEBUG-D3] 表已存在, 将更新: id={}, {}.{}", targetTable.getId(), databaseName, tableName);
+            }
+
+            // 应用Hive表级属性（从DDL语句中提取的EXTERNAL/comment/LOCATION/STORED AS等）
+            if (hiveAttrs != null) {
+                applyHiveAttributes(targetTable, hiveAttrs);
+                log.info("[DDL-DEBUG-D3] Hive属性已应用: type={}, comment={}, storageFormat={}, location={}",
+                        targetTable.getTableType(), targetTable.getTableComment(),
+                        targetTable.getStorageFormat(), targetTable.getLocation());
+            }
 
             // 通过ExecutionStrategy获取字段信息
             ExecutionStrategy strategy = executionStrategyFactory.getStrategy(config);
+            log.info("[DDL-DEBUG-D3] ExecutionStrategy获取成功: {}", strategy.getClass().getSimpleName());
             List<ColumnMetadataVO> columnVOs = strategy.listColumns(config, databaseName, tableName);
+            log.info("[DDL-DEBUG-D4] listColumns返回字段数量: {}", columnVOs != null ? columnVOs.size() : "null");
             List<ColumnMetadata> columns = convertToColumnMetadataEntities(columnVOs, targetTable, storageEngine, databaseName);
 
+            log.info("[DDL-DEBUG-D3] 准备写入DB: table={}, columns={}", targetTable.getTableName(), columns.size());
             tableMetadataService.syncSingleTable(storageEngine, targetTable, columns);
             log.info("增量同步成功: {} {}.{}", ddlType, databaseName, tableName);
             return true;
@@ -178,6 +206,26 @@ public class MetadataSyncService {
         }
         if (source.getTableCreateTime() != null) {
             target.setTableCreateTime(source.getTableCreateTime());
+        }
+    }
+
+    /**
+     * 将从DDL语句中提取的Hive表级属性应用到TableMetadata实体。
+     * 包括：表类型(EXTERNAL/MANAGED)、表注释、存储格式、存储路径等。
+     */
+    private void applyHiveAttributes(TableMetadata target, AbstractBaseExecutionStrategy.HiveTableAttributes attrs) {
+        if (attrs == null || target == null) return;
+        if (attrs.tableType != null) {
+            target.setTableType(attrs.tableType);
+        }
+        if (attrs.tableComment != null) {
+            target.setTableComment(attrs.tableComment);
+        }
+        if (attrs.storageFormat != null) {
+            target.setStorageFormat(attrs.storageFormat);
+        }
+        if (attrs.location != null) {
+            target.setLocation(attrs.location);
         }
     }
 

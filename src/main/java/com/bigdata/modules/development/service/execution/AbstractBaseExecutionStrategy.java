@@ -110,21 +110,141 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
 
     // ==================== DDL检测 ====================
 
+    /**
+     * Hive表级属性（从CREATE TABLE语句的Hive特有子句中提取）
+     */
+    public static class HiveTableAttributes {
+        public String tableComment;       // TBLPROPERTIES 中的 'comment' 值
+        public String tableType;          // EXTERNAL → "EXTERNAL_TABLE", 否则 "MANAGED_TABLE"
+        public String storageFormat;      // STORED AS 后面的格式（TEXTFILE/ORC/PARQUET等）
+        public String location;           // LOCATION '...' 的值
+        public String fieldDelimiter;     // FIELDS TERMINATED BY '...' 的值
+        public Map<String, String> tblProperties; // TBLPROPERTIES 中所有键值对
+    }
+
+    /**
+     * 从原始SQL中提取Hive表级属性，同时返回剥离后的标准SQL供JSqlParser解析。
+     * <p>
+     * 提取的属性包括：EXTERNAL标志、TBLPROPERTIES comment、STORED AS格式、LOCATION路径、字段分隔符等。
+     * 剥离后的SQL只保留 CREATE + 表名 + 列定义，确保JSqlParser能正确解析。
+     */
+    private Object[] extractAndStripHiveAttributes(String sql) {
+        if (sql == null) return new Object[]{null, null};
+
+        HiveTableAttributes attrs = new HiveTableAttributes();
+        attrs.tblProperties = new LinkedHashMap<>();
+
+        String result = sql.trim();
+        String upper = result.toUpperCase();
+
+        // 1. 检测 EXTERNAL 关键字
+        if (upper.contains("EXTERNAL")) {
+            attrs.tableType = "EXTERNAL_TABLE";
+            result = result.replaceAll("(?i)\\bEXTERNAL\\s+", "");
+        } else {
+            attrs.tableType = "MANAGED_TABLE";
+        }
+
+        // 2. 提取 TBLPROPERTIES 中的 comment 和其他属性
+        java.util.regex.Pattern tblPropsPattern = java.util.regex.Pattern.compile(
+                "(?i)\\bTBLPROPERTIES\\s*\\(([^)]+)\\)");
+        java.util.regex.Matcher tblPropsMatcher = tblPropsPattern.matcher(result);
+        if (tblPropsMatcher.find()) {
+            String propsBody = tblPropsMatcher.group(1);
+            java.util.regex.Pattern kvPattern = java.util.regex.Pattern.compile("'([^']*)'\\s*=\\s*'([^']*)'");
+            java.util.regex.Matcher kvMatcher = kvPattern.matcher(propsBody);
+            while (kvMatcher.find()) {
+                String key = kvMatcher.group(1);
+                String value = kvMatcher.group(2);
+                attrs.tblProperties.put(key, value);
+                if ("comment".equalsIgnoreCase(key)) {
+                    attrs.tableComment = value;
+                }
+            }
+            result = result.replace(tblPropsMatcher.group(0), "");
+        }
+
+        // 3. 提取 STORED AS 格式
+        java.util.regex.Pattern storedAsPattern = java.util.regex.Pattern.compile("(?i)\\bSTORED\\s+AS\\s+(\\w+)");
+        java.util.regex.Matcher storedAsMatcher = storedAsPattern.matcher(result);
+        if (storedAsMatcher.find()) {
+            attrs.storageFormat = storedAsMatcher.group(1).toUpperCase();
+            result = result.replace(storedAsMatcher.group(0), "");
+        }
+
+        // 4. 提取 LOCATION 路径
+        java.util.regex.Pattern locationPattern = java.util.regex.Pattern.compile("(?i)\\bLOCATION\\s+'([^']*)'");
+        java.util.regex.Matcher locationMatcher = locationPattern.matcher(result);
+        if (locationMatcher.find()) {
+            attrs.location = locationMatcher.group(1);
+            result = result.replace(locationMatcher.group(0), "");
+        }
+
+        // 5. 提取 FIELDS TERMINATED BY 分隔符
+        java.util.regex.Pattern delimiterPattern = java.util.regex.Pattern.compile(
+                "(?i)\\bFIELDS\\s+TERMINATED\\s+BY\\s+'([^']*)'");
+        java.util.regex.Matcher delimiterMatcher = delimiterPattern.matcher(result);
+        if (delimiterMatcher.find()) {
+            attrs.fieldDelimiter = delimiterMatcher.group(1);
+            result = result.replace(delimiterMatcher.group(0), "");
+        }
+
+        // 6. 移除其余 Hive 子句残留
+        result = result.replaceAll("(?i)\\bROW\\s+FORMAT\\s+DELIMITED", "");
+        result = result.replaceAll("(?i)\\bROW\\s+FORMAT\\s+SERDE\\s+'[^']*'", "");
+        result = result.replaceAll("(?i)\\bSTORED\\s+BY\\s+\\w+", "");
+        result = result.replaceAll("(?i)\\bSERDE\\s+'[^']*'(\\s+WITH\\s+SERDEPROPERTIES\\s*\\([^)]*\\))?", "");
+
+        // 7. 对于 CREATE 语句，截取到列定义右括号为止（兜底）
+        if (result.toUpperCase().startsWith("CREATE")) {
+            int parenDepth = 0;
+            int lastParenPos = -1;
+            for (int i = 0; i < result.length(); i++) {
+                char c = result.charAt(i);
+                if (c == '(') parenDepth++;
+                else if (c == ')') {
+                    parenDepth--;
+                    if (parenDepth == 0) { lastParenPos = i; break; }
+                }
+            }
+            if (lastParenPos > 0) {
+                result = result.substring(0, lastParenPos + 1).trim();
+            }
+        }
+
+        return new Object[]{result.trim(), attrs};
+    }
+
     protected static class DdlInfo {
         String ddlType;
         String databaseName;
         String tableName;
+        HiveTableAttributes hiveAttributes; // Hive表级属性（EXTERNAL/comment/LOCATION/STORED AS等）
     }
 
     /**
      * 使用JSqlParser检测SQL是否为DDL语句（CREATE/ALTER/DROP/TRUNCATE TABLE）
+     * <p>
+     * 支持标准SQL和Hive DDL语法。对于Hive特有的子句（ROW FORMAT、STORED AS、LOCATION、TBLPROPERTIES等），
+     * 会先做预处理剥离后再交给JSqlParser解析，避免解析失败。
+     * </p>
      */
     protected DdlInfo detectDdlStatement(String sql) {
         if (sql == null || sql.trim().isEmpty()) {
             return null;
         }
+        getLog().info("[DDL-DEBUG-D1] detectDdlStatement 入口, SQL前100字: {}", sql.length() > 100 ? sql.substring(0, 100) + "..." : sql);
         try {
-            net.sf.jsqlparser.statement.Statement stmt = CCJSqlParserUtil.parse(sql);
+            // 提取Hive表级属性 + 剥离Hive特有子句，使JSqlParser能正确解析
+            Object[] extractResult = extractAndStripHiveAttributes(sql);
+            String normalizedSql = (String) extractResult[0];
+            HiveTableAttributes hiveAttrs = (HiveTableAttributes) extractResult[1];
+            getLog().info("[DDL-DEBUG-D1] stripHive后SQL: {}", normalizedSql.length() > 200 ? normalizedSql.substring(0, 200) + "..." : normalizedSql);
+            if (hiveAttrs != null) {
+                getLog().info("[DDL-DEBUG-D1] 提取到Hive属性: type={}, comment={}, storageFormat={}, location={}",
+                        hiveAttrs.tableType, hiveAttrs.tableComment, hiveAttrs.storageFormat, hiveAttrs.location);
+            }
+            net.sf.jsqlparser.statement.Statement stmt = CCJSqlParserUtil.parse(normalizedSql);
             if (stmt instanceof CreateTable) {
                 CreateTable createTable = (CreateTable) stmt;
                 DdlInfo info = new DdlInfo();
@@ -134,6 +254,7 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
                 if (info.databaseName == null || info.databaseName.isEmpty()) {
                     info.databaseName = createTable.getTable().getDatabase().getDatabaseName();
                 }
+                info.hiveAttributes = hiveAttrs;
                 return info;
             }
             if (stmt instanceof Alter) {
@@ -173,7 +294,7 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
             }
             return null;
         } catch (Exception e) {
-            getLog().debug("SQL解析失败, 可能不是DDL语句: {}", e.getMessage());
+            getLog().error("[DDL-DEBUG-D1] JSqlParser解析失败(这是根因!): {}", e.getMessage(), e);
             return null;
         }
     }
@@ -704,8 +825,13 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
      * 所有SQL执行策略（JDBC、Kyuubi等）在execute成功后均可调用此方法。
      */
     protected void handleDdlMetadataSync(String sql, CodeExecutionContext context, String executionId) {
+        getLog().info("[DDL-DEBUG-D2] handleDdlMetadataSync 入口, executionId={}", executionId);
         DdlInfo ddlInfo = detectDdlStatement(sql);
-        if (ddlInfo == null) return;
+        if (ddlInfo == null) {
+            getLog().warn("[DDL-DEBUG-D2] ⚠️ ddlInfo为NULL! 元数据同步被跳过! SQL不是DDL或JSqlParser解析失败! executionId={}", executionId);
+            return;
+        }
+        getLog().info("[DDL-DEBUG-D2] DDL检测通过: type={}, db={}, table={}", ddlInfo.ddlType, ddlInfo.databaseName, ddlInfo.tableName);
 
         String ddlMsg = "DDL语句执行成功: " + ddlInfo.ddlType + " " +
                 (ddlInfo.databaseName != null ? ddlInfo.databaseName + "." : "") + ddlInfo.tableName;
@@ -715,7 +841,8 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
             boolean syncSuccess = metadataSyncService.syncSingleTableMetadata(
                     context.getPrimaryDatasourceConfig().getId(),
                     context.getPrimaryStorageEngine(),
-                    ddlInfo.databaseName, ddlInfo.tableName, ddlInfo.ddlType);
+                    ddlInfo.databaseName, ddlInfo.tableName, ddlInfo.ddlType,
+                    ddlInfo.hiveAttributes);
             if (syncSuccess) {
                 getLog().info("元数据同步成功: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
                 executionLogListener.publishLog(executionId, "[元数据] 同步成功: " + ddlInfo.tableName);

@@ -9,6 +9,8 @@ import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
 import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import com.bigdata.modules.development.service.execution.ExecutionStrategy;
 import com.bigdata.modules.development.service.execution.ExecutionStrategyFactory;
+import com.bigdata.modules.development.service.execution.AbstractBaseExecutionStrategy;
+import com.bigdata.modules.development.service.execution.CodeExecutionContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,7 +59,7 @@ class MetadataSyncServiceTest {
 
     @Test
     void testSyncSingleTableMetadata_DROP() {
-        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "DROP");
+        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "DROP", null);
         assertTrue(result);
         verify(tableMetadataService).deleteTableByNames(StorageEngineType.HIVE, "ods", "user_info");
     }
@@ -79,7 +81,7 @@ class MetadataSyncServiceTest {
         when(executionStrategy.listColumns(eq(mockConfig), eq("ods"), eq("user_info")))
                 .thenReturn(Collections.singletonList(colVo));
 
-        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "CREATE");
+        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "CREATE", null);
         assertTrue(result);
         verify(tableMetadataService).syncSingleTable(eq(StorageEngineType.HIVE), eq(existingTable), anyList());
     }
@@ -87,7 +89,7 @@ class MetadataSyncServiceTest {
     @Test
     void testSyncSingleTableMetadata_configNotFound() {
         when(datasourceConfigService.getDatasourceById(999L)).thenReturn(null);
-        boolean result = metadataSyncService.syncSingleTableMetadata(999L, StorageEngineType.HIVE, "ods", "t", "CREATE");
+        boolean result = metadataSyncService.syncSingleTableMetadata(999L, StorageEngineType.HIVE, "ods", "t", "CREATE", null);
         assertFalse(result);
     }
 
@@ -285,5 +287,498 @@ class MetadataSyncServiceTest {
         List<ColumnMetadata> result2 = (List<ColumnMetadata>) method.invoke(
                 metadataSyncService, Collections.emptyList(), null, StorageEngineType.HIVE, "db");
         assertTrue(result2.isEmpty());
+    }
+
+    // ==================== CREATE EXTERNAL TABLE DDL 元数据同步（真实数据）====================
+
+    /** 用户提供的真实建表SQL：tmall_dw.ods_product 外部表 */
+    private static final String CREATE_EXTERNAL_TABLE_SQL =
+            "CREATE EXTERNAL TABLE IF NOT EXISTS tmall_dw.ods_product (\n" +
+            "     item_id    BIGINT  COMMENT '商品 ID',\n" +
+            "     title      STRING  COMMENT '商品标题关键词（NLP 提取，空格分隔）',\n" +
+            "     pict_url   STRING  COMMENT '商品主图 URL',\n" +
+            "   category   STRING  COMMENT '商品类目编码，格式：父类目-叶子类目',\n" +
+            "   brand_id   STRING  COMMENT '品牌 ID',\n" +
+            "   seller_id  STRING  COMMENT '卖家 ID'\n" +
+            ") \n" +
+            "ROW FORMAT DELIMITED \n" +
+            "FIELDS TERMINATED BY '\\001' \n" +
+            "STORED AS TEXTFILE \n" +
+            "LOCATION 'jfs://myjfs/test/product' \n" +
+            "TBLPROPERTIES ( \n" +
+            "    'comment' = '天猫商品属性原始数据外部表', \n" +
+            "    'skip.header.line.count' = '0' \n" +
+            ");";
+
+    private static final String DB_NAME = "tmall_dw";
+    private static final String TABLE_NAME = "ods_product";
+    private static final Long DATASOURCE_ID = 1L;
+
+    /**
+     * 构造 ods_product 表的6个真实字段VO（来自CREATE TABLE语句定义）
+     */
+    private List<ColumnMetadataVO> buildOdsProductColumns() {
+        List<ColumnMetadataVO> columns = new ArrayList<>();
+
+        ColumnMetadataVO col1 = new ColumnMetadataVO();
+        col1.setTableName(TABLE_NAME);
+        col1.setColumnName("item_id");
+        col1.setColumnType("BIGINT");
+        col1.setColumnComment("商品 ID");
+        col1.setOrdinalPosition(1);
+        col1.setNullable(0);
+        columns.add(col1);
+
+        ColumnMetadataVO col2 = new ColumnMetadataVO();
+        col2.setTableName(TABLE_NAME);
+        col2.setColumnName("title");
+        col2.setColumnType("STRING");
+        col2.setColumnComment("商品标题关键词（NLP 提取，空格分隔）");
+        col2.setOrdinalPosition(2);
+        col2.setNullable(1);
+        columns.add(col2);
+
+        ColumnMetadataVO col3 = new ColumnMetadataVO();
+        col3.setTableName(TABLE_NAME);
+        col3.setColumnName("pict_url");
+        col3.setColumnType("STRING");
+        col3.setColumnComment("商品主图 URL");
+        col3.setOrdinalPosition(3);
+        col3.setNullable(1);
+        columns.add(col3);
+
+        ColumnMetadataVO col4 = new ColumnMetadataVO();
+        col4.setTableName(TABLE_NAME);
+        col4.setColumnName("category");
+        col4.setColumnType("STRING");
+        col4.setColumnComment("商品类目编码，格式：父类目-叶子类目");
+        col4.setOrdinalPosition(4);
+        col4.setNullable(1);
+        columns.add(col4);
+
+        ColumnMetadataVO col5 = new ColumnMetadataVO();
+        col5.setTableName(TABLE_NAME);
+        col5.setColumnName("brand_id");
+        col5.setColumnType("STRING");
+        col5.setColumnComment("品牌 ID");
+        col5.setOrdinalPosition(5);
+        col5.setNullable(1);
+        columns.add(col5);
+
+        ColumnMetadataVO col6 = new ColumnMetadataVO();
+        col6.setTableName(TABLE_NAME);
+        col6.setColumnName("seller_id");
+        col6.setColumnType("STRING");
+        col6.setColumnComment("卖家 ID");
+        col6.setOrdinalPosition(6);
+        col6.setNullable(1);
+        columns.add(col6);
+
+        return columns;
+    }
+
+    /**
+     * 测试1: DDL检测 — 验证JSqlParser能正确解析CREATE EXTERNAL TABLE语句，
+     * 提取出 databaseName=tmall_dw, tableName=ods_product, ddlType=CREATE
+     */
+    @Test
+    void testDetectDdlStatement_CreateExternalTable() throws Exception {
+        java.lang.reflect.Method detectMethod = AbstractBaseExecutionStrategy.class.getDeclaredMethod(
+                "detectDdlStatement", String.class);
+        detectMethod.setAccessible(true);
+
+        // 创建一个可测试的具体子类，实现getLog()返回真实Logger
+        TestableBaseStrategy strategy = new TestableBaseStrategy();
+
+        // 通过detectDdlStatement调用（内部会先stripHiveSpecificClauses再解析）
+        Object result = detectMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL);
+
+        assertNotNull(result, "CREATE EXTERNAL TABLE 应被识别为DDL语句");
+
+        // 通过反射读取DdlInfo内部类的字段
+        Class<?> ddlInfoClass = result.getClass();
+        java.lang.reflect.Field ddlTypeField = ddlInfoClass.getDeclaredField("ddlType");
+        java.lang.reflect.Field dbNameField = ddlInfoClass.getDeclaredField("databaseName");
+        java.lang.reflect.Field tblNameField = ddlInfoClass.getDeclaredField("tableName");
+        ddlTypeField.setAccessible(true);
+        dbNameField.setAccessible(true);
+        tblNameField.setAccessible(true);
+
+        assertEquals("CREATE", ddlTypeField.get(result), "DDL类型应为CREATE");
+        assertEquals(DB_NAME, dbNameField.get(result), "数据库名应为tmall_dw");
+        assertEquals(TABLE_NAME, tblNameField.get(result), "表名应为ods_product");
+    }
+
+    /**
+     * 测试2: 完整DDL元数据同步流程 — 模拟handleDdlMetadataSync调用syncSingleTableMetadata，
+     * 验证table_metadata和column_metadata均被正确写入。
+     *
+     * 场景：表不存在（首次建表），应走insert逻辑
+     */
+    @Test
+    void testCreateExternalTableDdlSync_newTable() {
+        // 1. Mock数据源配置查询
+        when(datasourceConfigService.getDatasourceById(DATASOURCE_ID)).thenReturn(mockConfig);
+
+        // 2. Mock ExecutionStrategy工厂和listColumns返回6个真实字段
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
+                .thenReturn(buildOdsProductColumns());
+
+        // 3. Mock表元数据查询：表不存在（首次建表），返回null → 走新建逻辑
+        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+                .thenReturn(null);
+
+        // 4. 执行同步（模拟handleDdlMetadataSync的调用）
+        boolean result = metadataSyncService.syncSingleTableMetadata(
+                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
+
+        // 5. 断言同步成功
+        assertTrue(result, "CREATE TABLE同步应成功");
+
+        // 6. 验证tableMetadataService.syncSingleTable被调用，且传入了正确的表+列数据
+        verify(tableMetadataService).syncSingleTable(
+                eq(StorageEngineType.HIVE),
+                argThat(table -> {
+                    // 验证表基本信息
+                    if (table == null) return false;
+                    if (!TABLE_NAME.equals(table.getTableName())) return false;
+                    if (!DB_NAME.equals(table.getDatabaseName())) return false;
+                    if (table.getDatasourceId() == null || !DATASOURCE_ID.equals(table.getDatasourceId())) return false;
+                    return true;
+                }),
+                argThat(columns -> {
+                    // 验证6个字段全部写入column_metadata
+                    if (columns == null || columns.size() != 6) return false;
+                    // 验证每个字段的名称、类型、注释、顺序
+                    String[] expectedNames = {"item_id", "title", "pict_url", "category", "brand_id", "seller_id"};
+                    String[] expectedTypes = {"BIGINT", "STRING", "STRING", "STRING", "STRING", "STRING"};
+                    String[] expectedComments = {
+                            "商品 ID",
+                            "商品标题关键词（NLP 提取，空格分隔）",
+                            "商品主图 URL",
+                            "商品类目编码，格式：父类目-叶子类目",
+                            "品牌 ID",
+                            "卖家 ID"
+                    };
+                    for (int i = 0; i < 6; i++) {
+                        ColumnMetadata col = columns.get(i);
+                        if (!expectedNames[i].equals(col.getColumnName())) return false;
+                        if (!expectedTypes[i].equals(col.getColumnType())) return false;
+                        if (!expectedComments[i].equals(col.getColumnComment())) return false;
+                        if ((i + 1) != col.getOrdinalPosition()) return false;
+                        if (!DB_NAME.equals(col.getDatabaseName())) return false;
+                        if (!TABLE_NAME.equals(col.getTableName())) return false;
+                        if (col.getSyncTime() == null) return false; // 同步时间必须设置
+                    }
+                    return true;
+                })
+        );
+    }
+
+    /**
+     * 测试3: DDL同步 — 表已存在场景（ALTER/重建表时覆盖更新）
+     */
+    @Test
+    void testCreateExternalTableDdlSync_existingTable() {
+        when(datasourceConfigService.getDatasourceById(DATASOURCE_ID)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
+                .thenReturn(buildOdsProductColumns());
+
+        // 表已存在，返回旧记录
+        TableMetadata existingTable = new TableMetadata();
+        existingTable.setId(200L);
+        existingTable.setTableName(TABLE_NAME);
+        existingTable.setDatabaseName(DB_NAME);
+        existingTable.setTableComment("旧的注释");
+        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+                .thenReturn(existingTable);
+
+        boolean result = metadataSyncService.syncSingleTableMetadata(
+                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
+
+        assertTrue(result);
+
+        // 已有表时，targetTable应该是已有的existingTable（id=200L），而非新建
+        verify(tableMetadataService).syncSingleTable(
+                eq(StorageEngineType.HIVE),
+                argThat(table -> table != null && table.getId() != null && table.getId().equals(200L)),
+                anyList()
+        );
+    }
+
+    /**
+     * 测试4: 端到端 — 模拟AbstractBaseExecutionStrategy.handleDdlMetadataSync完整调用链。
+     *
+     * 验证从SQL解析 → DDL检测 → 调用syncSingleTableMetadata → 写入table_metadata + column_metadata 的完整链路。
+     * 使用反射调用handleDdlMetadataSync（protected方法）。
+     */
+    @Test
+    void testHandleDdlMetadataSync_endToEnd() throws Exception {
+        // ---- 准备Mock ----
+        when(datasourceConfigService.getDatasourceById(DATASOURCE_ID)).thenReturn(mockConfig);
+        mockConfig.setStorageEngine(StorageEngineType.HIVE);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
+                .thenReturn(buildOdsProductColumns());
+        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+                .thenReturn(null);
+
+        // 构造CodeExecutionContext
+        CodeExecutionContext context = new CodeExecutionContext();
+        context.setExecutionId("exec-test-001");
+        context.setCodeContent(CREATE_EXTERNAL_TABLE_SQL);
+        context.setDatasourceConfigs(Collections.singletonList(mockConfig));
+
+        // 构造可测试的具体子类并注入mock依赖
+        TestableBaseStrategy strategy = new TestableBaseStrategy();
+        java.lang.reflect.Field msField = AbstractBaseExecutionStrategy.class.getDeclaredField("metadataSyncService");
+        msField.setAccessible(true);
+        msField.set(strategy, metadataSyncService);
+
+        java.lang.reflect.Field logListenerField = AbstractBaseExecutionStrategy.class.getDeclaredField("executionLogListener");
+        logListenerField.setAccessible(true);
+        com.bigdata.modules.development.service.execution.ExecutionLogListener mockLogListener =
+                mock(com.bigdata.modules.development.service.execution.ExecutionLogListener.class);
+        logListenerField.set(strategy, mockLogListener);
+
+        // ---- 执行 ----
+        java.lang.reflect.Method handleDdlMethod = AbstractBaseExecutionStrategy.class.getDeclaredMethod(
+                "handleDdlMetadataSync", String.class, CodeExecutionContext.class, String.class);
+        handleDdlMethod.setAccessible(true);
+        handleDdlMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL, context, "exec-test-001");
+
+        // ---- 验证 ----
+        // 1. executionLogListener发布了DDL日志
+        verify(mockLogListener).publishLog(eq("exec-test-001"), contains("DDL"));
+        verify(mockLogListener, atLeastOnce()).publishLog(eq("exec-test-001"), contains("ods_product"));
+
+        // 2. metadataSyncService.syncSingleTableMetadata被调用（通过内部调用链验证）
+        //    由于metadataSyncService是@InjectMocks真实对象，无法直接verify
+        //    改为验证其最终调用的tableMetadataService.syncSingleTable参数正确
+
+        // 3. 最终写入了table_metadata + column_metadata（6个字段）
+        verify(tableMetadataService).syncSingleTable(
+                eq(StorageEngineType.HIVE),
+                argThat(t -> t != null && TABLE_NAME.equals(t.getTableName())),
+                argThat(cols -> cols != null && cols.size() == 6)
+        );
+
+        // 4. 发布了成功日志
+        verify(mockLogListener).publishLog(eq("exec-test-001"), contains("同步成功"));
+    }
+
+    /**
+     * 测试5: 字段完整性验证 — 逐个校验6个字段的每个属性是否与DDL定义一致
+     */
+    @Test
+    void testCreateExternalTableDdlSync_columnDataIntegrity() throws Exception {
+        when(datasourceConfigService.getDatasourceById(DATASOURCE_ID)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
+                .thenReturn(buildOdsProductColumns());
+        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+                .thenReturn(null);
+
+        metadataSyncService.syncSingleTableMetadata(
+                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
+
+        // 捕获实际传入syncSingleTable的columns参数
+        java.util.ArrayList<List<ColumnMetadata>> capturedColumns = new java.util.ArrayList<>();
+        verify(tableMetadataService).syncSingleTable(any(), any(), org.mockito.ArgumentMatchers.<List<ColumnMetadata>>argThat(capturedColumns::add));
+
+        List<ColumnMetadata> columns = capturedColumns.get(0);
+        assertEquals(6, columns.size(), "应有6个字段");
+
+        // === 字段1: item_id BIGINT COMMENT '商品 ID' ===
+        ColumnMetadata c0 = columns.get(0);
+        assertEquals("item_id", c0.getColumnName());
+        assertEquals("BIGINT", c0.getColumnType());
+        assertEquals("商品 ID", c0.getColumnComment());
+        assertEquals(1, c0.getOrdinalPosition());
+        assertEquals(0, c0.getNullable());       // BIGINT主键通常NOT NULL
+        assertEquals(0, c0.getIsPartition());     // 非分区列
+        assertEquals(0, c0.getIsPrimaryKey());    // 未显式声明PK
+        assertNotNull(c0.getSyncTime());
+
+        // === 字段2: title STRING COMMENT '商品标题关键词...' ===
+        ColumnMetadata c1 = columns.get(1);
+        assertEquals("title", c1.getColumnName());
+        assertEquals("STRING", c1.getColumnType());
+        assertEquals("商品标题关键词（NLP 提取，空格分隔）", c1.getColumnComment());
+        assertEquals(2, c1.getOrdinalPosition());
+
+        // === 字段3: pict_url STRING COMMENT '商品主图 URL' ===
+        ColumnMetadata c2 = columns.get(2);
+        assertEquals("pict_url", c2.getColumnName());
+        assertEquals("STRING", c2.getColumnType());
+        assertEquals("商品主图 URL", c2.getColumnComment());
+        assertEquals(3, c2.getOrdinalPosition());
+
+        // === 字段4: category STRING COMMENT '商品类目编码...' ===
+        ColumnMetadata c3 = columns.get(3);
+        assertEquals("category", c3.getColumnName());
+        assertEquals("STRING", c3.getColumnType());
+        assertEquals("商品类目编码，格式：父类目-叶子类目", c3.getColumnComment());
+        assertEquals(4, c3.getOrdinalPosition());
+
+        // === 字段5: brand_id STRING COMMENT '品牌 ID' ===
+        ColumnMetadata c4 = columns.get(4);
+        assertEquals("brand_id", c4.getColumnName());
+        assertEquals("STRING", c4.getColumnType());
+        assertEquals("品牌 ID", c4.getColumnComment());
+        assertEquals(5, c4.getOrdinalPosition());
+
+        // === 字段6: seller_id STRING COMMENT '卖家 ID' ===
+        ColumnMetadata c5 = columns.get(5);
+        assertEquals("seller_id", c5.getColumnName());
+        assertEquals("STRING", c5.getColumnType());
+        assertEquals("卖家 ID", c5.getColumnComment());
+        assertEquals(6, c5.getOrdinalPosition());
+    }
+
+    /**
+     * 测试6: Hive表级属性提取与写入验证 — 核心测试！
+     *
+     * 验证从 CREATE EXTERNAL TABLE DDL 中提取的以下属性正确写入 table_metadata：
+     * - EXTERNAL → tableType = "EXTERNAL_TABLE"
+     * - TBLPROPERTIES 'comment' → tableComment = "天猫商品属性原始数据外部表"
+     * - STORED AS TEXTFILE → storageFormat = "TEXTFILE"
+     * - LOCATION 'jfs://myjfs/test/product' → location = "jfs://myjfs/test/product"
+     */
+    @Test
+    void testCreateExternalTableDdlSync_hiveAttributesExtracted() throws Exception {
+        // 1. 准备Mock
+        when(datasourceConfigService.getDatasourceById(DATASOURCE_ID)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
+                .thenReturn(buildOdsProductColumns());
+        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+                .thenReturn(null);
+
+        // 2. 构造真实的HiveTableAttributes（模拟extractAndStripHiveAttributes的提取结果）
+        AbstractBaseExecutionStrategy.HiveTableAttributes hiveAttrs =
+                new AbstractBaseExecutionStrategy.HiveTableAttributes();
+        hiveAttrs.tableType = "EXTERNAL_TABLE";
+        hiveAttrs.tableComment = "天猫商品属性原始数据外部表";
+        hiveAttrs.storageFormat = "TEXTFILE";
+        hiveAttrs.location = "jfs://myjfs/test/product";
+        hiveAttrs.fieldDelimiter = "\\001";
+
+        // 3. 执行同步，传入真实的Hive属性
+        boolean result = metadataSyncService.syncSingleTableMetadata(
+                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", hiveAttrs);
+        assertTrue(result);
+
+        // 4. 验证table_metadata中写入了所有Hive属性
+        verify(tableMetadataService).syncSingleTable(
+                eq(StorageEngineType.HIVE),
+                argThat(table -> {
+                    if (table == null) return false;
+                    // === 验证表类型 ===
+                    if (!"EXTERNAL_TABLE".equals(table.getTableType())) {
+                        System.out.println("[ASSERT-FAIL] tableType 期望=EXTERNAL_TABLE, 实际=" + table.getTableType());
+                        return false;
+                    }
+                    // === 验证表注释（来自TBLPROPERTIES 'comment'）===
+                    if (!"天猫商品属性原始数据外部表".equals(table.getTableComment())) {
+                        System.out.println("[ASSERT-FAIL] tableComment 期望=天猫商品属性原始数据外部表, 实际=" + table.getTableComment());
+                        return false;
+                    }
+                    // === 验证存储格式（来自STORED AS）===
+                    if (!"TEXTFILE".equals(table.getStorageFormat())) {
+                        System.out.println("[ASSERT-FAIL] storageFormat 期望=TEXTFILE, 实际=" + table.getStorageFormat());
+                        return false;
+                    }
+                    // === 验证存储路径（来自LOCATION）===
+                    if (!"jfs://myjfs/test/product".equals(table.getLocation())) {
+                        System.out.println("[ASSERT-FAIL] location 期望=jfs://myjfs/test/product, 实际=" + table.getLocation());
+                        return false;
+                    }
+                    // === 基础字段也需正确 ===
+                    if (!TABLE_NAME.equals(table.getTableName())) return false;
+                    if (!DB_NAME.equals(table.getDatabaseName())) return false;
+                    if (table.getDatasourceId() == null || !DATASOURCE_ID.equals(table.getDatasourceId())) return false;
+                    return true;
+                }),
+                anyList()
+        );
+    }
+
+    /**
+     * 测试7: extractAndStripHiveAttributes 直接验证 — 确认正则提取逻辑的正确性
+     */
+    @Test
+    void testExtractAndStripHiveAttributes_fullExtraction() throws Exception {
+        java.lang.reflect.Method extractMethod = AbstractBaseExecutionStrategy.class.getDeclaredMethod(
+                "extractAndStripHiveAttributes", String.class);
+        extractMethod.setAccessible(true);
+
+        TestableBaseStrategy strategy = new TestableBaseStrategy();
+        Object[] result = (Object[]) extractMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL);
+
+        String normalizedSql = (String) result[0];
+        AbstractBaseExecutionStrategy.HiveTableAttributes attrs =
+                (AbstractBaseExecutionStrategy.HiveTableAttributes) result[1];
+
+        assertNotNull(normalizedSql, "剥离后的SQL不应为null");
+        assertNotNull(attrs, "Hive属性不应为null");
+
+        // 验证剥离后的SQL不包含Hive子句（JSqlParser应能解析）
+        assertFalse(normalizedSql.toUpperCase().contains("EXTERNAL"),
+                "剥离后SQL不应包含EXTERNAL");
+        assertFalse(normalizedSql.toUpperCase().contains("ROW FORMAT"),
+                "剥离后SQL不应包含ROW FORMAT");
+        assertFalse(normalizedSql.toUpperCase().contains("STORED AS"),
+                "剥离后SQL不应包含STORED AS");
+        assertFalse(normalizedSql.toUpperCase().contains("LOCATION"),
+                "剥离后SQL不应包含LOCATION");
+        assertFalse(normalizedSql.toUpperCase().contains("TBLPROPERTIES"),
+                "剥离后SQL不应包含TBLPROPERTIES");
+        // 但应保留核心DDL结构
+        assertTrue(normalizedSql.toUpperCase().startsWith("CREATE TABLE"),
+                "剥离后应以CREATE TABLE开头");
+        assertTrue(normalizedSql.contains("("), "应保留列定义左括号");
+        assertTrue(normalizedSql.contains("item_id"), "应保留列定义内容");
+
+        // === 验证提取的Hive属性 ===
+        assertEquals("EXTERNAL_TABLE", attrs.tableType,
+                "EXTERNAL关键字应被识别为EXTERNAL_TABLE");
+        assertEquals("天猫商品属性原始数据外部表", attrs.tableComment,
+                "TBLPROPERTIES comment应被提取为表注释");
+        assertEquals("TEXTFILE", attrs.storageFormat,
+                "STORED AS TEXTFILE应被提取");
+        assertEquals("jfs://myjfs/test/product", attrs.location,
+                "LOCATION路径应被提取");
+        assertEquals("\\001", attrs.fieldDelimiter,
+                "FIELDS TERMINATED BY分隔符应被提取");
+        assertNotNull(attrs.tblProperties, "tblProperties不应为null");
+        assertEquals("天猫商品属性原始数据外部表", attrs.tblProperties.get("comment"),
+                "tblProperties中应包含comment键值对");
+        assertEquals("0", attrs.tblProperties.get("skip.header.line.count"),
+                "tblProperties中应包含其他属性");
+    }
+
+    /**
+     * 可测试的AbstractBaseExecutionStrategy具体子类，仅实现getLog()抽象方法。
+     * 用于单元测试中调用protected方法（detectDdlStatement、handleDdlMetadataSync等）。
+     */
+    private static class TestableBaseStrategy extends AbstractBaseExecutionStrategy {
+        @Override
+        protected org.slf4j.Logger getLog() {
+            return org.slf4j.LoggerFactory.getLogger(TestableBaseStrategy.class);
+        }
+
+        @Override
+        public com.bigdata.modules.development.service.execution.EngineType getEngineType() {
+            return null;
+        }
+
+        @Override
+        public com.bigdata.modules.development.service.execution.CodeExecutionResult execute(
+                CodeExecutionContext context) {
+            return null;
+        }
     }
 }
