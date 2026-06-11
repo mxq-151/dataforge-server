@@ -1,6 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.DataAccessPermissionService;
+import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysTablePermission;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
@@ -10,6 +11,7 @@ import com.bigdata.modules.system.mapper.SysUserMapper;
 import com.bigdata.modules.system.entity.SysUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.*;
@@ -61,6 +63,12 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
 
     @Autowired
     protected SysUserMapper sysUserMapper;
+
+    @Autowired
+    protected MetadataSyncService metadataSyncService;
+
+    @Autowired
+    protected ExecutionLogListener executionLogListener;
 
     protected final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -685,6 +693,69 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
                 return applyMask(original, "partial", maskParams);
             default:
                 return applyMask(original, "partial", maskParams);
+        }
+    }
+
+    // ==================== DDL元数据同步 & 行过滤/脱敏（所有SQL策略共用）====================
+
+    /**
+     * DDL语句执行后的元数据同步处理。
+     * 检测SQL是否为DDL，若是则通过MetadataSyncService同步对应表的元数据。
+     * 所有SQL执行策略（JDBC、Kyuubi等）在execute成功后均可调用此方法。
+     */
+    protected void handleDdlMetadataSync(String sql, CodeExecutionContext context, String executionId) {
+        DdlInfo ddlInfo = detectDdlStatement(sql);
+        if (ddlInfo == null) return;
+
+        String ddlMsg = "DDL语句执行成功: " + ddlInfo.ddlType + " " +
+                (ddlInfo.databaseName != null ? ddlInfo.databaseName + "." : "") + ddlInfo.tableName;
+        getLog().info(ddlMsg + ", 开始同步元数据");
+        executionLogListener.publishLog(executionId, "[DDL] " + ddlMsg);
+        try {
+            boolean syncSuccess = metadataSyncService.syncSingleTableMetadata(
+                    context.getPrimaryDatasourceConfig().getId(),
+                    context.getPrimaryStorageEngine(),
+                    ddlInfo.databaseName, ddlInfo.tableName, ddlInfo.ddlType);
+            if (syncSuccess) {
+                getLog().info("元数据同步成功: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
+                executionLogListener.publishLog(executionId, "[元数据] 同步成功: " + ddlInfo.tableName);
+            } else {
+                getLog().warn("元数据同步失败: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
+                executionLogListener.publishLog(executionId, "[元数据] 同步失败: " + ddlInfo.tableName);
+            }
+        } catch (Exception syncEx) {
+            getLog().error("元数据同步异常: {}.{}", ddlInfo.databaseName, ddlInfo.tableName, syncEx);
+            executionLogListener.publishLog(executionId, "[元数据] 同步异常: " + syncEx.getMessage());
+        }
+    }
+
+    /**
+     * 对查询结果统一应用行级过滤和数据脱敏。
+     * 所有SQL执行策略在返回SELECT结果前均可调用此方法。
+     */
+    protected void applyRowFilterAndMasking(List<List<String>> rows, List<String> columns,
+                                           String sql, CodeExecutionContext context) {
+        String datasourceName = context.getPrimaryDatasourceConfig().getDatasourceName();
+        String defaultDatabase = context.getPrimaryDatasourceDatabaseName();
+
+        SelectPermissionInfo permInfo = extractSelectPermissionInfo(sql, datasourceName, defaultDatabase);
+        if (permInfo != null && permInfo.tableRef != null) {
+            String dbName = permInfo.tableRef.databaseName != null ?
+                    permInfo.tableRef.databaseName : defaultDatabase;
+            SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
+                    datasourceName, dbName, permInfo.tableRef.tableName);
+            if (mergedPerm != null) {
+                if (mergedPerm.getRowFilterSql() != null && !mergedPerm.getRowFilterSql().isBlank()) {
+                    int beforeSize = rows.size();
+                    rows = applyRowFilter(rows, columns, mergedPerm.getRowFilterSql());
+                    getLog().info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rows.size(),
+                            mergedPerm.getRowFilterSql());
+                }
+                if (mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
+                    applyDataMasking(rows, columns, mergedPerm.getDataMaskingRule());
+                    getLog().info("已应用数据脱敏规则, 表: {}.{}", dbName, permInfo.tableRef.tableName);
+                }
+            }
         }
     }
 }

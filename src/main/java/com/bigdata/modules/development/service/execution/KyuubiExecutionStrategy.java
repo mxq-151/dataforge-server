@@ -3,9 +3,7 @@ package com.bigdata.modules.development.service.execution;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.metadata.entity.TableMetadata;
-import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
-import com.bigdata.modules.system.entity.SysTablePermission;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,12 +35,6 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     @Autowired
     private ProcessManager processManager;
-
-    @Autowired
-    private MetadataSyncService metadataSyncService;
-
-    @Autowired
-    private ExecutionLogListener executionLogListener;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -669,62 +661,6 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             log.info("[Kyuubi REST] Session已关闭: {}", sessionHandle);
         } catch (Exception e) {
             log.warn("[Kyuubi REST] 关闭Session异常: {}", e.getMessage());
-        }
-    }
-
-    // ==================== 元数据同步 & 行过滤/脱敏（调用基类方法）====================
-
-    /** DDL元数据同步 */
-    private void handleDdlMetadataSync(String sql, CodeExecutionContext context, String executionId) {
-        DdlInfo ddlInfo = detectDdlStatement(sql);
-        if (ddlInfo == null) return;
-
-        String ddlMsg = "DDL语句执行成功: " + ddlInfo.ddlType + " " +
-                (ddlInfo.databaseName != null ? ddlInfo.databaseName + "." : "") + ddlInfo.tableName;
-        log.info(ddlMsg + ", 开始同步元数据");
-        executionLogListener.publishLog(executionId, "[DDL] " + ddlMsg);
-        try {
-            boolean syncSuccess = metadataSyncService.syncSingleTableMetadata(
-                    context.getPrimaryDatasourceConfig().getId(),
-                    context.getPrimaryStorageEngine(),
-                    ddlInfo.databaseName, ddlInfo.tableName, ddlInfo.ddlType);
-            if (syncSuccess) {
-                log.info("元数据同步成功: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
-                executionLogListener.publishLog(executionId, "[元数据] 同步成功: " + ddlInfo.tableName);
-            } else {
-                log.warn("元数据同步失败: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
-                executionLogListener.publishLog(executionId, "[元数据] 同步失败: " + ddlInfo.tableName);
-            }
-        } catch (Exception syncEx) {
-            log.error("元数据同步异常: {}.{}", ddlInfo.databaseName, ddlInfo.tableName, syncEx);
-            executionLogListener.publishLog(executionId, "[元数据] 同步异常: " + syncEx.getMessage());
-        }
-    }
-
-    /** 对查询结果统一应用行级过滤和数据脱敏（调用基类提供的方法） */
-    private void applyRowFilterAndMasking(List<List<String>> rows, List<String> columns,
-                                           String sql, CodeExecutionContext context) {
-        String datasourceName = context.getPrimaryDatasourceConfig().getDatasourceName();
-        String defaultDatabase = context.getPrimaryDatasourceDatabaseName();
-
-        SelectPermissionInfo permInfo = extractSelectPermissionInfo(sql, datasourceName, defaultDatabase);
-        if (permInfo != null && permInfo.tableRef != null) {
-            String dbName = permInfo.tableRef.databaseName != null ?
-                    permInfo.tableRef.databaseName : defaultDatabase;
-            SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
-                    datasourceName, dbName, permInfo.tableRef.tableName);
-            if (mergedPerm != null) {
-                if (mergedPerm.getRowFilterSql() != null && !mergedPerm.getRowFilterSql().isBlank()) {
-                    int beforeSize = rows.size();
-                    rows = applyRowFilter(rows, columns, mergedPerm.getRowFilterSql());
-                    log.info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rows.size(),
-                            mergedPerm.getRowFilterSql());
-                }
-                if (mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
-                    applyDataMasking(rows, columns, mergedPerm.getDataMaskingRule());
-                    log.info("已应用数据脱敏规则, 表: {}.{}", dbName, permInfo.tableRef.tableName);
-                }
-            }
         }
     }
 

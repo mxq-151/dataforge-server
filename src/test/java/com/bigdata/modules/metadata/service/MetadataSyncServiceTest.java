@@ -1,8 +1,14 @@
 package com.bigdata.modules.metadata.service;
 
+import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
+import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
+import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
+import com.bigdata.modules.development.service.execution.ExecutionStrategy;
+import com.bigdata.modules.development.service.execution.ExecutionStrategyFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,11 +16,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.lang.reflect.Method;
-import java.sql.*;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -29,259 +34,256 @@ class MetadataSyncServiceTest {
     @Mock
     private TableMetadataMapper tableMetadataMapper;
 
+    @Mock
+    private ExecutionStrategyFactory executionStrategyFactory;
+
+    @Mock
+    private ExecutionStrategy executionStrategy;
+
     @InjectMocks
     private MetadataSyncService metadataSyncService;
 
-    private Connection mockConn;
-    private Statement mockStmt;
-    private PreparedStatement mockPstmt;
+    private DatasourceConfig mockConfig;
 
     @BeforeEach
-    void setUp() throws SQLException {
-        mockConn = mock(Connection.class);
-        mockStmt = mock(Statement.class);
-        mockPstmt = mock(PreparedStatement.class);
+    void setUp() {
+        mockConfig = new DatasourceConfig();
+        mockConfig.setId(1L);
+        mockConfig.setStorageEngine(StorageEngineType.HIVE);
+        mockConfig.setDatasourceName("test-kyuubi");
     }
 
-    private ResultSet buildDescribeFormattedRs(List<String[]> rows) throws SQLException {
-        ResultSet rs = mock(ResultSet.class);
-        final int[] index = {0};
-        lenient().when(rs.next()).thenAnswer(inv -> {
-            index[0]++;
-            return index[0] <= rows.size();
-        });
-        lenient().when(rs.getString(1)).thenAnswer(inv -> rows.get(index[0] - 1)[0]);
-        lenient().when(rs.getString(2)).thenAnswer(inv -> rows.get(index[0] - 1)[1]);
-        lenient().when(rs.getString(3)).thenAnswer(inv -> rows.get(index[0] - 1).length > 2 ? rows.get(index[0] - 1)[2] : null);
-        return rs;
-    }
+    // ==================== syncSingleTableMetadata 测试 ====================
 
-    private void setupCompressionMock(String ddl) throws SQLException {
-        ResultSet ddlRs = mock(ResultSet.class);
-        when(ddlRs.next()).thenReturn(true, false);
-        when(ddlRs.getString(1)).thenReturn(ddl);
-        Statement ddlStmt = mock(Statement.class);
-        when(ddlStmt.executeQuery(startsWith("SHOW CREATE TABLE"))).thenReturn(ddlRs);
-
-        Statement[] stmts = new Statement[]{mockStmt, ddlStmt};
-        int[] callCount = {0};
-        when(mockConn.createStatement()).thenAnswer(inv -> {
-            callCount[0]++;
-            return stmts[Math.min(callCount[0] - 1, stmts.length - 1)];
-        });
+    @Test
+    void testSyncSingleTableMetadata_DROP() {
+        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "DROP");
+        assertTrue(result);
+        verify(tableMetadataService).deleteTableByNames(StorageEngineType.HIVE, "ods", "user_info");
     }
 
     @Test
-    void testEnrichFromDescribeFormatted_TableParamsInColumn2ValueInColumn3() throws Exception {
-        List<String[]> rows = new ArrayList<>();
-        rows.add(new String[]{"# Detailed Table Information", "", ""});
-        rows.add(new String[]{"CreateTime:", "Wed May 22 10:30:00 CST 2024", ""});
-        rows.add(new String[]{"InputFormat:", "org.apache.hadoop.mapred.TextInputFormat", ""});
-        rows.add(new String[]{"Compressed:", "Yes", ""});
-        rows.add(new String[]{"", "numRows", "1234567"});
-        rows.add(new String[]{"", "totalSize", "1073741824"});
-        rows.add(new String[]{"", "LOCATION", "hdfs://namenode:8020/user/hive/warehouse/ods.db/user_info"});
-        rows.add(new String[]{"", "transient_lastDdlTime", "1716352200"});
+    void testSyncSingleTableMetadata_success() throws Exception {
+        when(datasourceConfigService.getDatasourceById(1L)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
 
-        ResultSet describeRs = buildDescribeFormattedRs(rows);
-        setupCompressionMock("CREATE TABLE ods.user_info (id INT) STORED AS ORC tblproperties (\"orc.compress\"=\"SNAPPY\")");
+        TableMetadata existingTable = new TableMetadata();
+        existingTable.setId(100L);
+        existingTable.setTableName("user_info");
+        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, "ods", "user_info")).thenReturn(existingTable);
 
-        when(mockStmt.executeQuery(startsWith("DESCRIBE FORMATTED"))).thenReturn(describeRs);
+        ColumnMetadataVO colVo = new ColumnMetadataVO();
+        colVo.setColumnName("id");
+        colVo.setColumnType("BIGINT");
+        colVo.setOrdinalPosition(1);
+        when(executionStrategy.listColumns(eq(mockConfig), eq("ods"), eq("user_info")))
+                .thenReturn(Collections.singletonList(colVo));
+
+        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "CREATE");
+        assertTrue(result);
+        verify(tableMetadataService).syncSingleTable(eq(StorageEngineType.HIVE), eq(existingTable), anyList());
+    }
+
+    @Test
+    void testSyncSingleTableMetadata_configNotFound() {
+        when(datasourceConfigService.getDatasourceById(999L)).thenReturn(null);
+        boolean result = metadataSyncService.syncSingleTableMetadata(999L, StorageEngineType.HIVE, "ods", "t", "CREATE");
+        assertFalse(result);
+    }
+
+    // ==================== syncAllMetadataByDatasourceId 测试 ====================
+
+    @Test
+    void testSyncAllMetadataByDatasourceId_configNotFound() {
+        when(datasourceConfigService.getDatasourceById(1L)).thenReturn(null);
+        boolean result = metadataSyncService.syncAllMetadataByDatasourceId(1L);
+        assertFalse(result);
+    }
+
+    @Test
+    void testSyncAllMetadataByDatasourceId_noDatabases() throws Exception {
+        when(datasourceConfigService.getDatasourceById(1L)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(executionStrategy.listDatabases(mockConfig)).thenReturn(Collections.emptyList());
+
+        boolean result = metadataSyncService.syncAllMetadataByDatasourceId(1L);
+        assertFalse(result);
+    }
+
+    @Test
+    void testSyncAllMetadataByDatasourceId_success() throws Exception {
+        when(datasourceConfigService.getDatasourceById(1L)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+
+        // 返回2个数据库，过滤掉系统库
+        when(executionStrategy.listDatabases(mockConfig))
+                .thenReturn(Arrays.asList("default", "information_schema", "tmall_dw"));
+
+        TableMetadata table1 = new TableMetadata();
+        table1.setTableName("order_detail");
+        table1.setDatabaseName("tmall_dw");
+
+        when(executionStrategy.listTables(eq(mockConfig), eq("tmall_dw")))
+                .thenReturn(Collections.singletonList(table1));
+        when(executionStrategy.listTables(eq(mockConfig), eq("default")))
+                .thenReturn(Collections.emptyList());
+
+        when(tableMetadataMapper.getTableMetadata(any(), anyString(), anyString())).thenReturn(null);
+
+        ColumnMetadataVO colVo = new ColumnMetadataVO();
+        colVo.setColumnName("id");
+        colVo.setOrdinalPosition(1);
+        when(executionStrategy.listColumns(eq(mockConfig), eq("tmall_dw"), eq("order_detail")))
+                .thenReturn(Collections.singletonList(colVo));
+
+        boolean result = metadataSyncService.syncAllMetadataByDatasourceId(1L);
+        assertTrue(result);
+        verify(tableMetadataService, atLeastOnce()).syncSingleTable(any(), any(), anyList());
+    }
+
+    // ==================== 辅助方法测试 ====================
+
+    @Test
+    void testIsSystemDatabase() throws Exception {
+        java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("isSystemDatabase", String.class);
+        method.setAccessible(true);
+
+        assertTrue((Boolean) method.invoke(metadataSyncService, (String) null));
+        assertTrue((Boolean) method.invoke(metadataSyncService, ""));
+        assertTrue((Boolean) method.invoke(metadataSyncService, "information_schema"));
+        assertTrue((Boolean) method.invoke(metadataSyncService, "mysql"));
+        assertTrue((Boolean) method.invoke(metadataSyncService, "performance_schema"));
+        assertTrue((Boolean) method.invoke(metadataSyncService, "sys"));
+        assertFalse((Boolean) method.invoke(metadataSyncService, "default"));
+        assertFalse((Boolean) method.invoke(metadataSyncService, "tmall_dw"));
+    }
+
+    @Test
+    void testMergeTableMetadata() throws Exception {
+        java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("mergeTableMetadata",
+                TableMetadata.class, TableMetadata.class);
+        method.setAccessible(true);
+
+        TableMetadata target = new TableMetadata();
+        target.setTableName("old_table");
+        target.setTableComment("old_comment");
+
+        TableMetadata source = new TableMetadata();
+        source.setTableName("new_table");
+        source.setTableComment("new_comment");
+        source.setTableType("MANAGED_TABLE");
+        source.setCatalogName("hive");
+        source.setStorageFormat("ORC");
+        source.setCompression("SNAPPY");
+        source.setLocation("hdfs://tmp");
+        source.setRowCount(1000L);
+        source.setSizeBytes(2048L);
+        source.setTableCreateTime(new Date());
+
+        method.invoke(metadataSyncService, target, source);
+
+        assertEquals("new_comment", target.getTableComment());
+        assertEquals("MANAGED_TABLE", target.getTableType());
+        assertEquals("hive", target.getCatalogName());
+        assertEquals("ORC", target.getStorageFormat());
+        assertEquals("SNAPPY", target.getCompression());
+        assertEquals("hdfs://tmp", target.getLocation());
+        assertEquals(1000L, target.getRowCount());
+        assertEquals(2048L, target.getSizeBytes());
+        assertNotNull(target.getTableCreateTime());
+        // tableName 不应被覆盖（merge方法中无此字段）
+        assertEquals("old_table", target.getTableName());
+    }
+
+    @Test
+    void testMergeTableMetadata_nullSourceFields() throws Exception {
+        java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("mergeTableMetadata",
+                TableMetadata.class, TableMetadata.class);
+        method.setAccessible(true);
+
+        TableMetadata target = new TableMetadata();
+        target.setTableComment("original");
+        target.setRowCount(500L);
+
+        TableMetadata source = new TableMetadata();
+        // 所有字段为null，不应覆盖target
+
+        method.invoke(metadataSyncService, target, source);
+
+        assertEquals("original", target.getTableComment());
+        assertEquals(500L, target.getRowCount());
+    }
+
+    @Test
+    void testConvertToColumnMetadataEntities() throws Exception {
+        java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("convertToColumnMetadataEntities",
+                List.class, TableMetadata.class, StorageEngineType.class, String.class);
+        method.setAccessible(true);
 
         TableMetadata table = new TableMetadata();
-        table.setDatabaseName("ods");
-        table.setTableName("user_info");
+        table.setId(10L);
+        table.setTableName("test_table");
 
-        Method method = MetadataSyncService.class.getDeclaredMethod("enrichFromDescribeFormatted", Connection.class, String.class, TableMetadata.class);
-        method.setAccessible(true);
-        method.invoke(metadataSyncService, mockConn, "ods", table);
+        List<ColumnMetadataVO> vos = new ArrayList<>();
+        ColumnMetadataVO vo1 = new ColumnMetadataVO();
+        vo1.setColumnName("id");
+        vo1.setColumnType("BIGINT");
+        vo1.setColumnComment("主键");
+        vo1.setOrdinalPosition(1);
+        vo1.setNullable(0);
+        vo1.setIsPrimaryKey(1);
+        vo1.setTableName("test_table");
+        vos.add(vo1);
 
-        System.out.println("=== TableParams在Column2/Value在Column3 ===");
-        System.out.println("storageFormat: " + table.getStorageFormat());
-        System.out.println("tableCreateTime: " + table.getTableCreateTime());
-        System.out.println("compression: " + table.getCompression());
-        System.out.println("rowCount: " + table.getRowCount());
-        System.out.println("sizeBytes: " + table.getSizeBytes());
-        System.out.println("location: " + table.getLocation());
+        ColumnMetadataVO vo2 = new ColumnMetadataVO();
+        vo2.setColumnName("name");
+        vo2.setColumnType("STRING");
+        vo2.setColumnComment("姓名");
+        vo2.setOrdinalPosition(2);
+        vo2.setNullable(1);
+        vo2.setIsPrimaryKey(0);
+        vo2.setTableName("test_table");
+        vos.add(vo2);
 
-        assertEquals("org.apache.hadoop.mapred.TextInputFormat", table.getStorageFormat());
-        assertNotNull(table.getTableCreateTime());
-        assertEquals("SNAPPY", table.getCompression());
-        assertEquals(1234567L, table.getRowCount());
-        assertEquals(1073741824L, table.getSizeBytes());
-        assertEquals("hdfs://namenode:8020/user/hive/warehouse/ods.db/user_info", table.getLocation());
+        @SuppressWarnings("unchecked")
+        List<ColumnMetadata> columns = (List<ColumnMetadata>) method.invoke(
+                metadataSyncService, vos, table, StorageEngineType.HIVE, "test_db");
+
+        assertEquals(2, columns.size());
+
+        ColumnMetadata col1 = columns.get(0);
+        assertEquals(10L, col1.getTableMetadataId());
+        assertEquals(StorageEngineType.HIVE, col1.getStorageEngine());
+        assertEquals("test_db", col1.getDatabaseName());
+        assertEquals("test_table", col1.getTableName());
+        assertEquals("id", col1.getColumnName());
+        assertEquals("BIGINT", col1.getColumnType());
+        assertEquals("主键", col1.getColumnComment());
+        assertEquals(1, col1.getOrdinalPosition());
+        assertEquals(0, col1.getNullable());
+        assertEquals(1, col1.getIsPrimaryKey());
+        assertNotNull(col1.getSyncTime());
+
+        ColumnMetadata col2 = columns.get(1);
+        assertEquals("name", col2.getColumnName());
+        assertEquals(1, col2.getNullable());
+        assertEquals(0, col2.getIsPrimaryKey());
     }
 
     @Test
-    void testEnrichFromDescribeFormatted_TableParamsInColumn1() throws Exception {
-        List<String[]> rows = new ArrayList<>();
-        rows.add(new String[]{"# Detailed Table Information", "", ""});
-        rows.add(new String[]{"CreateTime:", "2024-05-22 10:30:00", ""});
-        rows.add(new String[]{"InputFormat:", "org.apache.hadoop.hive.ql.io.orc.OrcInputFormat", ""});
-        rows.add(new String[]{"Compressed:", "No", ""});
-        rows.add(new String[]{"numRows", "500000", null});
-        rows.add(new String[]{"totalSize", "2147483648", null});
-        rows.add(new String[]{"Location:", "hdfs://namenode:8020/user/hive/warehouse/ods.db/order_detail", ""});
-
-        ResultSet describeRs = buildDescribeFormattedRs(rows);
-        when(mockConn.createStatement()).thenReturn(mockStmt);
-        when(mockStmt.executeQuery(startsWith("DESCRIBE FORMATTED"))).thenReturn(describeRs);
-
-        TableMetadata table = new TableMetadata();
-        table.setDatabaseName("ods");
-        table.setTableName("order_detail");
-
-        Method method = MetadataSyncService.class.getDeclaredMethod("enrichFromDescribeFormatted", Connection.class, String.class, TableMetadata.class);
-        method.setAccessible(true);
-        method.invoke(metadataSyncService, mockConn, "ods", table);
-
-        System.out.println("=== TableParams在Column1 ===");
-        System.out.println("storageFormat: " + table.getStorageFormat());
-        System.out.println("tableCreateTime: " + table.getTableCreateTime());
-        System.out.println("compression: " + table.getCompression());
-        System.out.println("rowCount: " + table.getRowCount());
-        System.out.println("sizeBytes: " + table.getSizeBytes());
-        System.out.println("location: " + table.getLocation());
-
-        assertEquals("org.apache.hadoop.hive.ql.io.orc.OrcInputFormat", table.getStorageFormat());
-        assertNotNull(table.getTableCreateTime());
-        assertEquals("NO", table.getCompression());
-        assertEquals(500000L, table.getRowCount());
-        assertEquals(2147483648L, table.getSizeBytes());
-        assertEquals("hdfs://namenode:8020/user/hive/warehouse/ods.db/order_detail", table.getLocation());
-    }
-
-    @Test
-    void testEnrichFromInfoSchema_MySQL() throws Exception {
-        when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
-        ResultSet infoRs = mock(ResultSet.class);
-        when(mockPstmt.executeQuery()).thenReturn(infoRs);
-        when(infoRs.next()).thenReturn(true, false);
-        when(infoRs.getLong("TABLE_ROWS")).thenReturn(10000L);
-        when(infoRs.wasNull()).thenReturn(false, false, false);
-        when(infoRs.getLong("DATA_LENGTH")).thenReturn(1048576L);
-        when(infoRs.getLong("INDEX_LENGTH")).thenReturn(524288L);
-        when(infoRs.getTimestamp("CREATE_TIME")).thenReturn(Timestamp.valueOf("2024-01-15 08:30:00"));
-        when(infoRs.getString("ENGINE")).thenReturn("InnoDB");
-        when(infoRs.getString("TABLE_COMMENT")).thenReturn("用户表");
-
-        Statement datadirStmt = mock(Statement.class);
-        ResultSet datadirRs = mock(ResultSet.class);
-        when(datadirRs.next()).thenReturn(true, false);
-        when(datadirRs.getString(1)).thenReturn("/var/lib/mysql/data/");
-        when(datadirStmt.executeQuery(eq("SELECT @@datadir"))).thenReturn(datadirRs);
-
-        Statement ddlStmt = mock(Statement.class);
-        ResultSet ddlRs = mock(ResultSet.class);
-        when(ddlRs.next()).thenReturn(false);
-        when(ddlStmt.executeQuery(startsWith("SHOW CREATE TABLE"))).thenReturn(ddlRs);
-
-        Statement[] stmts = new Statement[]{datadirStmt, ddlStmt};
-        int[] callCount = {0};
-        when(mockConn.createStatement()).thenAnswer(inv -> {
-            callCount[0]++;
-            return stmts[Math.min(callCount[0] - 1, stmts.length - 1)];
-        });
-
-        TableMetadata table = new TableMetadata();
-        table.setDatabaseName("mydb");
-        table.setTableName("users");
-
-        Method method = MetadataSyncService.class.getDeclaredMethod("enrichFromInfoSchema", Connection.class, String.class, TableMetadata.class);
-        method.setAccessible(true);
-        method.invoke(metadataSyncService, mockConn, "mydb", table);
-
-        System.out.println("=== information_schema 解析结果 ===");
-        System.out.println("storageFormat: " + table.getStorageFormat());
-        System.out.println("tableCreateTime: " + table.getTableCreateTime());
-        System.out.println("rowCount: " + table.getRowCount());
-        System.out.println("sizeBytes: " + table.getSizeBytes());
-        System.out.println("location: " + table.getLocation());
-        System.out.println("tableComment: " + table.getTableComment());
-
-        assertEquals("InnoDB", table.getStorageFormat());
-        assertNotNull(table.getTableCreateTime());
-        assertEquals(10000L, table.getRowCount());
-        assertEquals(1048576L + 524288L, table.getSizeBytes());
-        assertEquals("/var/lib/mysql/data/mydb/", table.getLocation());
-        assertEquals("用户表", table.getTableComment());
-    }
-
-    @Test
-    void testEnrichFromClickHouseSystem() throws Exception {
-        when(mockConn.prepareStatement(anyString())).thenReturn(mockPstmt);
-        ResultSet ckRs = mock(ResultSet.class);
-        when(mockPstmt.executeQuery()).thenReturn(ckRs);
-        when(ckRs.next()).thenReturn(true, false);
-        when(ckRs.getLong("total_rows")).thenReturn(500000L);
-        when(ckRs.wasNull()).thenReturn(false);
-        when(ckRs.getLong("total_bytes")).thenReturn(2097152L);
-        when(ckRs.getTimestamp("create_time")).thenReturn(Timestamp.valueOf("2024-03-10 12:00:00"));
-        when(ckRs.getString("engine")).thenReturn("MergeTree");
-        when(ckRs.getString("data_paths")).thenReturn("/var/lib/clickhouse/data/default/events/");
-
-        Statement ddlStmt = mock(Statement.class);
-        ResultSet ddlRs = mock(ResultSet.class);
-        when(ddlRs.next()).thenReturn(false);
-        when(ddlStmt.executeQuery(anyString())).thenReturn(ddlRs);
-        when(mockConn.createStatement()).thenReturn(ddlStmt);
-
-        TableMetadata table = new TableMetadata();
-        table.setDatabaseName("default");
-        table.setTableName("events");
-
-        Method method = MetadataSyncService.class.getDeclaredMethod("enrichFromClickHouseSystem", Connection.class, String.class, TableMetadata.class);
-        method.setAccessible(true);
-        method.invoke(metadataSyncService, mockConn, "default", table);
-
-        System.out.println("=== ClickHouse system.tables 解析结果 ===");
-        System.out.println("storageFormat: " + table.getStorageFormat());
-        System.out.println("tableCreateTime: " + table.getTableCreateTime());
-        System.out.println("rowCount: " + table.getRowCount());
-        System.out.println("sizeBytes: " + table.getSizeBytes());
-        System.out.println("location: " + table.getLocation());
-
-        assertEquals("MergeTree", table.getStorageFormat());
-        assertNotNull(table.getTableCreateTime());
-        assertEquals(500000L, table.getRowCount());
-        assertEquals(2097152L, table.getSizeBytes());
-        assertEquals("/var/lib/clickhouse/data/default/events/", table.getLocation());
-    }
-
-    @Test
-    void testParseDate() throws Exception {
-        Method method = MetadataSyncService.class.getDeclaredMethod("parseDate", String.class);
+    void testConvertToColumnMetadataEntities_nullInput() throws Exception {
+        java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("convertToColumnMetadataEntities",
+                List.class, TableMetadata.class, StorageEngineType.class, String.class);
         method.setAccessible(true);
 
-        java.util.Date d1 = (java.util.Date) method.invoke(metadataSyncService, "Wed May 22 10:30:00 CST 2024");
-        assertNotNull(d1, "Hive日期格式应被正确解析");
+        @SuppressWarnings("unchecked")
+        List<ColumnMetadata> result1 = (List<ColumnMetadata>) method.invoke(
+                metadataSyncService, null, null, StorageEngineType.HIVE, "db");
+        assertTrue(result1.isEmpty());
 
-        java.util.Date d2 = (java.util.Date) method.invoke(metadataSyncService, "2024-05-22 10:30:00");
-        assertNotNull(d2, "标准日期时间格式应被正确解析");
-
-        java.util.Date d3 = (java.util.Date) method.invoke(metadataSyncService, "2024-05-22");
-        assertNotNull(d3, "日期格式应被正确解析");
-
-        java.util.Date d4 = (java.util.Date) method.invoke(metadataSyncService, "");
-        assertNull(d4, "空字符串应返回null");
-
-        java.util.Date d5 = (java.util.Date) method.invoke(metadataSyncService, (String) null);
-        assertNull(d5, "null应返回null");
-    }
-
-    @Test
-    void testExtractCompressionFromDDL() throws Exception {
-        Statement stmt = mock(Statement.class);
-        when(mockConn.createStatement()).thenReturn(stmt);
-
-        ResultSet snappyRs = mock(ResultSet.class);
-        when(snappyRs.next()).thenReturn(true, false);
-        when(snappyRs.getString(1)).thenReturn("CREATE TABLE t (id INT) STORED AS ORC tblproperties (\"orc.compress\"=\"SNAPPY\")");
-        when(stmt.executeQuery(anyString())).thenReturn(snappyRs);
-
-        Method method = MetadataSyncService.class.getDeclaredMethod("extractCompressionFromDDL", Connection.class, String.class, String.class);
-        method.setAccessible(true);
-        String result = (String) method.invoke(metadataSyncService, mockConn, "ods", "user_info");
-        assertEquals("SNAPPY", result);
+        @SuppressWarnings("unchecked")
+        List<ColumnMetadata> result2 = (List<ColumnMetadata>) method.invoke(
+                metadataSyncService, Collections.emptyList(), null, StorageEngineType.HIVE, "db");
+        assertTrue(result2.isEmpty());
     }
 }
