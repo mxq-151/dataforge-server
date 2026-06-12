@@ -10,6 +10,7 @@ import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import com.bigdata.modules.development.service.execution.ExecutionStrategy;
 import com.bigdata.modules.development.service.execution.ExecutionStrategyFactory;
 import com.bigdata.modules.development.service.execution.AbstractBaseExecutionStrategy;
+import com.bigdata.common.sql.CalciteDdlParser;
 import com.bigdata.modules.development.service.execution.CodeExecutionContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -707,44 +708,19 @@ class MetadataSyncServiceTest {
     }
 
     /**
-     * 测试7: extractAndStripHiveAttributes 直接验证 — 确认正则提取逻辑的正确性
+     * 测试7: Hive表级属性提取验证 — 确认CalciteDdlParser的正则提取逻辑正确性
      */
     @Test
-    void testExtractAndStripHiveAttributes_fullExtraction() throws Exception {
-        java.lang.reflect.Method extractMethod = AbstractBaseExecutionStrategy.class.getDeclaredMethod(
-                "extractAndStripHiveAttributes", String.class);
-        extractMethod.setAccessible(true);
+    void testExtractHiveAttributes_fullExtraction() {
+        // 直接调用 CalciteDdlParser（无需反射）
+        CalciteDdlParser.HiveTableAttributes attrs = CalciteDdlParser.extractHiveAttributes(CREATE_EXTERNAL_TABLE_SQL);
 
-        TestableBaseStrategy strategy = new TestableBaseStrategy();
-        Object[] result = (Object[]) extractMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL);
-
-        String normalizedSql = (String) result[0];
-        AbstractBaseExecutionStrategy.HiveTableAttributes attrs =
-                (AbstractBaseExecutionStrategy.HiveTableAttributes) result[1];
-
-        assertNotNull(normalizedSql, "剥离后的SQL不应为null");
         assertNotNull(attrs, "Hive属性不应为null");
-
-        // 验证剥离后的SQL不包含Hive子句（JSqlParser应能解析）
-        assertFalse(normalizedSql.toUpperCase().contains("EXTERNAL"),
-                "剥离后SQL不应包含EXTERNAL");
-        assertFalse(normalizedSql.toUpperCase().contains("ROW FORMAT"),
-                "剥离后SQL不应包含ROW FORMAT");
-        assertFalse(normalizedSql.toUpperCase().contains("STORED AS"),
-                "剥离后SQL不应包含STORED AS");
-        assertFalse(normalizedSql.toUpperCase().contains("LOCATION"),
-                "剥离后SQL不应包含LOCATION");
-        assertFalse(normalizedSql.toUpperCase().contains("TBLPROPERTIES"),
-                "剥离后SQL不应包含TBLPROPERTIES");
-        // 但应保留核心DDL结构
-        assertTrue(normalizedSql.toUpperCase().startsWith("CREATE TABLE"),
-                "剥离后应以CREATE TABLE开头");
-        assertTrue(normalizedSql.contains("("), "应保留列定义左括号");
-        assertTrue(normalizedSql.contains("item_id"), "应保留列定义内容");
 
         // === 验证提取的Hive属性 ===
         assertEquals("EXTERNAL_TABLE", attrs.tableType,
                 "EXTERNAL关键字应被识别为EXTERNAL_TABLE");
+        assertTrue(attrs.isExternal, "isExternal应为true");
         assertEquals("天猫商品属性原始数据外部表", attrs.tableComment,
                 "TBLPROPERTIES comment应被提取为表注释");
         assertEquals("TEXTFILE", attrs.storageFormat,
@@ -758,6 +734,25 @@ class MetadataSyncServiceTest {
                 "tblProperties中应包含comment键值对");
         assertEquals("0", attrs.tblProperties.get("skip.header.line.count"),
                 "tblProperties中应包含其他属性");
+    }
+
+    /**
+     * 测试8: CalciteDdlParser.detect() 完整解析验证 — CREATE EXTERNAL TABLE
+     */
+    @Test
+    void testCalciteDdlParser_detectCreateExternalTable() {
+        CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(CREATE_EXTERNAL_TABLE_SQL);
+
+        assertNotNull(info, "CREATE EXTERNAL TABLE 应被识别为DDL语句");
+        assertEquals("CREATE", info.getDbType(), "DDL类型应为CREATE");
+        assertEquals(DB_NAME, info.getDatabaseName(), "数据库名应为tmall_dw");
+        assertEquals(TABLE_NAME, info.getTableName(), "表名应为ods_product");
+
+        // 验证Hive属性也被正确提取
+        assertNotNull(info.getHiveAttributes(), "Hive属性不应为null");
+        assertEquals("EXTERNAL_TABLE", info.getHiveAttributes().tableType);
+        assertEquals("天猫商品属性原始数据外部表", info.getHiveAttributes().tableComment);
+        assertEquals("TEXTFILE", info.getHiveAttributes().storageFormat);
     }
 
     /**

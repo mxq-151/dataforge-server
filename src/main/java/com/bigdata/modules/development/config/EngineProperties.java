@@ -61,6 +61,13 @@ public class EngineProperties {
             }
             return "spark-submit";
         }
+
+        public String getSparkSqlCommand() {
+            if (home != null && !home.trim().isEmpty()) {
+                return home.trim().endsWith("/") ? home + "bin/spark-sql" : home + "/bin/spark-sql";
+            }
+            return "spark-sql";
+        }
     }
 
     public static class Flink {

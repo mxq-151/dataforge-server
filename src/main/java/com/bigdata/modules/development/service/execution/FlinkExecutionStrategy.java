@@ -77,7 +77,8 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
         if (context.isJarExecutionMode() || context.getCodeType() == CodeType.PYTHON) {
             Process process = pb.start();
-            String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "flink");
+            String registeredId = processManager.registerProcess(
+                    context.getExecutionId(), process, context.getSubmitBy(), "flink");
 
             // 推送进程启动日志
             executionLogListener.publishLog(executionId, "[Flink] 进程已启动, PID=" + process.pid());
@@ -125,7 +126,8 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
             }
             pb.redirectInput(ProcessBuilder.Redirect.PIPE);
             Process process = pb.start();
-            String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "flink");
+            String registeredId = processManager.registerProcess(
+                    context.getExecutionId(), process, context.getSubmitBy(), "flink");
 
             try (var writer = process.getOutputStream()) {
                 writer.write(codeContent.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -184,7 +186,8 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
         pb.redirectErrorStream(true);
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         Process process = pb.start();
-        String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "flink-sql");
+        String registeredId = processManager.registerProcess(
+                context.getExecutionId(), process, context.getSubmitBy(), "flink-sql");
 
         String sqlContent = buildFlinkSqlWithConfiguration(context);
         try (var writer = process.getOutputStream()) {

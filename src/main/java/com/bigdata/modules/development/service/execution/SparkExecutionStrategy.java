@@ -17,10 +17,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+
 
 @Component
 public class SparkExecutionStrategy implements ExecutionStrategy {
@@ -56,7 +55,8 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
             pb.redirectErrorStream(true);
             Process process = pb.start();
 
-            String registeredId = processManager.registerProcess(process, context.getSubmitBy(), "spark");
+            String registeredId = processManager.registerProcess(
+                    context.getExecutionId(), process, context.getSubmitBy(), "spark");
 
             // 推送进程启动日志，确保 buffer 中立即有内容
             executionLogListener.publishLog(executionId, "[Spark] 进程已启动, PID=" + process.pid());
@@ -103,7 +103,17 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
                 result.setDurationMs((int) duration);
                 return result;
             } else {
-                CodeExecutionResult result = CodeExecutionResult.failure(executionId, output.toString());
+                // 提取核心错误信息，避免返回全量Spark日志（可能数千行）
+                String rawOutput = output.toString();
+                log.error("[Spark-ERROR] 进程退出码={}, 输出总长度={}字符, 共{}行", exitCode, rawOutput.length(), countLines(rawOutput));
+                log.error("[Spark-ERROR] 原始输出(前500字): {}", truncateForLog(rawOutput, 500));
+
+                String errorMessage = extractCoreError(rawOutput);
+                log.error("[Spark-ERROR] 提取的核心错误: {}", errorMessage);
+
+                executionLogListener.publishLog(executionId, "[ERROR] " + errorMessage);
+
+                CodeExecutionResult result = CodeExecutionResult.failure(executionId, errorMessage);
                 result.setStartTime(new java.util.Date(startTime));
                 result.setEndTime(new java.util.Date());
                 result.setDurationMs((int) duration);
@@ -122,7 +132,13 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
     private List<String> buildCommand(CodeExecutionContext context) throws Exception {
         List<String> command = new ArrayList<>();
-        command.add(engineProperties.getSpark().getSparkSubmitCommand());
+
+        // SQL模式使用 spark-sql（支持 -e / -f 参数），其他模式使用 spark-submit
+        if (context.getCodeType() == CodeType.SQL) {
+            command.add(engineProperties.getSpark().getSparkSqlCommand());
+        } else {
+            command.add(engineProperties.getSpark().getSparkSubmitCommand());
+        }
 
         addComputeResources(command, context);
         addAllDatasourceConfs(command, context);
@@ -353,13 +369,13 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         command.add("spark.sql.codegen.wholeStage=true");
 
         String codeContent = context.getCodeContent();
-        if (codeContent != null && !codeContent.trim().isEmpty()) {
-            command.add("-e");
-            command.add(codeContent.trim());
-        } else {
-            command.add("-e");
-            command.add("SELECT 1");
+        if (codeContent == null || codeContent.trim().isEmpty()) {
+            codeContent = "SELECT 1";
         }
+
+        // spark-sql 支持 -e 参数直接执行SQL（spark-submit不支持）
+        command.add("-e");
+        command.add(codeContent.trim());
     }
 
     private void handlePythonMode(List<String> command, CodeExecutionContext context) throws Exception {
@@ -414,6 +430,138 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         } catch (Exception e) {
             return defaultPort;
         }
+    }
+
+    // ==================== 错误信息提取 ====================
+
+    /**
+     * 从Spark进程原始输出中提取核心错误信息。
+     * <p>
+     * Spark输出通常包含大量classpath、INFO日志等噪音，真正的错误信息隐藏在其中。
+     * 提取策略（按优先级）：
+     * <ol>
+     *   <li>Exception in thread / Error: 行 + 后续堆栈摘要</li>
+     *   <li>Caused by: 行</li>
+     *   <li>org.apache.spark.*Exception / java.lang.*Exception 的第一行</li>
+     *   <li>包含 ERROR / WARN 关键字的行</li>
+     *   <li>最后 N 行（Spark常在末尾输出错误摘要）</li>
+     * </ol>
+     */
+    private String extractCoreError(String rawOutput) {
+        if (rawOutput == null || rawOutput.isBlank()) {
+            return "Spark执行失败（无输出信息）";
+        }
+
+        String[] lines = rawOutput.split("\n");
+
+        // 1. 查找 "Exception in thread" 或 "Error:" 开头的行
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.startsWith("Exception in thread") || line.startsWith("Error:")) {
+                return buildErrorContext(lines, i, "异常");
+            }
+        }
+
+        // 2. 查找 Caused by:
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.startsWith("Caused by:")) {
+                return buildErrorContext(lines, i, "根因");
+            }
+        }
+
+        // 3. 查找 Spark/Java 异常类
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if ((line.contains("org.apache.spark.") || line.contains("java.lang."))
+                    && (line.contains("Exception:") || line.contains("Error:"))) {
+                return buildErrorContext(lines, i, "异常");
+            }
+        }
+
+        // 4. 查找 ERROR 级别日志行
+        List<String> errorLines = new ArrayList<>();
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.contains(" ERROR ") || trimmed.contains("FATAL")) {
+                // 去掉时间戳前缀
+                String clean = removeLogPrefix(trimmed);
+                if (!clean.isEmpty()) {
+                    errorLines.add(clean);
+                }
+            }
+        }
+        if (!errorLines.isEmpty()) {
+            return String.join("\n", errorLines);
+        }
+
+        // 5. 兜底：取最后15行（Spark错误常在末尾）
+        int start = Math.max(0, lines.length - 15);
+        StringBuilder lastLines = new StringBuilder();
+        for (int i = start; i < lines.length; i++) {
+            if (!lines[i].isBlank()) {
+                lastLines.append(lines[i].trim()).append("\n");
+            }
+        }
+        String result = lastLines.toString().trim();
+        return result.isEmpty() ? rawOutput : result;
+    }
+
+    /**
+     * 从匹配行开始构建错误上下文（包含后续相关行）
+     */
+    private String buildErrorContext(String[] allLines, int startIndex, String label) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[Spark ").append(label).append("] ").append(allLines[startIndex].trim()).append("\n");
+
+        // 收集后续最多10行相关上下文（堆栈或详情）
+        int contextLines = 0;
+        for (int i = startIndex + 1; i < allLines.length && contextLines < 10; i++) {
+            String line = allLines[i].trim();
+            // 遇到空行后又是非缩进行时停止（新的日志条目开始）
+            if (line.isEmpty()) continue;
+            // 堆栈行以 \t 或 "at " 开头
+            if (line.startsWith("\t") || line.startsWith("at ")
+                    || line.startsWith("Caused by:")
+                    || line.startsWith("... ")) {
+                sb.append(line).append("\n");
+                contextLines++;
+            } else if (!line.startsWith("[") && contextLines > 0) {
+                // 非堆栈非日志前缀的行，可能是额外错误信息
+                sb.append(line).append("\n");
+                contextLines++;
+            } else if (contextLines == 0 && !line.startsWith("[")
+                    && !line.matches("^\\d{4}-\\d{2}-\\d{2}.*")) {
+                // 第一行上下文：非时间戳非日志格式的行
+                sb.append(line).append("\n");
+                contextLines++;
+            }
+        }
+
+        return sb.toString().trim();
+    }
+
+    /**
+     * 移除常见日志前缀（时间戳 + 日志级别），保留核心消息
+     */
+    private String removeLogPrefix(String logLine) {
+        // 匹配 "2024-01-01 12:00:00 [thread] LEVEL ..." 格式
+        String cleaned = logLine.replaceFirst("^\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}[^ ]*\\s+", "");
+        cleaned = cleaned.replaceFirst("^\\[[^]]+\\]\\s*", "");  // [thread-name]
+        cleaned = cleaned.replaceFirst("^(ERROR|WARN|INFO|DEBUG|FATAL)\\s+", "");
+        cleaned = cleaned.replaceFirst("^---+\s*", "");           // 分隔线
+        return cleaned.trim();
+    }
+
+    private int countLines(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        return text.split("\n").length;
+    }
+
+    private String truncateForLog(String text, int maxLen) {
+        if (text == null) return "(null)";
+        if (text.length() <= maxLen) return text;
+        return text.substring(0, maxLen) + "...(截断,总长度=" + text.length() + ")";
     }
 
     @Override

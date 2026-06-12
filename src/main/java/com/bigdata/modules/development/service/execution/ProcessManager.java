@@ -19,7 +19,13 @@ public class ProcessManager {
     private final ConcurrentHashMap<String, ManagedCancellable> cancellableMap = new ConcurrentHashMap<>();
 
     public String registerProcess(Process process, Long userId, String engineType) {
-        String executionId = generateExecutionId();
+        return registerProcess(generateExecutionId(), process, userId, engineType);
+    }
+
+    /**
+     * 注册进程（使用指定的executionId，确保与context.executionId一致，支持取消操作）
+     */
+    public String registerProcess(String executionId, Process process, Long userId, String engineType) {
         ManagedProcess mp = new ManagedProcess(executionId, process, null, userId, engineType);
         processMap.put(executionId, mp);
         log.info("注册进程: executionId={}, userId={}, engine={}", executionId, userId, engineType);

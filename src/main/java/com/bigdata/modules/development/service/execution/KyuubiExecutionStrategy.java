@@ -30,8 +30,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     private static final Logger log = LoggerFactory.getLogger(KyuubiExecutionStrategy.class);
     private static final int MAX_RESULT_ROWS = 1000;
     private static final long ASYNC_POLL_INTERVAL_MS = 2000;
-    private static final long SYNC_POLL_TIMEOUT_MS = 300000; // 5分钟同步超时
-    private static final long ASYNC_POLL_TIMEOUT_MS = 600000; // 10分钟异步超时
+    private static final long SYNC_POLL_TIMEOUT_MS = 6000000; // 5分钟同步超时
+    private static final long ASYNC_POLL_TIMEOUT_MS = 6000000; // 10分钟异步超时
 
     @Autowired
     private ProcessManager processManager;
@@ -124,17 +124,6 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         }
     }
 
-    /**
-     * 关闭指定token对应的Session并从缓存中移除（用于显式登出/切换数据源场景）
-     */
-    private void invalidateSession(String username, String password) {
-        String token = buildToken(username, password);
-        SessionEntry entry = sessionCache.remove(token);
-        if (entry != null) {
-            doCloseSession(entry.baseUrl, entry.sessionHandle);
-            log.info("[Kyuubi Session] 已失效并移除: session={}", entry.sessionHandle);
-        }
-    }
 
     /** 对token脱敏用于日志输出 */
     private String maskToken(String token) {
