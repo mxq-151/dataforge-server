@@ -56,4 +56,9 @@ public class SecurityUtils {
         return roles != null && roles.stream()
                 .anyMatch("ROLE_SUPER_ADMIN"::equalsIgnoreCase);
     }
+
+    public static boolean isAiRequest() {
+        CustomUserDetails userDetails = getCurrentUserDetails();
+        return userDetails != null && userDetails.isAiRequest();
+    }
 }

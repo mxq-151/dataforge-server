@@ -28,6 +28,7 @@ public class OperationAuditLogVO implements Serializable {
     private LocalDateTime operationTime;
     private Integer durationMs;
     private Integer isSensitive;
+    private Integer isAiRequest;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -91,4 +92,7 @@ public class OperationAuditLogVO implements Serializable {
 
     public Integer getIsSensitive() { return isSensitive; }
     public void setIsSensitive(Integer isSensitive) { this.isSensitive = isSensitive; }
+
+    public Integer getIsAiRequest() { return isAiRequest; }
+    public void setIsAiRequest(Integer isAiRequest) { this.isAiRequest = isAiRequest; }
 }

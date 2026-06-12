@@ -18,6 +18,7 @@ public class CustomUserDetails implements UserDetails {
     private boolean superAdmin;
     private Collection<? extends GrantedAuthority> authorities;
     private boolean enabled;
+    private boolean aiRequest;
 
     public CustomUserDetails() {
     }
@@ -32,6 +33,20 @@ public class CustomUserDetails implements UserDetails {
         this.superAdmin = superAdmin;
         this.authorities = authorities;
         this.enabled = enabled;
+    }
+
+    public CustomUserDetails(Long userId, String username, Long tenantId, List<String> roles,
+                             boolean superAdmin,
+                             Collection<? extends GrantedAuthority> authorities, boolean enabled,
+                             boolean aiRequest) {
+        this.userId = userId;
+        this.username = username;
+        this.tenantId = tenantId;
+        this.roles = roles;
+        this.superAdmin = superAdmin;
+        this.authorities = authorities;
+        this.enabled = enabled;
+        this.aiRequest = aiRequest;
     }
 
     public Long getUserId() {
@@ -115,5 +130,13 @@ public class CustomUserDetails implements UserDetails {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public boolean isAiRequest() {
+        return aiRequest;
+    }
+
+    public void setAiRequest(boolean aiRequest) {
+        this.aiRequest = aiRequest;
     }
 }

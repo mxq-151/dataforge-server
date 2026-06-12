@@ -41,6 +41,9 @@ public class AuditLogController {
             @RequestParam(required = false) String username,
             @RequestParam(required = false) Integer isSensitive,
             @RequestParam(required = false) String operationType,
+            @RequestParam(required = false) Integer isAiRequest,
+            @RequestParam(required = false) String sortField,
+            @RequestParam(required = false) String sortOrder,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
 
@@ -51,7 +54,8 @@ public class AuditLogController {
 
         Page<OperationAuditLog> page = auditLogService.getAuditLogList(
                 current, size, module, operation, username,
-                tenantId, isSensitive, operationType, startTime, endTime);
+                tenantId, isSensitive, operationType, startTime, endTime,
+                isAiRequest, sortField, sortOrder);
 
         Page<OperationAuditLogVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream().map(this::toVO).toList());
@@ -121,7 +125,8 @@ public class AuditLogController {
 
         Page<OperationAuditLog> page = auditLogService.getAuditLogList(
                 1, 10000, module, operation, username,
-                tenantId, isSensitive, operationType, startTime, endTime);
+                tenantId, isSensitive, operationType, startTime, endTime,
+                null, null, null);
 
         response.setContentType("text/csv;charset=UTF-8");
         String fileName = URLEncoder.encode("audit_log_" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".csv", StandardCharsets.UTF_8);
@@ -187,6 +192,7 @@ public class AuditLogController {
         vo.setOperationTime(entity.getOperationTime());
         vo.setDurationMs(entity.getDurationMs());
         vo.setIsSensitive(entity.getIsSensitive());
+        vo.setIsAiRequest(entity.getIsAiRequest());
         return vo;
     }
 

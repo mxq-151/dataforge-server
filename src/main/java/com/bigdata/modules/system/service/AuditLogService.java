@@ -19,10 +19,31 @@ public class AuditLogService {
     @Autowired
     private OperationAuditLogMapper auditLogMapper;
 
+    /** 最大每页记录数 */
+    private static final int MAX_PAGE_SIZE = 100;
+
+    /** 允许排序的字段白名单 */
+    private static final java.util.Set<String> SORTABLE_FIELDS = java.util.Set.of(
+            "operationTime", "durationMs", "responseStatus", "username", "module", "operation"
+    );
+
     public Page<OperationAuditLog> getAuditLogList(int current, int size, String module, String operation,
                                                    String username, Long tenantId,
                                                    Integer isSensitive, String operationType,
-                                                   LocalDateTime startTime, LocalDateTime endTime) {
+                                                   LocalDateTime startTime, LocalDateTime endTime,
+                                                   Integer isAiRequest,
+                                                   String sortField, String sortOrder) {
+        // 分页大小限制
+        if (size > MAX_PAGE_SIZE) {
+            size = MAX_PAGE_SIZE;
+        }
+        if (size < 1) {
+            size = 20;
+        }
+        if (current < 1) {
+            current = 1;
+        }
+
         Page<OperationAuditLog> page = new Page<>(current, size);
         LambdaQueryWrapper<OperationAuditLog> wrapper = new LambdaQueryWrapper<>();
 
@@ -44,6 +65,9 @@ public class AuditLogService {
         if (operationType != null && !operationType.isEmpty()) {
             wrapper.eq(OperationAuditLog::getOperationType, operationType);
         }
+        if (isAiRequest != null) {
+            wrapper.eq(OperationAuditLog::getIsAiRequest, isAiRequest);
+        }
         if (startTime != null) {
             wrapper.ge(OperationAuditLog::getOperationTime, startTime);
         }
@@ -51,8 +75,57 @@ public class AuditLogService {
             wrapper.le(OperationAuditLog::getOperationTime, endTime);
         }
 
-        wrapper.orderByDesc(OperationAuditLog::getOperationTime);
+        // 动态排序（白名单校验，防SQL注入）
+        applySort(wrapper, sortField, sortOrder);
+
         return auditLogMapper.selectPage(page, wrapper);
+    }
+
+    /**
+     * 应用动态排序，仅允许白名单内的字段
+     */
+    private void applySort(LambdaQueryWrapper<OperationAuditLog> wrapper, String sortField, String sortOrder) {
+        if (sortField == null || sortField.isEmpty()) {
+            // 默认按操作时间倒序
+            wrapper.orderByDesc(OperationAuditLog::getOperationTime);
+            return;
+        }
+
+        if (!SORTABLE_FIELDS.contains(sortField)) {
+            // 不在白名单中，回退默认排序
+            wrapper.orderByDesc(OperationAuditLog::getOperationTime);
+            return;
+        }
+
+        boolean asc = "asc".equalsIgnoreCase(sortOrder);
+        switch (sortField) {
+            case "operationTime":
+                if (asc) wrapper.orderByAsc(OperationAuditLog::getOperationTime);
+                else wrapper.orderByDesc(OperationAuditLog::getOperationTime);
+                break;
+            case "durationMs":
+                if (asc) wrapper.orderByAsc(OperationAuditLog::getDurationMs);
+                else wrapper.orderByDesc(OperationAuditLog::getDurationMs);
+                break;
+            case "responseStatus":
+                if (asc) wrapper.orderByAsc(OperationAuditLog::getResponseStatus);
+                else wrapper.orderByDesc(OperationAuditLog::getResponseStatus);
+                break;
+            case "username":
+                if (asc) wrapper.orderByAsc(OperationAuditLog::getUsername);
+                else wrapper.orderByDesc(OperationAuditLog::getUsername);
+                break;
+            case "module":
+                if (asc) wrapper.orderByAsc(OperationAuditLog::getModule);
+                else wrapper.orderByDesc(OperationAuditLog::getModule);
+                break;
+            case "operation":
+                if (asc) wrapper.orderByAsc(OperationAuditLog::getOperation);
+                else wrapper.orderByDesc(OperationAuditLog::getOperation);
+                break;
+            default:
+                wrapper.orderByDesc(OperationAuditLog::getOperationTime);
+        }
     }
 
     public void saveAuditLog(OperationAuditLog auditLog) {

@@ -59,6 +59,9 @@ public class AuditLogAspect {
                 captureRequestParams(joinPoint, request)
         );
 
+        // 记录是否为AI发起的请求
+        log.setIsAiRequest(SecurityUtils.isAiRequest() ? 1 : 0);
+
         try {
             Object result = joinPoint.proceed();
 

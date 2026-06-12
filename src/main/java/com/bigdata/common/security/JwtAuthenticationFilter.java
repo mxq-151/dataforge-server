@@ -52,10 +52,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                     List<SimpleGrantedAuthority> authorities = parseAuthorities(role);
 
+                    // 检测是否为AI发起的请求
+                    boolean aiRequest = "true".equalsIgnoreCase(request.getHeader("X-AI-Request"));
+
                     CustomUserDetails userDetails = new CustomUserDetails(
                             userId, username, tenantId, parseRoleNames(role),
                             superAdmin,
-                            authorities, true
+                            authorities, true, aiRequest
                     );
 
                     UsernamePasswordAuthenticationToken authentication =

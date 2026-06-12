@@ -33,6 +33,7 @@ public class OperationAuditLog implements Serializable {
     private LocalDateTime operationTime;
     private Integer durationMs;
     private Integer isSensitive;
+    private Integer isAiRequest;
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
@@ -218,6 +219,14 @@ public class OperationAuditLog implements Serializable {
 
     public void setIsSensitive(Integer isSensitive) {
         this.isSensitive = isSensitive;
+    }
+
+    public Integer getIsAiRequest() {
+        return isAiRequest;
+    }
+
+    public void setIsAiRequest(Integer isAiRequest) {
+        this.isAiRequest = isAiRequest;
     }
 
     public LocalDateTime getCreateTime() {
