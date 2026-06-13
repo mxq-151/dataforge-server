@@ -262,9 +262,8 @@ public class CodeExecutionService {
 
     private void loadJarDependencies(CodeExecutionContext context, List<String> jarCatalogs) {
         if (jarCatalogs != null && !jarCatalogs.isEmpty()) {
-            String jarDeps = String.join(",", jarCatalogs);
-            context.setJarDependencies(jarDeps);
-            log.info("   JAR依赖: {}", jarDeps);
+            context.setJarDependencies(jarCatalogs);
+            log.info("   JAR依赖: {}", jarCatalogs);
         } else {
             log.debug("未指定JAR依赖");
         }

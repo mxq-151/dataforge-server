@@ -11,6 +11,7 @@ public class EngineProperties {
     private Flink flink = new Flink();
     private Doris doris = new Doris();
     private HBase hbase = new HBase();
+    private Jar jar = new Jar();
 
     public Spark getSpark() {
         return spark;
@@ -42,6 +43,26 @@ public class EngineProperties {
 
     public void setHbase(HBase hbase) {
         this.hbase = hbase;
+    }
+
+    public Jar getJar() {
+        return jar;
+    }
+
+    public void setJar(Jar jar) {
+        this.jar = jar;
+    }
+
+    public static class Jar {
+        private String basePath;
+
+        public String getBasePath() {
+            return basePath;
+        }
+
+        public void setBasePath(String basePath) {
+            this.basePath = basePath;
+        }
     }
 
     public static class Spark {

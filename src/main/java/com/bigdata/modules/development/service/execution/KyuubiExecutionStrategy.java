@@ -30,8 +30,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     private static final Logger log = LoggerFactory.getLogger(KyuubiExecutionStrategy.class);
     private static final int MAX_RESULT_ROWS = 1000;
     private static final long ASYNC_POLL_INTERVAL_MS = 2000;
-    private static final long SYNC_POLL_TIMEOUT_MS = 6000000; // 5分钟同步超时
-    private static final long ASYNC_POLL_TIMEOUT_MS = 6000000; // 10分钟异步超时
+    private static final long SYNC_POLL_TIMEOUT_MS = 12000000; 
+    private static final long ASYNC_POLL_TIMEOUT_MS = 12000000; 
 
     @Autowired
     private ProcessManager processManager;
@@ -531,7 +531,6 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("statement", statement);
             body.put("runAsync", true);
-            body.put("queryTimeout", 300);
 
             ResponseEntity<JsonNode> response = restTemplate.exchange(
                     URI.create(url), HttpMethod.POST,

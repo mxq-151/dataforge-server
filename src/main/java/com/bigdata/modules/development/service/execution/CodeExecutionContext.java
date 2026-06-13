@@ -18,7 +18,7 @@ public class CodeExecutionContext {
     private String inputParams;
     private Long submitBy;
     private String submitByName;
-    private String jarDependencies;
+    private List<String> jarDependencies;
     private Map<String, Object> runParams;
     private Map<String, Object> computeResources;
     private String uploadedJarPath;
@@ -97,11 +97,11 @@ public class CodeExecutionContext {
         this.submitByName = submitByName;
     }
 
-    public String getJarDependencies() {
+    public List<String> getJarDependencies() {
         return jarDependencies;
     }
 
-    public void setJarDependencies(String jarDependencies) {
+    public void setJarDependencies(List<String> jarDependencies) {
         this.jarDependencies = jarDependencies;
     }
 

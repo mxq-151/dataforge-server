@@ -64,3 +64,5 @@ engine:
     home: /Users/mxq/Desktop/bigdata-workspace/spark-4.1.1-bin-hadoop3
   flink:
     home: /opt/flink
+  jar:
+    base-path: /opt/jars

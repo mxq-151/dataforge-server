@@ -319,10 +319,14 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     }
 
     private void addJarDependencies(List<String> command, CodeExecutionContext context) {
-        String jarDependencies = context.getJarDependencies();
+        List<String> jarDependencies = context.getJarDependencies();
         if (jarDependencies != null && !jarDependencies.isEmpty()) {
+            String basePath = engineProperties.getJar().getBasePath();
+            String joined = jarDependencies.stream()
+                    .map(jar -> basePath.trim().endsWith("/") ? basePath + jar : basePath + "/" + jar)
+                    .collect(java.util.stream.Collectors.joining(","));
             command.add("--jars");
-            command.add(jarDependencies);
+            command.add(joined);
         }
     }
 
