@@ -316,11 +316,10 @@ DROP TABLE IF EXISTS `indicators`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `indicators` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `fingerprint` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '指标指纹，通过calc_expr和default_filter以及所有使用字段的MD5得到',
-  `project_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '所属业务域',
+  `project_code` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '所属项目编码',
   `topic` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '所属主题域',
   `name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '指标名称',
-  `alias` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '别名/英文缩写',
+  `code` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '指标编码(唯一标识)',
   `business_definition` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '业务定义、计算方法',
   `calc_expr` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '计算表达式',
   `default_filter` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '筛选条件',
@@ -334,7 +333,7 @@ CREATE TABLE `indicators` (
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_fingerprint` (`fingerprint`)
+  UNIQUE KEY `uk_code` (`code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='指标定义主表';
 /*!40101 SET character_set_client = @saved_cs_client */;
 
