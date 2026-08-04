@@ -63,7 +63,7 @@ public class IndicatorController {
 
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ADMIN', 'ROLE_DATA_ENGINEER', 'ROLE_DATA_ARCH')")
+    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ENGINEER', 'ROLE_DATA_DEV_ENGINEER', 'ROLE_DATA_ARCHITECT')")
     @AuditLog(module = "指标管理", operation = "创建指标", targetType = "Indicator")
     public Result<Void> save(@Valid @RequestBody IndicatorDTO dto) {
         indicatorService.saveIndicator(dto);
@@ -71,7 +71,7 @@ public class IndicatorController {
     }
 
     @PostMapping("/batch")
-    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ADMIN', 'ROLE_DATA_ENGINEER', 'ROLE_DATA_ARCH')")
+    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ENGINEER', 'ROLE_DATA_DEV_ENGINEER', 'ROLE_DATA_ARCHITECT')")
     @AuditLog(module = "指标管理", operation = "批量创建指标", targetType = "Indicator")
     public Result<Void> batchSave(@Valid @RequestBody List<IndicatorDTO> dtoList) {
         indicatorService.batchSaveIndicators(dtoList);
@@ -88,7 +88,7 @@ public class IndicatorController {
 
 
     @DeleteMapping("/batch")
-    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ADMIN', 'ROLE_DATA_ARCH')")
+    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ENGINEER', 'ROLE_DATA_ARCHITECT')")
     @AuditLog(module = "指标管理", operation = "批量删除指标", targetType = "Indicator")
     public Result<Void> batchDelete(@RequestBody List<Long> ids) {
         indicatorService.batchDeleteIndicators(ids);
