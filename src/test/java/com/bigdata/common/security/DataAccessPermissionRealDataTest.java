@@ -41,9 +41,6 @@ class DataAccessPermissionRealDataTest {
     private SysRoleMapper sysRoleMapper;
 
     @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
-
-    @Autowired
     private SysTablePermissionMapper sysTablePermissionMapper;
 
     @Autowired

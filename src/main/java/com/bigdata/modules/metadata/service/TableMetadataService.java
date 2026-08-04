@@ -122,6 +122,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             table.setDeleted(0);
             updateById(table);
         } else {
+            table.setId(null);
             table.setStorageEngine(storageEngine);
             table.setSyncTime(new Date());
             table.setDeleted(0);

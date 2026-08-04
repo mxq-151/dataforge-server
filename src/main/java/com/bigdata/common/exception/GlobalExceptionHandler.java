@@ -1,6 +1,9 @@
 package com.bigdata.common.exception;
 
+import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
+import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -34,8 +37,12 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(AccessDeniedException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
-    public Result<Void> handleAccessDeniedException(AccessDeniedException e) {
-        logger.warn("访问被拒绝: {}", e.getMessage());
+    public Result<Void> handleAccessDeniedException(AccessDeniedException e, HttpServletRequest request) {
+        String username = SecurityUtils.getCurrentUsername();
+        String roles = SecurityUtils.getCurrentUserRoles().toString();
+        String method = request.getMethod();
+        String uri = request.getRequestURI();
+        logger.warn("访问被拒绝: 用户={}, 角色={}, 请求={} {}, 原因={}", username, roles, method, uri, e.getMessage());
         return Result.error(403, "无权访问该资源");
     }
 

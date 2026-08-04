@@ -12,7 +12,8 @@ public enum RoleType {
     OPS_ENGINEER("OPS_ENGINEER", "运维工程师"),
     DATA_DEV_ENGINEER("DATA_DEV_ENGINEER", "数据开发工程师"),
     BUSINESS_REQUESTER("BUSINESS_REQUESTER", "业务需求方"),
-    DATA_ANALYST("DATA_ANALYST", "数据分析师");
+    DATA_ANALYST("DATA_ANALYST", "数据分析师"),
+    DATA_ARCHITECT("DATA_ARCHITECT", "数据架构师");
 
     @EnumValue
     @JsonValue

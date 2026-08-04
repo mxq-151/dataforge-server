@@ -9,12 +9,7 @@ server:
 
 spring:
   application:
-    name: bigdata-platform
-  http:
-    encoding:
-      charset: UTF-8
-      enabled: true
-      force: true
+    name: dataforge
   messages:
     encoding: UTF-8
     basename: i18n/messages
@@ -26,7 +21,7 @@ spring:
     property-naming-strategy: SNAKE_CASE
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/bigdata_platform?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://127.0.0.1:3306/dataforge?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: '123456'
     hikari:
@@ -49,15 +44,15 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: auto
-      logic-delete-field: deleted
-      logic-delete-value: 1
-      logic-not-delete-value: 0
 
 jwt:
   secret: bigdata-platform-jwt-secret-key-2024-very-long-secret
   expiration: 86400000
   header: Authorization
   prefix: Bearer
+
+aes:
+  key: Bigdata2026AesK@
 
 engine:
   spark:

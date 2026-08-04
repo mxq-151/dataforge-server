@@ -173,7 +173,6 @@ public class FileSystemFactory {
                 }
             }
         }
-        System.out.println(config);
         setDefaultsForStorageType(storageType, config);
 
         return config;
@@ -249,10 +248,10 @@ public class FileSystemFactory {
                     Long configId = config.getId();
 
                     // 初始化自定义FileSystem（用于文件浏览操作）
-                    getFileSystem(storageType, configId);
+                    //getFileSystem(storageType, configId);
 
                     // 同时初始化Hadoop FileSystem（用于数据读取操作）
-                    initHadoopFileSystemFromConfig(config);
+                    //initHadoopFileSystemFromConfig(config);
 
                     logger.info("Initialized file system: name={}, type={}, id={}",
                             config.getStorageName(), storageType, configId);

@@ -3,6 +3,7 @@ package com.bigdata.modules.system.controller;
 import com.bigdata.common.annotation.AuditLog;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.ChangePasswordDTO;
@@ -27,6 +28,9 @@ public class UserController {
 
     @Autowired
     private SysUserService sysUserService;
+
+    @Autowired
+    private AesUtils aesUtils;
 
     @GetMapping("/list")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
@@ -85,6 +89,15 @@ public class UserController {
     @PutMapping("/password")
     public Result<Void> changePassword(@Valid @RequestBody ChangePasswordDTO dto) {
         Long currentUserId = getCurrentUserId();
+        try {
+            dto.setOldPassword(aesUtils.decryptPassword(dto.getOldPassword()));
+            dto.setNewPassword(aesUtils.decryptPassword(dto.getNewPassword()));
+            dto.setConfirmPassword(aesUtils.decryptPassword(dto.getConfirmPassword()));
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(e.getMessage());
+        } catch (Exception e) {
+            throw new BusinessException("密码解密失败，请使用密钥加密后再传输");
+        }
         sysUserService.changePassword(currentUserId, dto);
         return Result.success();
     }

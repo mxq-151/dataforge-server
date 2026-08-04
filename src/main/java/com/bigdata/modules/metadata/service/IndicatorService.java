@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.List;
 
 @Service
@@ -24,28 +25,42 @@ public class IndicatorService {
     @Autowired
     private IndicatorFieldMapper indicatorFieldMapper;
 
-    public List<Indicator> getIndicatorsByFilter(String projectName, String topic, String keyword) {
+    public List<Indicator> getIndicatorsByFilter(String projectCode, String topic, String keyword) {
         LambdaQueryWrapper<Indicator> wrapper = new LambdaQueryWrapper<>();
-        if (projectName != null && !projectName.isEmpty()) {
-            wrapper.eq(Indicator::getProjectName, projectName);
+        if (projectCode != null && !projectCode.isEmpty()) {
+            wrapper.eq(Indicator::getProjectCode, projectCode);
         }
         if (topic != null && !topic.isEmpty()) {
             wrapper.eq(Indicator::getTopic, topic);
         }
         if (keyword != null && !keyword.isEmpty()) {
             wrapper.and(w -> w.like(Indicator::getName, keyword)
-                    .or().like(Indicator::getAlias, keyword)
+                    .or().like(Indicator::getCode, keyword)
                     .or().like(Indicator::getBusinessDefinition, keyword));
         }
         wrapper.orderByDesc(Indicator::getCreatedAt);
         return indicatorMapper.selectList(wrapper);
     }
 
-    public Page<Indicator> getIndicatorList(int current, int size, String projectName, String topic, String name, String keyword) {
+    public List<Indicator> getIndicatorsByFilter(Collection<String> projectCodes, String keyword) {
+        LambdaQueryWrapper<Indicator> wrapper = new LambdaQueryWrapper<>();
+        if (projectCodes != null && !projectCodes.isEmpty()) {
+            wrapper.in(Indicator::getProjectCode, projectCodes);
+        }
+        if (keyword != null && !keyword.isEmpty()) {
+            wrapper.and(w -> w.like(Indicator::getName, keyword)
+                    .or().like(Indicator::getCode, keyword)
+                    .or().like(Indicator::getBusinessDefinition, keyword));
+        }
+        wrapper.orderByDesc(Indicator::getCreatedAt);
+        return indicatorMapper.selectList(wrapper);
+    }
+
+    public Page<Indicator> getIndicatorList(int current, int size, String projectCode, String topic, String name, String keyword) {
         Page<Indicator> page = new Page<>(current, size);
         LambdaQueryWrapper<Indicator> wrapper = new LambdaQueryWrapper<>();
-        if (projectName != null && !projectName.isEmpty()) {
-            wrapper.eq(Indicator::getProjectName, projectName);
+        if (projectCode != null && !projectCode.isEmpty()) {
+            wrapper.eq(Indicator::getProjectCode, projectCode);
         }
         if (topic != null && !topic.isEmpty()) {
             wrapper.eq(Indicator::getTopic, topic);
@@ -55,7 +70,7 @@ public class IndicatorService {
         }
         if (keyword != null && !keyword.isEmpty()) {
             wrapper.and(w -> w.like(Indicator::getName, keyword)
-                    .or().like(Indicator::getAlias, keyword)
+                    .or().like(Indicator::getCode, keyword)
                     .or().like(Indicator::getBusinessDefinition, keyword));
         }
         wrapper.orderByDesc(Indicator::getCreatedAt);
@@ -75,11 +90,12 @@ public class IndicatorService {
     @Transactional
     public void saveIndicator(IndicatorDTO dto) {
         Indicator indicator = new Indicator();
-        indicator.setProjectName(dto.getProjectName());
+        indicator.setProjectCode(dto.getProjectCode());
         indicator.setTopic(dto.getTopic());
         indicator.setName(dto.getName());
-        indicator.setAlias(dto.getAlias());
+        indicator.setCode(dto.getCode());
         indicator.setBusinessDefinition(dto.getBusinessDefinition());
+        indicator.setCalcExpr(dto.getCalcExpr());
         indicator.setDefaultFilter(dto.getDefaultFilter());
         indicator.setAlertConfig(dto.getAlertConfig());
         indicator.setBusinessOwner(dto.getBusinessOwner());
@@ -88,9 +104,20 @@ public class IndicatorService {
         indicator.setRefreshUnit(dto.getRefreshUnit());
         indicator.setRefreshDesc(dto.getRefreshDesc());
         indicator.setVisibility(dto.getVisibility());
-        indicatorMapper.insert(indicator);
 
-        saveFields(indicator.getId(), dto.getFields());
+        indicatorMapper.upsertByCode(indicator);
+
+        // upsert后根据code查出id，用于保存关联字段
+        LambdaQueryWrapper<Indicator> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Indicator::getCode, dto.getCode());
+        Indicator saved = indicatorMapper.selectOne(queryWrapper);
+
+        // 删除旧字段，重新插入
+        LambdaQueryWrapper<IndicatorField> deleteWrapper = new LambdaQueryWrapper<>();
+        deleteWrapper.eq(IndicatorField::getIndicatorsId, saved.getId());
+        indicatorFieldMapper.delete(deleteWrapper);
+
+        saveFields(saved.getId(), dto.getFields());
     }
 
     @Transactional
@@ -103,11 +130,12 @@ public class IndicatorService {
             throw new BusinessException("指标不存在");
         }
 
-        existing.setProjectName(dto.getProjectName());
+        existing.setProjectCode(dto.getProjectCode());
         existing.setTopic(dto.getTopic());
         existing.setName(dto.getName());
-        existing.setAlias(dto.getAlias());
+        existing.setCode(dto.getCode());
         existing.setBusinessDefinition(dto.getBusinessDefinition());
+        existing.setCalcExpr(dto.getCalcExpr());
         existing.setDefaultFilter(dto.getDefaultFilter());
         existing.setAlertConfig(dto.getAlertConfig());
         existing.setBusinessOwner(dto.getBusinessOwner());
@@ -137,6 +165,38 @@ public class IndicatorService {
         LambdaQueryWrapper<IndicatorField> deleteWrapper = new LambdaQueryWrapper<>();
         deleteWrapper.eq(IndicatorField::getIndicatorsId, id);
         indicatorFieldMapper.delete(deleteWrapper);
+    }
+
+    @Transactional
+    public void deleteIndicatorByCode(String code) {
+        LambdaQueryWrapper<Indicator> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Indicator::getCode, code);
+        Indicator existing = indicatorMapper.selectOne(wrapper);
+        if (existing == null) {
+            throw new BusinessException("指标不存在: " + code);
+        }
+        indicatorMapper.deleteById(existing.getId());
+
+        LambdaQueryWrapper<IndicatorField> deleteWrapper = new LambdaQueryWrapper<>();
+        deleteWrapper.eq(IndicatorField::getIndicatorsId, existing.getId());
+        indicatorFieldMapper.delete(deleteWrapper);
+    }
+
+    @Transactional
+    public void batchSaveIndicators(List<IndicatorDTO> dtoList) {
+        for (IndicatorDTO dto : dtoList) {
+            saveIndicator(dto);
+        }
+    }
+
+    @Transactional
+    public void batchDeleteIndicators(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        for (Long id : ids) {
+            deleteIndicator(id);
+        }
     }
 
     private void saveFields(Long indicatorsId, List<IndicatorFieldDTO> fields) {

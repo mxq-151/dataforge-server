@@ -2,6 +2,7 @@ package com.bigdata.modules.system.controller;
 
 import com.bigdata.common.annotation.AuditLog;
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.entity.DevProject;
@@ -14,9 +15,9 @@ import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysUser;
 import com.bigdata.modules.system.mapper.SysMenuPermissionMapper;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
+import com.bigdata.modules.system.mapper.SysRoleMenuPermissionMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
-import com.bigdata.modules.system.mapper.SysUserRoleMapper;
 import com.bigdata.modules.system.service.SysRoleProjectPermissionService;
 import com.bigdata.modules.system.service.SysTenantService;
 import com.bigdata.modules.system.service.SysUserService;
@@ -58,7 +59,7 @@ public class AuthController {
     private SysTenantUserMapper sysTenantUserMapper;
 
     @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
+    private SysRoleMenuPermissionMapper sysRoleMenuPermissionMapper;
 
     @Autowired
     private DevProjectMapper devProjectMapper;
@@ -66,10 +67,22 @@ public class AuthController {
     @Autowired
     private SysMenuPermissionMapper sysMenuPermissionMapper;
 
+    @Autowired
+    private AesUtils aesUtils;
+
     @AuditLog(module = "认证", operation = "用户登录", targetType = "User")
     @PostMapping("/login")
     public Result<LoginVO> login(@Valid @RequestBody LoginDTO loginDTO) {
-        String token = sysUserService.login(loginDTO.getUsername(), loginDTO.getPassword());
+        String password;
+        try {
+            password = aesUtils.decryptPassword(loginDTO.getPassword());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(e.getMessage());
+        } catch (Exception e) {
+            throw new BusinessException("密码解密失败，请使用密钥加密后再传输");
+        }
+
+        String token = sysUserService.login(loginDTO.getUsername(), password);
 
         SysUser user = sysUserService.getUserByUsername(loginDTO.getUsername());
         if (user == null) {
@@ -173,7 +186,7 @@ public class AuthController {
 
         List<Long> menuPermissionIds = new ArrayList<>();
         if (!CollectionUtils.isEmpty(roleIds)) {
-            menuPermissionIds = sysUserRoleMapper.selectMenuPermissionIdsByRoleIds(roleIds);
+            menuPermissionIds = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleIds(roleIds);
         }
         Set<Long> uniqueMenuPermIds = menuPermissionIds.stream().collect(Collectors.toSet());
 

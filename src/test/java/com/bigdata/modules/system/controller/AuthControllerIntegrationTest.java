@@ -61,9 +61,6 @@ class AuthControllerIntegrationTest {
     private SysTenantRoleMapper sysTenantRoleMapper;
 
     @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
-
-    @Autowired
     private DevProjectMapper devProjectMapper;
 
     @Autowired

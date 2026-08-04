@@ -16,7 +16,6 @@ public class BaseEntity implements Serializable {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 
-    @TableLogic
     @TableField(fill = FieldFill.INSERT)
     private Integer deleted;
 

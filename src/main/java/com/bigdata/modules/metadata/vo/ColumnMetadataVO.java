@@ -26,6 +26,8 @@ public class ColumnMetadataVO implements Serializable {
     private Date createTime;
     private Date updateTime;
     private String maskingType;
+    private Boolean canRead;
+    private Boolean canWrite;
 
     public Long getId() {
         return id;
@@ -161,5 +163,21 @@ public class ColumnMetadataVO implements Serializable {
 
     public void setMaskingType(String maskingType) {
         this.maskingType = maskingType;
+    }
+
+    public Boolean getCanRead() {
+        return canRead;
+    }
+
+    public void setCanRead(Boolean canRead) {
+        this.canRead = canRead;
+    }
+
+    public Boolean getCanWrite() {
+        return canWrite;
+    }
+
+    public void setCanWrite(Boolean canWrite) {
+        this.canWrite = canWrite;
     }
 }

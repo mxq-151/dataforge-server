@@ -150,7 +150,6 @@ bigdata-platform/
 - sys_user_role - 用户角色关联表
 - datasource_config - 数据源配置表
 - storage_config - 存储配置表
-- cluster_config - 集群配置表
 - operation_audit_log - 操作审计日志表
 
 **初始数据:**

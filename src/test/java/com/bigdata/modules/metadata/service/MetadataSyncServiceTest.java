@@ -385,14 +385,14 @@ class MetadataSyncServiceTest {
     @Test
     void testDetectDdlStatement_CreateExternalTable() throws Exception {
         java.lang.reflect.Method detectMethod = AbstractBaseExecutionStrategy.class.getDeclaredMethod(
-                "detectDdlStatement", String.class);
+                "detectDdlStatement", String.class, StorageEngineType.class);
         detectMethod.setAccessible(true);
 
         // 创建一个可测试的具体子类，实现getLog()返回真实Logger
         TestableBaseStrategy strategy = new TestableBaseStrategy();
 
         // 通过detectDdlStatement调用（内部会先stripHiveSpecificClauses再解析）
-        Object result = detectMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL);
+        Object result = detectMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL, StorageEngineType.HIVE);
 
         assertNotNull(result, "CREATE EXTERNAL TABLE 应被识别为DDL语句");
 
@@ -713,7 +713,7 @@ class MetadataSyncServiceTest {
     @Test
     void testExtractHiveAttributes_fullExtraction() {
         // 直接调用 CalciteDdlParser（无需反射）
-        CalciteDdlParser.HiveTableAttributes attrs = CalciteDdlParser.extractHiveAttributes(CREATE_EXTERNAL_TABLE_SQL);
+        CalciteDdlParser.TableAttributes attrs = CalciteDdlParser.extractHiveAttributes(CREATE_EXTERNAL_TABLE_SQL);
 
         assertNotNull(attrs, "Hive属性不应为null");
 

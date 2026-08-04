@@ -2,6 +2,7 @@ package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.sql.CalciteDdlParser;
+import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysTablePermission;
@@ -86,7 +87,7 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
         sql = sql.trim();
 
         // DDL权限检查
-        DdlInfo ddlInfo = detectDdlStatement(sql);
+        DdlInfo ddlInfo = detectDdlStatement(sql, context.getPrimaryStorageEngine());
         if (ddlInfo != null) {
             if (!hasDdlPermission(context.getSubmitBy())) {
                 getLog().warn("用户[{}]无DDL执行权限, 拒绝执行: {}", context.getSubmitBy(), context.getSubmitByName());
@@ -116,46 +117,56 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
         public String location;           // LOCATION '...' 的值
         public String fieldDelimiter;     // FIELDS TERMINATED BY '...' 的值
         public Map<String, String> tblProperties; // TBLPROPERTIES 中所有键值对
+        public String compressionCodec;   // 压缩算法
+        public boolean isPartitioned;     // 是否分区表
+        public String partitionColumns;   // 分区列（逗号分隔）
     }
 
     protected static class DdlInfo {
         String ddlType;
         String databaseName;
         String tableName;
+        /** RENAME的新数据库名（仅RENAME操作有效，可能为null） */
+        String newDatabaseName;
+        /** RENAME的新表名（仅RENAME操作有效） */
+        String newTableName;
         HiveTableAttributes hiveAttributes;
     }
 
     /**
      * 使用Apache Calcite检测SQL是否为DDL语句（CREATE/ALTER/DROP/TRUNCATE TABLE）。
      * <p>
-     * 支持标准SQL和Hive DDL语法。对于Hive特有的子句（ROW FORMAT、STORED AS、LOCATION、TBLPROPERTIES等），
-     * 通过CalciteDdlParser进行预处理剥离后再解析，并提取Hive表级属性。
+     * 支持标准SQL和多种引擎的DDL语法（Hive、Doris、StarRocks、ClickHouse等）。
+     * 通过CalciteDdlParser进行引擎自适应预处理剥离后再解析，并提取引擎特定表级属性。
      *
      * @see com.bigdata.common.sql.CalciteDdlParser
      */
-    protected DdlInfo detectDdlStatement(String sql) {
+    protected DdlInfo detectDdlStatement(String sql, StorageEngineType engineType) {
         if (sql == null || sql.trim().isEmpty()) {
             return null;
         }
-        getLog().info("[DDL-DEBUG-D1] detectDdlStatement 入口(Calcite), SQL前100字: {}", sql.length() > 100 ? sql.substring(0, 100) + "..." : sql);
+        getLog().info("[DDL-DEBUG-D1] detectDdlStatement 入口(Calcite), engine={}, SQL前100字: {}",
+                engineType, sql.length() > 100 ? sql.substring(0, 100) + "..." : sql);
         try {
-            CalciteDdlParser.DdlInfo calciteInfo = CalciteDdlParser.detect(sql);
+            CalciteDdlParser.DdlInfo calciteInfo = CalciteDdlParser.detect(sql, engineType);
             if (calciteInfo == null) {
                 return null;
             }
 
-            getLog().info("[DDL-DEBUG-D1] Calcite解析成功: type={}, db={}, table={}, fallback={}",
+            getLog().info("[DDL-DEBUG-D1] Calcite解析成功: type={}, db={}, table={}, engine={}, fallback={}",
                     calciteInfo.getDbType(), calciteInfo.getDatabaseName(), calciteInfo.getTableName(),
-                    calciteInfo.isFallbackMode());
+                    calciteInfo.getEngineType(), calciteInfo.isFallbackMode());
 
             // 转换为内部 DdlInfo
             DdlInfo info = new DdlInfo();
             info.ddlType = calciteInfo.getDbType();
             info.databaseName = calciteInfo.getDatabaseName();
             info.tableName = calciteInfo.getTableName();
+            info.newDatabaseName = calciteInfo.getNewDatabaseName();
+            info.newTableName = calciteInfo.getNewTableName();
 
-            // 转换 Hive 属性
-            CalciteDdlParser.HiveTableAttributes calciteAttrs = calciteInfo.getHiveAttributes();
+            // 转换引擎特定属性
+            CalciteDdlParser.TableAttributes calciteAttrs = calciteInfo.getTableAttributes();
             if (calciteAttrs != null) {
                 info.hiveAttributes = new HiveTableAttributes();
                 info.hiveAttributes.tableComment = calciteAttrs.tableComment;
@@ -164,9 +175,12 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
                 info.hiveAttributes.location = calciteAttrs.location;
                 info.hiveAttributes.fieldDelimiter = calciteAttrs.fieldDelimiter;
                 info.hiveAttributes.tblProperties = calciteAttrs.tblProperties;
+                info.hiveAttributes.compressionCodec = calciteAttrs.compressionCodec;
+                info.hiveAttributes.isPartitioned = calciteAttrs.isPartitioned;
+                info.hiveAttributes.partitionColumns = calciteAttrs.partitionColumns;
 
-                getLog().info("[DDL-DEBUG-D1] 提取到Hive属性: type={}, comment={}, storageFormat={}, location={}",
-                        info.hiveAttributes.tableType, info.hiveAttributes.tableComment,
+                getLog().info("[DDL-DEBUG-D1] 提取到表属性: engine={}, type={}, comment={}, storageFormat={}, location={}",
+                        calciteAttrs.engineType, info.hiveAttributes.tableType, info.hiveAttributes.tableComment,
                         info.hiveAttributes.storageFormat, info.hiveAttributes.location);
             }
 
@@ -704,12 +718,48 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
      */
     protected void handleDdlMetadataSync(String sql, CodeExecutionContext context, String executionId) {
         getLog().info("[DDL-DEBUG-D2] handleDdlMetadataSync 入口, executionId={}", executionId);
-        DdlInfo ddlInfo = detectDdlStatement(sql);
+        DdlInfo ddlInfo = detectDdlStatement(sql, context.getPrimaryStorageEngine());
         if (ddlInfo == null) {
             getLog().warn("[DDL-DEBUG-D2] ⚠️ ddlInfo为NULL! 元数据同步被跳过! SQL不是DDL或Calcite解析失败! executionId={}", executionId);
             return;
         }
         getLog().info("[DDL-DEBUG-D2] DDL检测通过: type={}, db={}, table={}", ddlInfo.ddlType, ddlInfo.databaseName, ddlInfo.tableName);
+
+        // RENAME TABLE 特殊处理: 先删除旧表元数据, 再同步新表元数据
+        if ("RENAME".equalsIgnoreCase(ddlInfo.ddlType)) {
+            String oldDb = ddlInfo.databaseName;
+            String oldTable = ddlInfo.tableName;
+            String newDb = ddlInfo.newDatabaseName != null ? ddlInfo.newDatabaseName : oldDb;
+            String newTable = ddlInfo.newTableName;
+
+            String renameMsg = "DDL语句执行成功: RENAME " +
+                    (oldDb != null ? oldDb + "." : "") + oldTable + " TO " +
+                    (newDb != null ? newDb + "." : "") + newTable;
+            getLog().info(renameMsg + ", 开始同步元数据");
+            executionLogListener.publishLog(executionId, "[DDL] " + renameMsg);
+
+            try {
+                boolean dropOk = metadataSyncService.syncSingleTableMetadata(
+                        context.getPrimaryDatasourceConfig().getId(),
+                        context.getPrimaryStorageEngine(),
+                        oldDb, oldTable, "DROP", null);
+                boolean createOk = metadataSyncService.syncSingleTableMetadata(
+                        context.getPrimaryDatasourceConfig().getId(),
+                        context.getPrimaryStorageEngine(),
+                        newDb, newTable, "CREATE", null);
+                if (dropOk && createOk) {
+                    getLog().info("元数据同步成功: RENAME {}.{} TO {}.{}", oldDb, oldTable, newDb, newTable);
+                    executionLogListener.publishLog(executionId, "[元数据] 同步成功: RENAME " + oldTable + " TO " + newTable);
+                } else {
+                    getLog().warn("元数据同步失败: RENAME {}.{} TO {}.{}", oldDb, oldTable, newDb, newTable);
+                    executionLogListener.publishLog(executionId, "[元数据] 同步失败: RENAME " + oldTable + " TO " + newTable);
+                }
+            } catch (Exception syncEx) {
+                getLog().error("元数据同步异常: RENAME {}.{} TO {}.{}", oldDb, oldTable, newDb, newTable, syncEx);
+                executionLogListener.publishLog(executionId, "[元数据] 同步异常: " + syncEx.getMessage());
+            }
+            return;
+        }
 
         String ddlMsg = "DDL语句执行成功: " + ddlInfo.ddlType + " " +
                 (ddlInfo.databaseName != null ? ddlInfo.databaseName + "." : "") + ddlInfo.tableName;

@@ -24,7 +24,7 @@ public class PermissionService {
     private SysTablePermissionMapper tablePermissionMapper;
 
     @Autowired
-    private SysUserRoleMapper userRoleMapper;
+    private SysRoleMenuPermissionMapper roleMenuPermissionMapper;
 
     @Autowired
     private SysRoleFilePermissionMapper roleFilePermissionMapper;
@@ -98,32 +98,32 @@ public class PermissionService {
         deleteRoleAllPermissions(roleId);
         LocalDateTime now = LocalDateTime.now();
         if (menuPermissionIds != null && !menuPermissionIds.isEmpty()) {
-            userRoleMapper.batchInsertRoleMenuPermissions(roleId, menuPermissionIds, now);
+            roleMenuPermissionMapper.batchInsertRoleMenuPermissions(roleId, menuPermissionIds, now);
         }
         if (filePermissionIds != null && !filePermissionIds.isEmpty()) {
-            userRoleMapper.batchInsertRoleFilePermissions(roleId, filePermissionIds, now);
+            roleFilePermissionMapper.batchInsertRoleFilePermissions(roleId, filePermissionIds, now);
         }
         if (tablePermissionIds != null && !tablePermissionIds.isEmpty()) {
-            userRoleMapper.batchInsertRoleTablePermissions(roleId, tablePermissionIds, now);
+            roleTablePermissionMapper.batchInsertRoleTablePermissions(roleId, tablePermissionIds, now);
         }
     }
 
     private void deleteRoleAllPermissions(Long roleId) {
-        userRoleMapper.deleteRoleMenuPermissions(roleId);
-        userRoleMapper.deleteRoleFilePermissions(roleId);
-        userRoleMapper.deleteRoleTablePermissions(roleId);
+        roleMenuPermissionMapper.deleteByRoleId(roleId);
+        roleFilePermissionMapper.deleteByRoleId(roleId);
+        roleTablePermissionMapper.deleteByRoleId(roleId);
     }
 
     public List<Long> getMenuPermissionIdsByRoleId(Long roleId) {
-        return userRoleMapper.selectMenuPermissionIdsByRoleId(roleId);
+        return roleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(roleId);
     }
 
     public List<Long> getFilePermissionIdsByRoleId(Long roleId) {
-        return userRoleMapper.selectFilePermissionIdsByRoleId(roleId);
+        return roleFilePermissionMapper.selectFilePermissionIdsByRoleId(roleId);
     }
 
     public List<Long> getTablePermissionIdsByRoleId(Long roleId) {
-        return userRoleMapper.selectTablePermissionIdsByRoleId(roleId);
+        return roleTablePermissionMapper.selectTablePermissionIdsByRoleId(roleId);
     }
 
     private Map<Long, String> getAllRoleNameMap() {

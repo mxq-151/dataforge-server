@@ -75,9 +75,10 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
                 DatasourceConfig configWithDb = new DatasourceConfig();
                 org.springframework.beans.BeanUtils.copyProperties(rawConfig, configWithDb);
                 configWithDb.setUrl(buildUrlWithDatabase(rawConfig.getUrl(), rawConfig.getDatasourceType(), databaseName));
-                HikariDataSource ds = createPoolFromConfig(configWithDb);
-                ds.setPoolName("ds-" + userId + "-" + datasourceId + "-" + databaseName);
-                return ds;
+                // poolName 必须在 HikariDataSource 创建前通过 HikariConfig 设置，
+                // 否则会抛 IllegalStateException: The configuration of the pool is sealed once started.
+                String poolName = "ds-" + userId + "-" + datasourceId + "-" + databaseName;
+                return createPoolFromConfig(configWithDb, poolName);
             } catch (Exception e) {
                 log.error("创建带数据库名的连接池失败: poolKey={}", poolKey, e);
                 throw new RuntimeException("创建连接池失败: " + e.getMessage(), e);
@@ -102,13 +103,18 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
             case MYSQL:
             case DORIS:
             case STARROCKS:
-                if (normalizedUrl.contains("/")) {
-                    int lastSlash = normalizedUrl.lastIndexOf('/');
-                    int questionMark = normalizedUrl.indexOf('?', lastSlash);
-                    if (questionMark > 0) {
-                        return normalizedUrl.substring(0, lastSlash + 1) + databaseName + normalizedUrl.substring(questionMark);
-                    } else {
-                        return normalizedUrl.substring(0, lastSlash + 1) + databaseName;
+                // 查找 "://" 后的第一个 "/"，这才是 host:port 与数据库之间的分隔符，
+                // 避免误匹配 query 参数中的 "/"（如 serverTimezone=Asia/Shanghai）
+                int schemeEnd = normalizedUrl.indexOf("://");
+                if (schemeEnd > 0) {
+                    int pathStart = normalizedUrl.indexOf('/', schemeEnd + 3);
+                    if (pathStart > 0) {
+                        int queryStart = normalizedUrl.indexOf('?', pathStart);
+                        if (queryStart > pathStart) {
+                            return normalizedUrl.substring(0, pathStart + 1) + databaseName + normalizedUrl.substring(queryStart);
+                        } else {
+                            return normalizedUrl.substring(0, pathStart + 1) + databaseName;
+                        }
                     }
                 }
                 break;
@@ -130,8 +136,13 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         return normalizedUrl;
     }
 
-    private HikariDataSource createPoolFromConfig(DatasourceConfig config) {
+
+    private HikariDataSource createPoolFromConfig(DatasourceConfig config, String poolName) {
         HikariConfig hc = buildHikariConfig(config);
+        // 若调用方指定了 poolName，则在 HikariConfig 阶段覆盖（HikariDataSource 创建后不可再修改）
+        if (poolName != null && !poolName.isEmpty()) {
+            hc.setPoolName(poolName);
+        }
         HikariDataSource pool = new HikariDataSource(hc);
         log.info("创建连接池(带数据库): type={}, url={}", config.getDatasourceType(), config.getUrl());
         return pool;

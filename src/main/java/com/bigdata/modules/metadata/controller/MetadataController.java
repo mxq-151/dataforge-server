@@ -16,7 +16,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.ArrayList;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,8 +39,8 @@ public class MetadataController {
     @GetMapping("/tables")
     public Result<Page<TableMetadataVO>> getTableList(
             @RequestParam(defaultValue = "1") int current,
-            @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) Long datasourceId,
+            @RequestParam(defaultValue = "10000") int size,
+            @RequestParam(required = true) Long datasourceId,
             @RequestParam(required = false) String databaseName,
             @RequestParam(required = false) String tableName,
             @RequestParam(required = false) String keyword) {
@@ -107,41 +107,11 @@ public class MetadataController {
         return Result.success(voPage);
     }
 
-    @GetMapping("/tables/all")
-    public Result<Page<TableMetadataVO>> getAllTables(
-            @RequestParam(defaultValue = "1") int current,
-            @RequestParam(defaultValue = "10000") int size,
-            @RequestParam(required = true) String databaseName,
-            @RequestParam(required = false) String tableName,
-            @RequestParam(required = false) String keyword) {
-        Page<TableMetadata> page = tableMetadataService.getTableList(current, size, null, databaseName, tableName, keyword);
-
-        if (!dataAccessPermissionService.isAdmin()) {
-            Set<String> accessibleTableNames = dataAccessPermissionService.getAccessibleTableNames(null, databaseName);
-            final Set<String> tblNames = accessibleTableNames;
-
-            if (tblNames != null && !tblNames.isEmpty()) {
-                List<TableMetadata> filtered = page.getRecords().stream()
-                        .filter(t -> t.getTableName() != null && tblNames.contains(t.getTableName()))
-                        .collect(Collectors.toList());
-                page.setRecords(filtered);
-                page.setTotal(filtered.size());
-            } else {
-                page.setRecords(new ArrayList<>());
-                page.setTotal(0);
-            }
-        }
-
-        Page<TableMetadataVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
-        voPage.setRecords(page.getRecords().stream().map(this::toTableMetadataVO).collect(Collectors.toList()));
-        return Result.success(voPage);
-    }
-
     @GetMapping("/table/columns")
     public Result<List<ColumnMetadataVO>> getTableColumns(
-            @RequestParam StorageEngineType storageEngine,
-            @RequestParam String databaseName,
-            @RequestParam String tableName) {
+            @RequestParam(required = true)  StorageEngineType storageEngine,
+            @RequestParam(required = true)  String databaseName,
+            @RequestParam(required = true)  String tableName) {
 
         dataAccessPermissionService.checkTablePermission(
                 null,

@@ -9,11 +9,12 @@ public class IndicatorVO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private Long id;
-    private String projectName;
+    private String projectCode;
     private String topic;
     private String name;
-    private String alias;
+    private String code;
     private String businessDefinition;
+    private String calcExpr;
     private String defaultFilter;
     private String alertConfig;
     private String businessOwner;
@@ -34,12 +35,12 @@ public class IndicatorVO implements Serializable {
         this.id = id;
     }
 
-    public String getProjectName() {
-        return projectName;
+    public String getProjectCode() {
+        return projectCode;
     }
 
-    public void setProjectName(String projectName) {
-        this.projectName = projectName;
+    public void setProjectCode(String projectCode) {
+        this.projectCode = projectCode;
     }
 
     public String getTopic() {
@@ -58,12 +59,12 @@ public class IndicatorVO implements Serializable {
         this.name = name;
     }
 
-    public String getAlias() {
-        return alias;
+    public String getCode() {
+        return code;
     }
 
-    public void setAlias(String alias) {
-        this.alias = alias;
+    public void setCode(String code) {
+        this.code = code;
     }
 
     public String getBusinessDefinition() {
@@ -72,6 +73,14 @@ public class IndicatorVO implements Serializable {
 
     public void setBusinessDefinition(String businessDefinition) {
         this.businessDefinition = businessDefinition;
+    }
+
+    public String getCalcExpr() {
+        return calcExpr;
+    }
+
+    public void setCalcExpr(String calcExpr) {
+        this.calcExpr = calcExpr;
     }
 
     public String getDefaultFilter() {

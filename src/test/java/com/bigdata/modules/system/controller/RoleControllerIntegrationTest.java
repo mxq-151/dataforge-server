@@ -56,7 +56,13 @@ class RoleControllerIntegrationTest {
     private SysMenuPermissionMapper sysMenuPermissionMapper;
 
     @Autowired
-    private SysUserRoleMapper sysUserRoleMapper;
+    private SysRoleMenuPermissionMapper sysRoleMenuPermissionMapper;
+
+    @Autowired
+    private SysRoleFilePermissionMapper sysRoleFilePermissionMapper;
+
+    @Autowired
+    private SysRoleTablePermissionMapper sysRoleTablePermissionMapper;
 
     @Autowired
     private SysTablePermissionMapper sysTablePermissionMapper;
@@ -603,7 +609,7 @@ class RoleControllerIntegrationTest {
                     null
             );
 
-            List<Long> assignedMenuIds = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(role.getId());
+            List<Long> assignedMenuIds = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(role.getId());
             assertEquals(2, assignedMenuIds.size(), "应有2条菜单权限绑定");
 
             System.out.println("  分配结果: 成功 ✓");
@@ -628,7 +634,7 @@ class RoleControllerIntegrationTest {
                     Arrays.asList(table1.getId(), table2.getId())
             );
 
-            List<Long> assignedTableIds = sysUserRoleMapper.selectTablePermissionIdsByRoleId(role.getId());
+            List<Long> assignedTableIds = sysRoleTablePermissionMapper.selectTablePermissionIdsByRoleId(role.getId());
             assertEquals(2, assignedTableIds.size(), "应有2条表权限绑定");
 
             System.out.println("  分配结果: 成功 ✓");
@@ -653,7 +659,7 @@ class RoleControllerIntegrationTest {
                     null
             );
 
-            List<Long> assignedFileIds = sysUserRoleMapper.selectFilePermissionIdsByRoleId(role.getId());
+            List<Long> assignedFileIds = sysRoleFilePermissionMapper.selectFilePermissionIdsByRoleId(role.getId());
             assertEquals(2, assignedFileIds.size(), "应有2条文件权限绑定");
 
             System.out.println("  分配结果: 成功 ✓");
@@ -703,7 +709,7 @@ class RoleControllerIntegrationTest {
                     null
             );
 
-            List<Long> firstAssign = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(role.getId());
+            List<Long> firstAssign = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(role.getId());
             assertEquals(2, firstAssign.size(), "第一次分配后应有2条");
 
             permissionService.assignRolePermissions(
@@ -713,7 +719,7 @@ class RoleControllerIntegrationTest {
                     null
             );
 
-            List<Long> secondAssign = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(role.getId());
+            List<Long> secondAssign = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(role.getId());
             assertEquals(1, secondAssign.size(), "重新分配后应有1条");
             assertEquals(menu3.getId(), secondAssign.get(0),
                     "应是新的菜单权限");
@@ -740,9 +746,9 @@ class RoleControllerIntegrationTest {
                     Arrays.asList(table.getId())
             );
 
-            List<Long> menuIds = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(role.getId());
-            List<Long> fileIds = sysUserRoleMapper.selectFilePermissionIdsByRoleId(role.getId());
-            List<Long> tableIds = sysUserRoleMapper.selectTablePermissionIdsByRoleId(role.getId());
+            List<Long> menuIds = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(role.getId());
+            List<Long> fileIds = sysRoleFilePermissionMapper.selectFilePermissionIdsByRoleId(role.getId());
+            List<Long> tableIds = sysRoleTablePermissionMapper.selectTablePermissionIdsByRoleId(role.getId());
 
             assertEquals(1, menuIds.size(), "应有1个菜单权限");
             assertEquals(1, fileIds.size(), "应有1个文件权限");
@@ -1058,7 +1064,7 @@ class RoleControllerIntegrationTest {
                     null,
                     null
             );
-            List<Long> menuPermIds = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(role.getId());
+            List<Long> menuPermIds = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(role.getId());
             assertEquals(1, menuPermIds.size());
 
             System.out.println("  步骤3: 关联用户");
@@ -1123,8 +1129,8 @@ class RoleControllerIntegrationTest {
                     null
             );
 
-            List<Long> permsA = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(roleA.getId());
-            List<Long> permsB = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(roleB.getId());
+            List<Long> permsA = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(roleA.getId());
+            List<Long> permsB = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(roleB.getId());
 
             assertEquals(1, permsA.size(), "角色A应有1个权限");
             assertEquals(1, permsB.size(), "角色B应有1个权限");
@@ -1151,12 +1157,12 @@ class RoleControllerIntegrationTest {
                     null
             );
 
-            List<Long> permsBefore = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(role.getId());
+            List<Long> permsBefore = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(role.getId());
             assertFalse(permsBefore.isEmpty(), "禁用前应有权限");
 
             roleController.changeStatus(role.getId(), 0);
 
-            List<Long> permsAfter = sysUserRoleMapper.selectMenuPermissionIdsByRoleId(role.getId());
+            List<Long> permsAfter = sysRoleMenuPermissionMapper.selectMenuPermissionIdsByRoleId(role.getId());
             assertEquals(permsBefore.size(), permsAfter.size(),
                     "禁用后权限数量不变（权限不受状态影响）");
 

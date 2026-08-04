@@ -29,11 +29,11 @@ public class IndicatorController {
     public Result<Page<IndicatorVO>> getList(
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) String projectName,
+            @RequestParam(required = false) String projectCode,
             @RequestParam(required = false) String topic,
             @RequestParam(required = false) String name,
             @RequestParam(required = false) String keyword) {
-        Page<Indicator> page = indicatorService.getIndicatorList(current, size, projectName, topic, name, keyword);
+        Page<Indicator> page = indicatorService.getIndicatorList(current, size, projectCode, topic, name, keyword);
         Page<IndicatorVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         voPage.setRecords(page.getRecords().stream().map(this::toVO).collect(Collectors.toList()));
         return Result.success(voPage);
@@ -41,10 +41,10 @@ public class IndicatorController {
 
     @GetMapping("/filter")
     public Result<List<IndicatorVO>> filterIndicators(
-            @RequestParam(required = false) String projectName,
+            @RequestParam(required = false) String projectCode,
             @RequestParam(required = false) String topic,
             @RequestParam(required = false) String keyword) {
-        List<Indicator> list = indicatorService.getIndicatorsByFilter(projectName, topic, keyword);
+        List<Indicator> list = indicatorService.getIndicatorsByFilter(projectCode, topic, keyword);
         List<IndicatorVO> voList = list.stream().map(this::toVO).collect(Collectors.toList());
         return Result.success(voList);
     }
@@ -61,11 +61,20 @@ public class IndicatorController {
         return Result.success(vo);
     }
 
+
     @PostMapping
-    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ADMIN', 'ROLE_DATA_ENGINEER', 'ROLE_DATA_ARCH')")
     @AuditLog(module = "指标管理", operation = "创建指标", targetType = "Indicator")
     public Result<Void> save(@Valid @RequestBody IndicatorDTO dto) {
         indicatorService.saveIndicator(dto);
+        return Result.success();
+    }
+
+    @PostMapping("/batch")
+    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ADMIN', 'ROLE_DATA_ENGINEER', 'ROLE_DATA_ARCH')")
+    @AuditLog(module = "指标管理", operation = "批量创建指标", targetType = "Indicator")
+    public Result<Void> batchSave(@Valid @RequestBody List<IndicatorDTO> dtoList) {
+        indicatorService.batchSaveIndicators(dtoList);
         return Result.success();
     }
 
@@ -77,11 +86,12 @@ public class IndicatorController {
         return Result.success();
     }
 
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('SUPER_ADMIN')")
-    @AuditLog(module = "指标管理", operation = "删除指标", targetType = "Indicator")
-    public Result<Void> delete(@PathVariable Long id) {
-        indicatorService.deleteIndicator(id);
+
+    @DeleteMapping("/batch")
+    @PreAuthorize("hasAnyAuthority('ROLE_SUPER_ADMIN', 'ROLE_OPS_ADMIN', 'ROLE_DATA_ARCH')")
+    @AuditLog(module = "指标管理", operation = "批量删除指标", targetType = "Indicator")
+    public Result<Void> batchDelete(@RequestBody List<Long> ids) {
+        indicatorService.batchDeleteIndicators(ids);
         return Result.success();
     }
 

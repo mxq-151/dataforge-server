@@ -9,9 +9,9 @@ public class IndicatorDTO {
 
     private Long id;
 
-    @NotBlank(message = "项目名称不能为空")
-    @Size(max = 200, message = "项目名称不能超过200字符")
-    private String projectName;
+    @NotBlank(message = "项目编码不能为空")
+    @Size(max = 200, message = "项目编码不能超过200字符")
+    private String projectCode;
 
     @NotBlank(message = "主题不能为空")
     @Size(max = 200, message = "主题不能超过200字符")
@@ -21,10 +21,12 @@ public class IndicatorDTO {
     @Size(max = 200, message = "指标名称不能超过200字符")
     private String name;
 
-    @Size(max = 100, message = "别名不能超过100字符")
-    private String alias;
+    @NotBlank(message = "指标编码不能为空")
+    @Size(max = 100, message = "指标编码不能超过100字符")
+    private String code;
 
     private String businessDefinition;
+    private String calcExpr;
     private String defaultFilter;
     private String alertConfig;
 
@@ -54,12 +56,12 @@ public class IndicatorDTO {
         this.id = id;
     }
 
-    public String getProjectName() {
-        return projectName;
+    public String getProjectCode() {
+        return projectCode;
     }
 
-    public void setProjectName(String projectName) {
-        this.projectName = projectName;
+    public void setProjectCode(String projectCode) {
+        this.projectCode = projectCode;
     }
 
     public String getTopic() {
@@ -78,12 +80,12 @@ public class IndicatorDTO {
         this.name = name;
     }
 
-    public String getAlias() {
-        return alias;
+    public String getCode() {
+        return code;
     }
 
-    public void setAlias(String alias) {
-        this.alias = alias;
+    public void setCode(String code) {
+        this.code = code;
     }
 
     public String getBusinessDefinition() {
@@ -92,6 +94,14 @@ public class IndicatorDTO {
 
     public void setBusinessDefinition(String businessDefinition) {
         this.businessDefinition = businessDefinition;
+    }
+
+    public String getCalcExpr() {
+        return calcExpr;
+    }
+
+    public void setCalcExpr(String calcExpr) {
+        this.calcExpr = calcExpr;
     }
 
     public String getDefaultFilter() {

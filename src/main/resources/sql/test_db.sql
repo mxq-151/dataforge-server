@@ -20,9 +20,6 @@ SET @@SESSION.SQL_LOG_BIN= 0;
 --
 -- GTID state at the beginning of the backup 
 --
-
-SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '675db888-1844-11f1-8b84-2043f1eed45b:1-1954090';
-
 --
 -- Current Database: `test_db`
 --

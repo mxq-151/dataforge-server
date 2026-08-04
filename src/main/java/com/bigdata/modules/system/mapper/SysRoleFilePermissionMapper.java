@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.bigdata.modules.system.entity.SysRoleFilePermission;
 import org.apache.ibatis.annotations.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Mapper
@@ -38,4 +39,21 @@ public interface SysRoleFilePermissionMapper extends BaseMapper<SysRoleFilePermi
             "</foreach>" +
             "</script>")
     void batchInsert(@Param("list") List<SysRoleFilePermission> list);
+
+    @Insert("<script>" +
+            "INSERT INTO sys_role_file_permission(role_id, file_permission_id, create_time) VALUES " +
+            "<foreach item='permId' collection='permissionIds' separator=','>" +
+            "(#{roleId}, #{permId}, #{createTime})" +
+            "</foreach>" +
+            "</script>")
+    void batchInsertRoleFilePermissions(@Param("roleId") Long roleId, @Param("permissionIds") List<Long> permissionIds, @Param("createTime") LocalDateTime createTime);
+
+    @Insert("INSERT INTO sys_role_file_permission(role_id, file_permission_id, create_time) VALUES(#{roleId}, #{permissionId}, #{createTime})")
+    void insertRoleFilePermission(@Param("roleId") Long roleId, @Param("permissionId") Long permissionId, @Param("createTime") LocalDateTime createTime);
+
+    @Delete("DELETE FROM sys_role_file_permission WHERE role_id = #{roleId}")
+    int deleteByRoleId(@Param("roleId") Long roleId);
+
+    @Select("SELECT file_permission_id FROM sys_role_file_permission WHERE role_id = #{roleId}")
+    List<Long> selectFilePermissionIdsByRoleId(@Param("roleId") Long roleId);
 }

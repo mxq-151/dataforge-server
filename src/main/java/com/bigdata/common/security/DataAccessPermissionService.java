@@ -2,6 +2,8 @@ package com.bigdata.common.security;
 
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.utils.SecurityUtils;
+import com.bigdata.modules.development.entity.DevProject;
+import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.system.entity.*;
 import com.bigdata.modules.system.mapper.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +44,9 @@ public class DataAccessPermissionService {
 
     @Autowired
     private SysRoleProjectPermissionMapper sysRoleProjectPermissionMapper;
+
+    @Autowired
+    private DevProjectMapper devProjectMapper;
 
     @Autowired
     private SysFilePermissionMapper sysFilePermissionMapper;
@@ -469,6 +474,41 @@ public class DataAccessPermissionService {
         }
 
         return false;
+    }
+
+    /**
+     * 获取当前用户可访问的项目编码集合。
+     * 管理员返回null（表示无限制），无权限返回空集合。
+     */
+    public Set<String> getAccessibleProjectCodes() {
+        if (isAdmin()) {
+            return null;
+        }
+
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            return Collections.emptySet();
+        }
+
+        List<Long> roleIds = getUserRoleIds(userId);
+        if (roleIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        List<SysRoleProjectPermission> permissions = sysRoleProjectPermissionMapper.selectByRoleIds(roleIds);
+        if (permissions.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        Set<Long> projectIds = permissions.stream()
+                .map(SysRoleProjectPermission::getProjectId)
+                .collect(Collectors.toSet());
+
+        List<DevProject> projects = devProjectMapper.selectBatchIds(projectIds);
+        return projects.stream()
+                .map(DevProject::getProjectCode)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
     }
 
     private boolean hasTableOperation(SysTablePermission perm, String operation) {
