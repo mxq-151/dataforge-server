@@ -31,6 +31,8 @@ public class TableMetadata {
     private Integer coldDays = 180;
     private Integer keepDays = 720;
     private Date syncTime;
+    private String tableFingerprint;
+    private String columnsFingerprint;
     private Long createBy;
     private Date createTime;
     private Date updateTime;
@@ -76,6 +78,10 @@ public class TableMetadata {
     public void setKeepDays(Integer keepDays) { this.keepDays = keepDays; }
     public Date getSyncTime() { return syncTime; }
     public void setSyncTime(Date syncTime) { this.syncTime = syncTime; }
+    public String getTableFingerprint() { return tableFingerprint; }
+    public void setTableFingerprint(String tableFingerprint) { this.tableFingerprint = tableFingerprint; }
+    public String getColumnsFingerprint() { return columnsFingerprint; }
+    public void setColumnsFingerprint(String columnsFingerprint) { this.columnsFingerprint = columnsFingerprint; }
     public Long getCreateBy() { return createBy; }
     public void setCreateBy(Long createBy) { this.createBy = createBy; }
     public Date getCreateTime() { return createTime; }

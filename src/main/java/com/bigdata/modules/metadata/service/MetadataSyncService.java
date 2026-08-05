@@ -116,12 +116,17 @@ public class MetadataSyncService {
 
             int totalTableCount = 0;
             Map<String, List<TableMetadata>> databaseTableMap = new LinkedHashMap<>();
+            // 远程存在的表键集合(databaseName + DELIMITER + tableName)，用于同步后清理孤表
+            Set<String> remoteTableKeys = new HashSet<>();
             for (String db : databases) {
                 if (isSystemDatabase(db)) continue;
                 List<TableMetadata> tables = strategy.listTables(config, db);
                 if (tables != null && !tables.isEmpty()) {
                     databaseTableMap.put(db, tables);
                     totalTableCount += tables.size();
+                    for (TableMetadata t : tables) {
+                        remoteTableKeys.add(db + TableMetadataService.DELIMITER + t.getTableName());
+                    }
                 }
             }
 
@@ -153,6 +158,16 @@ public class MetadataSyncService {
                         log.error("同步表失败: {}.{}", db, remoteTable.getTableName(), e);
                         failCount++;
                     }
+                }
+            }
+
+            // 清理本地多余表元数据(远程已不存在的表或数据库)
+            if (remoteTableKeys.isEmpty()) {
+                log.warn("远程未获取到任何表元数据, 跳过孤表清理: datasourceId={}", datasourceId);
+            } else {
+                int deletedCount = tableMetadataService.deleteOrphanTablesByDatasource(datasourceId, storageEngine, remoteTableKeys);
+                if (deletedCount > 0) {
+                    log.info("清理孤表元数据: datasourceId={}, 删除表数量={}", datasourceId, deletedCount);
                 }
             }
 

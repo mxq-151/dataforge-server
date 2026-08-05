@@ -915,6 +915,8 @@ CREATE TABLE `table_metadata` (
   `cold_days` int NOT NULL DEFAULT '180' COMMENT '冷数据保留天数',
   `keep_days` int NOT NULL DEFAULT '720' COMMENT '数据总保留天数',
   `sync_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '元数据同步时间',
+  `table_fingerprint` varchar(64) DEFAULT NULL COMMENT '表结构指纹(表级元数据MD5)，未变更时跳过表更新',
+  `columns_fingerprint` varchar(64) DEFAULT NULL COMMENT '字段结构指纹(字段级元数据MD5)，未变更时跳过字段重建',
   `create_by` bigint DEFAULT NULL COMMENT '创建人',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
