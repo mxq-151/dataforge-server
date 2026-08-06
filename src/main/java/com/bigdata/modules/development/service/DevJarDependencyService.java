@@ -57,7 +57,7 @@ public class DevJarDependencyService {
             throw new BusinessException("未配置依赖包保存的基础路径(engine.jar.base-path)");
         }
         String jarPath = jar.getJarPath();
-        if (jarPath == null || jarPath.trim().isEmpty()) {
+        if (jar.getSource().equalsIgnoreCase("custom") && (jarPath == null || jarPath.trim().isEmpty()))  {
             throw new BusinessException("依赖包路径(jarPath)不能为空");
         }
         if (jar.getSource().equals("custom")){

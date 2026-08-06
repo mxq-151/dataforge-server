@@ -206,6 +206,43 @@ public class CodeExecutionController {
         }
     }
 
+    /**
+     * SQL语法校验：不真正执行业务SQL，仅校验语法是否正确。
+     * MySQL 使用 PREPARE stmt FROM，Doris/StarRocks 使用 EXPLAIN，ClickHouse 使用 EXPLAIN SYNTAX。
+     * 校验引擎由主数据源的存储引擎类型决定。
+     */
+    @PostMapping("/validate")
+    @AuditLog(module = "SQL执行", operation = "校验SQL", targetType = "SQL")
+    public Result<Map<String, Object>> validate(@RequestBody CodeExecutionRequest request) {
+        try {
+            Long userId = SecurityUtils.getCurrentUserId();
+            if (userId == null) {
+                return Result.error(401, "未登录或登录已过期");
+            }
+            if (request == null) {
+                return Result.error(400, "请求参数不能为空");
+            }
+            if (request.getCodeContent() == null || request.getCodeContent().trim().isEmpty()) {
+                return Result.error(400, "SQL内容不能为空");
+            }
+            if (request.getDatasources() == null || request.getDatasources().isEmpty()) {
+                return Result.error(400, "语法校验需要指定数据源");
+            }
+
+            checkDatasourceAccess(request.getDatasources());
+
+            Map<String, Object> result = codeExecutionService.validateSqlSyntax(request);
+            return Result.success(result);
+        } catch (BusinessException e) {
+            return Result.error(e.getCode(), e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return Result.error(400, e.getMessage());
+        } catch (Exception e) {
+            log.error("SQL语法校验接口异常", e);
+            return Result.error("语法校验失败: " + e.getMessage());
+        }
+    }
+
     private String saveUploadedJar(MultipartFile file, Long userId) throws IOException {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("上传的JAR文件不能为空");

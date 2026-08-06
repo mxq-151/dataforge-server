@@ -4,6 +4,7 @@ import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
 import com.bigdata.modules.development.entity.DevScriptExecution;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,8 +12,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -345,5 +351,287 @@ public class CodeExecutionService {
     public List<Map<String, Object>> getRunningProcesses(Long userId) {
         processManager.cleanup();
         return processManager.getRunningProcesses(userId);
+    }
+
+    /**
+     * SQL语法校验：不真正执行业务SQL，仅利用各引擎自身的语法解析能力进行校验。
+     * <ul>
+     *   <li>MySQL：PREPARE stmt FROM '&lt;sql&gt;' （仅解析，不执行）</li>
+     *   <li>Doris / StarRocks：EXPLAIN &lt;sql&gt;</li>
+     *   <li>ClickHouse：EXPLAIN SYNTAX &lt;sql&gt;</li>
+     * </ul>
+     * 校验目标引擎由主数据源的 storageEngine 决定（与实际连接一致）。
+     */
+    public Map<String, Object> validateSqlSyntax(CodeExecutionRequest request) {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        String sql = request.getCodeContent();
+        if (sql == null || sql.trim().isEmpty()) {
+            result.put("valid", false);
+            result.put("message", "SQL语句不能为空");
+            return result;
+        }
+
+        List<DatasourceConfig> configs = loadDatasourceConfigsByName(request.getDatasources());
+        if (configs.isEmpty()) {
+            throw new BusinessException("语法校验需要指定有效的数据源");
+        }
+        DatasourceConfig dsConfig = configs.get(0);
+        StorageEngineType storageEngine = dsConfig.getStorageEngine();
+        if (storageEngine == null) {
+            throw new BusinessException("数据源未配置存储引擎类型");
+        }
+        result.put("engine", storageEngine.name());
+
+        String dbName = (dsConfig.getDatabaseName() != null && !dsConfig.getDatabaseName().isEmpty())
+                ? dsConfig.getDatabaseName().get(0) : null;
+
+        List<String> statements = splitSqlStatements(sql);
+        List<Map<String, Object>> errors = new ArrayList<>();
+        int skipped = 0;
+
+        Connection connection = null;
+        Statement stmt = null;
+        try {
+            connection = datasourceConfigService.getConnection(dsConfig.getId(), dbName);
+            stmt = connection.createStatement();
+
+            for (int i = 0; i < statements.size(); i++) {
+                String statement = statements.get(i);
+                if (isCommentOrBlank(statement)) {
+                    continue;
+                }
+                String validateSql = buildValidateSql(storageEngine, statement);
+                try {
+                    stmt.execute(validateSql);
+                    drainResults(stmt);
+                } catch (SQLException e) {
+                    // MySQL PREPARE 不支持的语句类型(如 USE/SET 会话命令)直接跳过，不视为语法错误
+                    if (storageEngine == StorageEngineType.MYSQL && isUnsupportedPrepareStatement(e)) {
+                        skipped++;
+                        continue;
+                    }
+                    Map<String, Object> err = new LinkedHashMap<>();
+                    err.put("index", i + 1);
+                    err.put("sql", statement);
+                    err.put("message", e.getMessage());
+                    errors.add(err);
+                } finally {
+                    // MySQL 的 PREPARE 会在会话中残留预编译语句，及时释放避免连接复用时的泄漏
+                    if (storageEngine == StorageEngineType.MYSQL) {
+                        try { stmt.execute("DEALLOCATE PREPARE stmt"); } catch (Exception ignored) { }
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            result.put("valid", false);
+            result.put("message", "连接数据源失败: " + e.getMessage());
+            return result;
+        } finally {
+            closeQuietly(stmt);
+            closeQuietly(connection);
+        }
+
+        result.put("valid", errors.isEmpty());
+        result.put("statementCount", statements.size());
+        result.put("skipped", skipped);
+        result.put("errors", errors);
+        String message;
+        if (errors.isEmpty()) {
+            message = skipped > 0 ? "语法校验通过(跳过" + skipped + "条PREPARE不支持的语句)" : "语法校验通过";
+        } else {
+            message = "存在" + errors.size() + "处语法错误";
+        }
+        result.put("message", message);
+        return result;
+    }
+
+    private String buildValidateSql(StorageEngineType engine, String statement) {
+        switch (engine) {
+            case MYSQL:
+                // 转义单引号后用 PREPARE 解析，不真正执行
+                String escaped = statement.replace("'", "''");
+                return "PREPARE stmt FROM '" + escaped + "'";
+            case CLICKHOUSE:
+                return "EXPLAIN SYNTAX " + statement;
+            case DORIS:
+            case STARROCKS:
+            default:
+                return "EXPLAIN " + statement;
+        }
+    }
+
+    /**
+     * 判断是否为 MySQL "PREPARE 不支持该语句类型"的错误(非语法错误)。
+     * MySQL 错误码 1295: ER_UNSUPPORTED_PS
+     * "This command is not supported in the prepared statement protocol yet"
+     */
+    private boolean isUnsupportedPrepareStatement(SQLException e) {
+        if (e.getErrorCode() == 1295) {
+            return true;
+        }
+        String msg = e.getMessage();
+        return msg != null && msg.contains("not supported in the prepared statement protocol");
+    }
+
+    /**
+     * 消费执行后可能产生的结果集，避免影响下一条语句执行。
+     */
+    private void drainResults(Statement stmt) throws SQLException {
+        while (true) {
+            ResultSet rs = stmt.getResultSet();
+            if (rs != null) {
+                rs.close();
+            }
+            if (!stmt.getMoreResults() && stmt.getUpdateCount() == -1) {
+                break;
+            }
+        }
+    }
+
+    private void closeQuietly(AutoCloseable closeable) {
+        if (closeable != null) {
+            try {
+                closeable.close();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * 判断片段是否仅由注释/空白构成（无实际可执行SQL），此类片段跳过校验。
+     */
+    private boolean isCommentOrBlank(String s) {
+        if (s == null) return true;
+        String t = s;
+        t = t.replaceAll("(?s)/\\*.*?\\*/", " ");
+        t = t.replaceAll("(?m)--.*$", " ");
+        t = t.replaceAll("(?m)#.*$", " ");
+        return t.trim().isEmpty();
+    }
+
+    /**
+     * 按分号拆分SQL脚本为独立语句，拆分时跳过字符串字面量与注释内的分号。
+     */
+    private List<String> splitSqlStatements(String sql) {
+        List<String> statements = new ArrayList<>();
+        if (sql == null || sql.isEmpty()) return statements;
+
+        StringBuilder current = new StringBuilder();
+        int len = sql.length();
+        int i = 0;
+        while (i < len) {
+            char c = sql.charAt(i);
+
+            // 块注释 /* */
+            if (c == '/' && i + 1 < len && sql.charAt(i + 1) == '*') {
+                current.append(c).append(sql.charAt(i + 1));
+                i += 2;
+                while (i < len) {
+                    char cc = sql.charAt(i);
+                    current.append(cc);
+                    if (cc == '*' && i + 1 < len && sql.charAt(i + 1) == '/') {
+                        current.append(sql.charAt(i + 1));
+                        i += 2;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            // 行注释 --
+            if (c == '-' && i + 1 < len && sql.charAt(i + 1) == '-') {
+                current.append(c).append(sql.charAt(i + 1));
+                i += 2;
+                while (i < len && sql.charAt(i) != '\n') {
+                    current.append(sql.charAt(i));
+                    i++;
+                }
+                continue;
+            }
+            // 单引号字符串
+            if (c == '\'') {
+                current.append(c);
+                i++;
+                while (i < len) {
+                    char cc = sql.charAt(i);
+                    current.append(cc);
+                    if (cc == '\\' && i + 1 < len) {
+                        current.append(sql.charAt(i + 1));
+                        i += 2;
+                        continue;
+                    }
+                    if (cc == '\'') {
+                        if (i + 1 < len && sql.charAt(i + 1) == '\'') {
+                            current.append(sql.charAt(i + 1));
+                            i += 2;
+                            continue;
+                        }
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            // 双引号字符串/标识符
+            if (c == '"') {
+                current.append(c);
+                i++;
+                while (i < len) {
+                    char cc = sql.charAt(i);
+                    current.append(cc);
+                    if (cc == '\\' && i + 1 < len) {
+                        current.append(sql.charAt(i + 1));
+                        i += 2;
+                        continue;
+                    }
+                    if (cc == '"') {
+                        if (i + 1 < len && sql.charAt(i + 1) == '"') {
+                            current.append(sql.charAt(i + 1));
+                            i += 2;
+                            continue;
+                        }
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            // 反引号标识符
+            if (c == '`') {
+                current.append(c);
+                i++;
+                while (i < len) {
+                    char cc = sql.charAt(i);
+                    current.append(cc);
+                    if (cc == '`') {
+                        if (i + 1 < len && sql.charAt(i + 1) == '`') {
+                            current.append(sql.charAt(i + 1));
+                            i += 2;
+                            continue;
+                        }
+                        i++;
+                        break;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            // 语句分隔符
+            if (c == ';') {
+                String st = current.toString().trim();
+                if (!st.isEmpty()) statements.add(st);
+                current.setLength(0);
+                i++;
+                continue;
+            }
+            current.append(c);
+            i++;
+        }
+        String last = current.toString().trim();
+        if (!last.isEmpty()) statements.add(last);
+        return statements;
     }
 }
