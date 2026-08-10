@@ -101,7 +101,7 @@ CREATE TABLE `datasource_config` (
 
 LOCK TABLES `datasource_config` WRITE;
 /*!40000 ALTER TABLE `datasource_config` DISABLE KEYS */;
-INSERT INTO `datasource_config` VALUES (1,'test_datasource','mysql','jdbc','MYSQL','jdbc:mysql://127.0.0.1:3306/test_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true','[\"test_db\"]','test_tenant','123456',NULL,1,'2026-07-13 15:17:00','系统初始化-连接test_db的MySQL数据源',3,'2026-07-13 15:17:00','2026-07-13 15:28:14',0);
+INSERT INTO `datasource_config` VALUES (1,'test_datasource','mysql','jdbc','MYSQL','jdbc:mysql://127.0.0.1:3306/test_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true','[\"test_db\"]','test_tenant','3UcRXfVuO9KPvpqKUXMswQ==',NULL,1,'2026-07-13 15:17:00','系统初始化-连接test_db的MySQL数据源',3,'2026-07-13 15:17:00','2026-07-13 15:28:14',0);
 /*!40000 ALTER TABLE `datasource_config` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -788,7 +788,7 @@ CREATE TABLE `sys_tenant` (
 
 LOCK TABLES `sys_tenant` WRITE;
 /*!40000 ALTER TABLE `sys_tenant` DISABLE KEYS */;
-INSERT INTO `sys_tenant` VALUES (1,'测试租户','test_tenant','测试联系人','13800138000','test@example.com','系统初始化测试租户',1,3,'357f3724ff339b2a1602c390d59498fd','2026-07-13 15:17:00','2026-07-13 15:17:00',0);
+INSERT INTO `sys_tenant` VALUES (1,'测试租户','test_tenant','测试联系人','13800138000','test@example.com','系统初始化测试租户',1,3,'3UcRXfVuO9KPvpqKUXMswQ==','2026-07-13 15:17:00','2026-07-13 15:17:00',0);
 /*!40000 ALTER TABLE `sys_tenant` ENABLE KEYS */;
 UNLOCK TABLES;
 

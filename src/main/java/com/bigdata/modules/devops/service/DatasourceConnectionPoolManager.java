@@ -1,5 +1,6 @@
 package com.bigdata.modules.devops.service;
 
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.ConnectionType;
@@ -38,6 +39,9 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
 
     @Autowired
     private SysTenantService sysTenantService;
+
+    @Autowired
+    private AesUtils aesUtils;
 
     static {
         loadDriverSilently(KYUUBI_DRIVER);
@@ -138,7 +142,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
 
 
     private HikariDataSource createPoolFromConfig(DatasourceConfig config, String poolName) {
-        HikariConfig hc = buildHikariConfig(config);
+        HikariConfig hc = buildHikariConfig(config, true);
         // 若调用方指定了 poolName，则在 HikariConfig 阶段覆盖（HikariDataSource 创建后不可再修改）
         if (poolName != null && !poolName.isEmpty()) {
             hc.setPoolName(poolName);
@@ -158,7 +162,8 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
     }
 
     public HikariDataSource createTempPool(DatasourceConfig config) {
-        HikariConfig hc = buildHikariConfig(config);
+        // 测试连接时密码为前端传入的明文，不需要解密
+        HikariConfig hc = buildHikariConfig(config, false);
         hc.setPoolName("temp-ds-" + System.currentTimeMillis());
         HikariDataSource pool = new HikariDataSource(hc);
         log.info("创建临时连接池: type={}, url={}", config.getDatasourceType(), config.getUrl());
@@ -282,13 +287,13 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
             throw new RuntimeException("数据源不存在: id=" + datasourceId);
         }
 
-        HikariConfig hc = buildHikariConfig(config);
+        HikariConfig hc = buildHikariConfig(config, true);
         HikariDataSource pool = new HikariDataSource(hc);
         log.info("创建连接池: datasourceId={}, type={}, url={}", datasourceId, config.getDatasourceType(), config.getUrl());
         return pool;
     }
 
-    private HikariConfig buildHikariConfig(DatasourceConfig config) {
+    private HikariConfig buildHikariConfig(DatasourceConfig config, boolean decryptConfigPassword) {
         HikariConfig hc = new HikariConfig();
         DatasourceType type = config.getDatasourceType();
 
@@ -306,13 +311,19 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         if (isAdmin) {
             hc.setPoolName("ds-" + config.getId() + "-" + SecurityUtils.getCurrentUsername());
             hc.setUsername(config.getUsername());
-            hc.setPassword(config.getPassword());
+            // 数据库取出的密码已加密需要解密；测试连接传入的是明文不需要解密
+            String password = config.getPassword();
+            if (decryptConfigPassword) {
+                password = aesUtils.decryptStored(password);
+            }
+            hc.setPassword(password);
         } else {
+            // 租户密码始终从数据库取（已加密），需要解密
             String tenantPassword = "";
             if (currentUserId != null) {
                 SysTenant tenant = sysTenantService.getTenantByUserId(currentUserId);
                 if (tenant != null && tenant.getPassword() != null) {
-                    tenantPassword = tenant.getPassword();
+                    tenantPassword = aesUtils.decryptStored(tenant.getPassword());
                 }
             }
             log.info("create connect for {}",tenantCode);
@@ -400,6 +411,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
                 hc.setIdleTimeout(600000);
                 hc.setMaxLifetime(1800000);
                 hc.setValidationTimeout(10000);
+                hc.setKeepaliveTime(300000);
                 hc.setInitializationFailTimeout(-1);
                 break;
             default:
@@ -407,6 +419,8 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
                 hc.setIdleTimeout(600000);
                 hc.setMaxLifetime(1800000);
                 hc.setValidationTimeout(5000);
+                hc.setKeepaliveTime(300000);
+                hc.setInitializationFailTimeout(-1);
                 break;
         }
     }

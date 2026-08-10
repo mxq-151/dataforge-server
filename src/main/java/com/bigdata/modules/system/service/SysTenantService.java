@@ -3,6 +3,7 @@ package com.bigdata.modules.system.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.modules.system.dto.TenantDTO;
 import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysTenantRole;
@@ -35,6 +36,9 @@ public class SysTenantService {
 
     @Autowired
     private SysUserMapper sysUserMapper;
+
+    @Autowired
+    private AesUtils aesUtils;
 
     public Page<SysTenant> getTenantList(int current, int size, String tenantName, Integer status) {
         Page<SysTenant> page = new Page<>(current, size);
@@ -101,7 +105,7 @@ public class SysTenantService {
         tenant.setContactEmail(dto.getContactEmail());
         tenant.setDescription(dto.getDescription());
         tenant.setStatus(dto.getStatus() != null ? dto.getStatus() : 1);
-        tenant.setPassword(dto.getPassword());
+        tenant.setPassword(aesUtils.encryptStored(dto.getPassword()));
 
         sysTenantMapper.insert(tenant);
 
@@ -144,7 +148,7 @@ public class SysTenantService {
             tenant.setStatus(dto.getStatus());
         }
         if (dto.getPassword() != null) {
-            tenant.setPassword(dto.getPassword());
+            tenant.setPassword(aesUtils.encryptStored(dto.getPassword()));
         }
 
         sysTenantMapper.updateById(tenant);

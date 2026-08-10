@@ -49,11 +49,34 @@ public class AesUtils {
     }
 
     /**
-     * 加密（密码 + 13位时间戳）
+     * 加密（密码 + 13位时间戳），用于登录密码传输加密
      */
     public String encrypt(String password) {
         String plainText = password + System.currentTimeMillis();
         byte[] encrypted = aes.encrypt(plainText);
         return Base64.getEncoder().encodeToString(encrypted);
+    }
+
+    /**
+     * 加密存储（不带时间戳），用于数据库中敏感字段加密存储
+     */
+    public String encryptStored(String plainText) {
+        if (plainText == null || plainText.isEmpty()) {
+            return plainText;
+        }
+        byte[] encrypted = aes.encrypt(plainText.getBytes(StandardCharsets.UTF_8));
+        return Base64.getEncoder().encodeToString(encrypted);
+    }
+
+    /**
+     * 解密存储的密文（不带时间戳校验），用于数据库中加密字段的还原
+     */
+    public String decryptStored(String cipherTextBase64) {
+        if (cipherTextBase64 == null || cipherTextBase64.isEmpty()) {
+            return cipherTextBase64;
+        }
+        byte[] cipherBytes = Base64.getDecoder().decode(cipherTextBase64);
+        byte[] decrypted = aes.decrypt(cipherBytes);
+        return new String(decrypted, StandardCharsets.UTF_8);
     }
 }

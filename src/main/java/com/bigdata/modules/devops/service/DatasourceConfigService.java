@@ -3,6 +3,7 @@ package com.bigdata.modules.devops.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.modules.devops.dto.DatasourceConfigDTO;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.ConnectionType;
@@ -47,6 +48,9 @@ public class DatasourceConfigService {
 
     @Autowired
     private DatasourceConnectionPoolManager poolManager;
+
+    @Autowired
+    private AesUtils aesUtils;
 
     /**
      * 解析连接方式：若未指定则根据数据源类型推断默认值（向后兼容）
@@ -119,6 +123,7 @@ public class DatasourceConfigService {
         if (config.getConnectionType() == null) {
             config.setConnectionType(inferDefaultConnectionType(config.getDatasourceType()));
         }
+        config.setPassword(aesUtils.encryptStored(config.getPassword()));
         config.setConnectionStatus(0);
         datasourceConfigMapper.insert(config);
     }
@@ -127,6 +132,10 @@ public class DatasourceConfigService {
         // 更新时若未指定连接方式，自动推断默认值
         if (config.getConnectionType() == null) {
             config.setConnectionType(inferDefaultConnectionType(config.getDatasourceType()));
+        }
+        // 密码为空表示不修改密码，使用 MyBatis-Plus 不更新空字段
+        if (config.getPassword() != null && !config.getPassword().isEmpty()) {
+            config.setPassword(aesUtils.encryptStored(config.getPassword()));
         }
         datasourceConfigMapper.updateById(config);
         poolManager.refreshPool(config.getId());
@@ -141,49 +150,7 @@ public class DatasourceConfigService {
         datasourceConfigMapper.deleteById(id);
     }
 
-    public ConnectionTestResult testConnection(Long id) {
-        DatasourceConfig config = datasourceConfigMapper.selectById(id);
-        if (config == null) {
-            throw new BusinessException("数据源不存在");
-        }
-
-        boolean success = false;
-        String message = "";
-        long startTime = System.currentTimeMillis();
-        ConnectionType connType = resolveConnectionType(config);
-
-        try {
-            switch (connType) {
-                case HTTP:
-                    success = testHttpConnection(config.getUrl(), config.getUsername(), config.getPassword());
-                    message = success ? "HTTP连接成功" : "HTTP连接失败";
-                    break;
-                case ARROW:
-                    success = testArrowConnection(config.getUrl(), config.getUsername(), config.getPassword());
-                    message = success ? "Arrow Flight连接成功" : "Arrow Flight连接失败";
-                    break;
-                case JDBC:
-                default:
-                    success = poolManager.testConnection(id);
-                    message = success ? config.getDatasourceType().getDescription() + "连接成功"
-                            : config.getDatasourceType().getDescription() + "连接失败";
-                    break;
-            }
-        } catch (Exception e) {
-            logger.error("测试数据源连接失败: {}", e.getMessage());
-            message = "连接异常: " + e.getMessage();
-        }
-
-        long costTime = System.currentTimeMillis() - startTime;
-
-        config.setConnectionStatus(success ? 1 : 2);
-        config.setLastTestTime(LocalDateTime.now());
-        datasourceConfigMapper.updateById(config);
-
-        return new ConnectionTestResult(success, message, costTime + "ms");
-    }
-
-    public ConnectionTestResult testConnectionByConfig(DatasourceConfigDTO dto) {
+    public ConnectionTestResult testConnectionByConfig(DatasourceConfigDTO dto, Long id) {
         boolean success = false;
         String message = "";
         long startTime = System.currentTimeMillis();
@@ -226,6 +193,17 @@ public class DatasourceConfigService {
         }
 
         long costTime = System.currentTimeMillis() - startTime;
+
+        // 若指定了数据源ID，则更新连接状态
+        if (id != null) {
+            DatasourceConfig config = datasourceConfigMapper.selectById(id);
+            if (config != null) {
+                config.setConnectionStatus(success ? 1 : 2);
+                config.setLastTestTime(LocalDateTime.now());
+                datasourceConfigMapper.updateById(config);
+            }
+        }
+
         return new ConnectionTestResult(success, message, costTime + "ms");
     }
 

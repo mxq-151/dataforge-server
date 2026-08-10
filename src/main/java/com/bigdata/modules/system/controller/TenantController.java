@@ -109,7 +109,7 @@ public class TenantController {
             return null;
         }
         TenantVO vo = new TenantVO();
-        BeanUtils.copyProperties(entity, vo);
+        BeanUtils.copyProperties(entity, vo, "password");
 
         SysUser user = sysTenantService.getUserByTenantId(entity.getId());
         if (user != null) {

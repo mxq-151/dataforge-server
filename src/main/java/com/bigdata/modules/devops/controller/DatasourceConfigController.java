@@ -85,12 +85,6 @@ public class DatasourceConfigController {
         return Result.success();
     }
 
-    @PostMapping("/{id}/test")
-    public Result<ConnectionTestResult> testConnection(@PathVariable Long id) {
-        ConnectionTestResult result = datasourceConfigService.testConnection(id);
-        return Result.success(result);
-    }
-
     @PostMapping("/{id}/sync-metadata")
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public Result<Void> syncMetadata(@PathVariable Long id) {
@@ -103,14 +97,9 @@ public class DatasourceConfigController {
     }
 
     @PostMapping("/test")
-    public Result<ConnectionTestResult> testConnectionByConfig(@Valid @RequestBody DatasourceConfigDTO dto) {
-        DatasourceConfig config = new DatasourceConfig();
-        BeanUtils.copyProperties(dto, config);
-        long start = System.currentTimeMillis();
-        boolean success = executionStrategyFactory.getStrategy(config).testConnection(config);
-        long cost = System.currentTimeMillis() - start;
-        ConnectionTestResult result = new ConnectionTestResult(success,
-                success ? "连接成功" : "连接失败", cost + "ms");
+    public Result<ConnectionTestResult> testConnection(@Valid @RequestBody DatasourceConfigDTO dto,
+                                                        @RequestParam(required = false) Long id) {
+        ConnectionTestResult result = datasourceConfigService.testConnectionByConfig(dto, id);
         return Result.success(result);
     }
 
