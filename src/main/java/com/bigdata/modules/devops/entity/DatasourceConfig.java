@@ -10,7 +10,7 @@ import com.bigdata.modules.devops.enums.StorageEngineType;
 import java.time.LocalDateTime;
 import java.util.List;
 
-@TableName("datasource_config")
+@TableName(value = "datasource_config", autoResultMap = true)
 public class DatasourceConfig extends BaseEntity {
 
     private String datasourceName;

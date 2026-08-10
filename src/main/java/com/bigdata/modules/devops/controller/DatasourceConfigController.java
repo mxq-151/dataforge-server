@@ -41,7 +41,7 @@ public class DatasourceConfigController {
     @GetMapping("/list")
     public Result<Page<DatasourceConfigVO>> getList(
             @RequestParam(defaultValue = "1") int current,
-            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "100") int size,
             @RequestParam(required = false) String datasourceName,
             @RequestParam(required = false) DatasourceType datasourceType) {
         Page<DatasourceConfig> page = datasourceConfigService.getDatasourceList(current, size, datasourceName, datasourceType);
