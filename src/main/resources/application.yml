@@ -61,4 +61,4 @@ engine:
   flink:
     home: /opt/flink
   jar:
-    base-path: /opt/jars
+    base-path: /Users/mxq/jars/
