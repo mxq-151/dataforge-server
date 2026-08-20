@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.SysRoleMenuPermissionMapper">
+
+    <!-- H2 方言：MERGE INTO ... KEY(role_id, menu_permission_id)，实现 INSERT IGNORE 的“冲突不报错”语义 -->
+    <insert id="insertPermission" databaseId="h2">
+        MERGE INTO sys_role_menu_permission(role_id, menu_permission_id, create_time)
+        KEY(role_id, menu_permission_id)
+        VALUES(#{permission.roleId}, #{permission.menuPermissionId}, now())
+    </insert>
+
+</mapper>

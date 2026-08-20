@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.SysRoleFilePermissionMapper">
+
+    <select id="selectRoleIdsByPermissionId" resultType="java.lang.Long">
+        SELECT role_id FROM sys_role_file_permission WHERE file_permission_id = #{permissionId}
+    </select>
+
+    <select id="selectByPermissionIds" resultType="com.bigdata.modules.system.entity.SysRoleFilePermission">
+        SELECT file_permission_id AS filePermissionId, role_id AS roleId
+        FROM sys_role_file_permission
+        WHERE file_permission_id IN
+        <foreach item="permId" collection="permissionIds" open="(" separator="," close=")">
+            #{permId}
+        </foreach>
+    </select>
+
+    <select id="selectByRoleIds" resultType="com.bigdata.modules.system.entity.SysRoleFilePermission">
+        SELECT file_permission_id AS filePermissionId, role_id AS roleId
+        FROM sys_role_file_permission
+        WHERE role_id IN
+        <foreach item="roleId" collection="roleIds" open="(" separator="," close=")">
+            #{roleId}
+        </foreach>
+    </select>
+
+    <select id="selectFilePermissionIdsByRoleId" resultType="java.lang.Long">
+        SELECT file_permission_id FROM sys_role_file_permission WHERE role_id = #{roleId}
+    </select>
+
+    <delete id="deleteByPermissionId">
+        DELETE FROM sys_role_file_permission WHERE file_permission_id = #{permissionId}
+    </delete>
+
+    <delete id="deleteByRoleId">
+        DELETE FROM sys_role_file_permission WHERE role_id = #{roleId}
+    </delete>
+
+    <insert id="batchInsert">
+        INSERT INTO sys_role_file_permission(role_id, file_permission_id, create_time) VALUES
+        <foreach item="item" collection="list" separator=",">
+            (#{item.roleId}, #{item.filePermissionId}, #{item.createTime})
+        </foreach>
+    </insert>
+
+    <insert id="batchInsertRoleFilePermissions">
+        INSERT INTO sys_role_file_permission(role_id, file_permission_id, create_time) VALUES
+        <foreach item="permId" collection="permissionIds" separator=",">
+            (#{roleId}, #{permId}, #{createTime})
+        </foreach>
+    </insert>
+
+    <insert id="insertRoleFilePermission">
+        INSERT INTO sys_role_file_permission(role_id, file_permission_id, create_time)
+        VALUES(#{roleId}, #{permissionId}, #{createTime})
+    </insert>
+
+</mapper>

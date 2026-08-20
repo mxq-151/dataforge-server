@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.TableMetadataMapper">
+
+    <!-- H2 方言：MERGE INTO ... KEY(storage_engine, database_name, table_name) -->
+    <insert id="insertOrUpdate" databaseId="h2">
+        MERGE INTO table_metadata (
+            datasource_id, storage_engine, catalog_name, database_name, table_name,
+            table_type, table_comment,
+            partition_columns, storage_format, compression, location, row_count, size_bytes,
+            table_create_time, hot_days, cold_days, keep_days,
+            sync_time, deleted
+        )
+        KEY(storage_engine, database_name, table_name)
+        VALUES (
+            #{t.datasourceId}, #{t.storageEngine}, #{t.catalogName}, #{t.databaseName}, #{t.tableName},
+            #{t.tableType}, #{t.tableComment},
+            #{t.partitionColumns}, #{t.storageFormat}, #{t.compression}, #{t.location}, #{t.rowCount}, #{t.sizeBytes},
+            #{t.tableCreateTime}, #{t.hotDays}, #{t.coldDays}, #{t.keepDays},
+            #{t.syncTime}, #{t.deleted}
+        )
+    </insert>
+
+</mapper>

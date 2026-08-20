@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.SysRoleMenuPermissionMapper">
+
+    <!-- MySQL 方言：INSERT IGNORE 忽略重复键冲突，仅 MySQL/MariaDB 支持 -->
+    <insert id="insertPermission" databaseId="mysql">
+        INSERT IGNORE INTO sys_role_menu_permission(role_id, menu_permission_id, create_time)
+        VALUES(#{permission.roleId}, #{permission.menuPermissionId}, now())
+    </insert>
+
+</mapper>

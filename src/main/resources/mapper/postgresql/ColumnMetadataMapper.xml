@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.ColumnMetadataMapper">
+
+    <!-- PostgreSQL 方言：单行 upsert，ON CONFLICT (storage_engine, database_name, table_name, column_name) -->
+    <insert id="insertOrUpdate" databaseId="postgresql">
+        INSERT INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        ) VALUES (
+            #{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+            #{col.columnName}, #{col.columnType}, #{col.columnComment},
+            #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime}
+        )
+        ON CONFLICT (storage_engine, database_name, table_name, column_name) DO UPDATE SET
+        column_type = EXCLUDED.column_type,
+        column_comment = EXCLUDED.column_comment,
+        is_partition = EXCLUDED.is_partition,
+        is_primary_key = EXCLUDED.is_primary_key,
+        ordinal_position = EXCLUDED.ordinal_position,
+        nullable = EXCLUDED.nullable,
+        default_value = EXCLUDED.default_value,
+        sync_time = EXCLUDED.sync_time
+    </insert>
+
+    <!-- PostgreSQL 方言：批量 upsert，EXCLUDED 伪表引用待插入值 -->
+    <insert id="batchInsertOrUpdate" databaseId="postgresql">
+        INSERT INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        ) VALUES
+        <foreach item="col" collection="list" separator=",">
+            (#{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+             #{col.columnName}, #{col.columnType}, #{col.columnComment},
+             #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime})
+        </foreach>
+        ON CONFLICT (storage_engine, database_name, table_name, column_name) DO UPDATE SET
+        column_type = EXCLUDED.column_type,
+        column_comment = EXCLUDED.column_comment,
+        is_partition = EXCLUDED.is_partition,
+        is_primary_key = EXCLUDED.is_primary_key,
+        ordinal_position = EXCLUDED.ordinal_position,
+        nullable = EXCLUDED.nullable,
+        default_value = EXCLUDED.default_value,
+        sync_time = EXCLUDED.sync_time
+    </insert>
+
+</mapper>

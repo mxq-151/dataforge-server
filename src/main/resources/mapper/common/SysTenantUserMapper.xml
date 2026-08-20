@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.SysTenantUserMapper">
+
+    <select id="selectByTenantId" resultType="com.bigdata.modules.system.entity.SysTenantUser">
+        SELECT * FROM sys_tenant_user WHERE tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectByUserId" resultType="com.bigdata.modules.system.entity.SysTenantUser">
+        SELECT * FROM sys_tenant_user WHERE user_id = #{userId}
+    </select>
+
+    <select id="selectUserIdsByTenantId" resultType="java.lang.Long">
+        SELECT user_id FROM sys_tenant_user WHERE tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectTenantIdByUserId" resultType="java.lang.Long">
+        SELECT tenant_id FROM sys_tenant_user WHERE user_id = #{userId}
+    </select>
+
+    <delete id="deleteByTenantId">
+        DELETE FROM sys_tenant_user WHERE tenant_id = #{tenantId}
+    </delete>
+
+    <delete id="deleteByUserId">
+        DELETE FROM sys_tenant_user WHERE user_id = #{userId}
+    </delete>
+
+</mapper>

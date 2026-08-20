@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.OperationAuditLogMapper">
+
+    <!-- PostgreSQL 方言：查询 operation_audit_log 的声明式分区子表名。
+         假设父表为 PARTITION BY RANGE (operation_time)，子分区表命名为 pYYYYMMDD（与 MySQL 分区名统一） -->
+    <select id="selectAllPartitionNames" databaseId="postgresql" resultType="java.lang.String">
+        SELECT child.relname
+        FROM pg_inherits i
+        JOIN pg_class parent ON parent.oid = i.inhparent AND parent.relname = 'operation_audit_log'
+        JOIN pg_class child ON child.oid = i.inhrelid
+        WHERE child.relkind = 'r'
+    </select>
+
+    <!-- PostgreSQL 方言：按文件名约定 pYYYYMMDD 过滤出早于 cutoff 的过期子分区 -->
+    <select id="selectExpiredPartitions" databaseId="postgresql" resultType="java.lang.String">
+        SELECT child.relname
+        FROM pg_inherits i
+        JOIN pg_class parent ON parent.oid = i.inhparent AND parent.relname = 'operation_audit_log'
+        JOIN pg_class child ON child.oid = i.inhrelid
+        WHERE child.relkind = 'r'
+          AND child.relname ~ '^p[0-9]{8}$'
+          AND child.relname &lt; 'p' || to_char(to_date(#{beforeDate}, 'YYYY-MM-DD'), 'YYYYMMDD')
+    </select>
+
+    <!-- PostgreSQL 方言：一次性删除多个过期子分区。DROP TABLE 父分区表允许直接删除子分区（脱附并删除数据） -->
+    <update id="dropPartitions" databaseId="postgresql">
+        DROP TABLE ${partitionNames}
+    </update>
+
+    <!-- PostgreSQL 方言：创建单个声明式子分区，边界使用日期字符串绑定。
+         假设父表 operation_audit_log 为 PARTITION BY RANGE (operation_time)。 -->
+    <update id="createPartition" databaseId="postgresql">
+        CREATE TABLE ${partitionName} PARTITION OF operation_audit_log
+        FOR VALUES FROM (#{fromDate}) TO (#{toDate})
+    </update>
+
+</mapper>

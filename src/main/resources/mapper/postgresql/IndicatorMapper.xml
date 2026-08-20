@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.IndicatorMapper">
+
+    <!-- PostgreSQL 方言：按唯一约束 uk_code(code) upsert，使用 ON CONFLICT ... DO UPDATE + EXCLUDED 伪表 -->
+    <insert id="upsertByCode" databaseId="postgresql">
+        INSERT INTO indicators (project_code, topic, name, code, business_definition, calc_expr,
+                                default_filter, alert_config, business_owner, tech_owner,
+                                refresh_interval, refresh_unit, refresh_desc, visibility)
+        VALUES (#{projectCode}, #{topic}, #{name}, #{code}, #{businessDefinition}, #{calcExpr},
+                #{defaultFilter}, #{alertConfig}, #{businessOwner}, #{techOwner},
+                #{refreshInterval}, #{refreshUnit}, #{refreshDesc}, #{visibility})
+        ON CONFLICT (code) DO UPDATE SET
+        project_code = EXCLUDED.project_code,
+        topic = EXCLUDED.topic,
+        name = EXCLUDED.name,
+        business_definition = EXCLUDED.business_definition,
+        calc_expr = EXCLUDED.calc_expr,
+        default_filter = EXCLUDED.default_filter,
+        alert_config = EXCLUDED.alert_config,
+        business_owner = EXCLUDED.business_owner,
+        tech_owner = EXCLUDED.tech_owner,
+        refresh_interval = EXCLUDED.refresh_interval,
+        refresh_unit = EXCLUDED.refresh_unit,
+        refresh_desc = EXCLUDED.refresh_desc,
+        visibility = EXCLUDED.visibility,
+        updated_at = NOW()
+    </insert>
+
+</mapper>

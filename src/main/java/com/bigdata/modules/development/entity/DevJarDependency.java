@@ -1,15 +1,10 @@
 package com.bigdata.modules.development.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.common.entity.BaseEntity;
 
 @TableName("dev_jar_dependency")
 public class DevJarDependency extends BaseEntity {
-
-    @TableId(type = IdType.AUTO)
-    private Long id;
 
     private String jarName;
 
@@ -40,14 +35,6 @@ public class DevJarDependency extends BaseEntity {
     private String programType;
 
     private Integer autoChoose;
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public String getJarName() {
         return jarName;

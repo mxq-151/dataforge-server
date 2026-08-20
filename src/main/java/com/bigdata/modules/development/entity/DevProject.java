@@ -1,15 +1,10 @@
 package com.bigdata.modules.development.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.common.entity.BaseEntity;
 
 @TableName("dev_project")
 public class DevProject extends BaseEntity {
-
-    @TableId(type = IdType.AUTO)
-    private Long id;
 
     private String projectName;
 
@@ -28,14 +23,6 @@ public class DevProject extends BaseEntity {
     private Integer scriptCount;
 
     private Integer scheduledCount;
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
 
     public String getProjectName() {
         return projectName;

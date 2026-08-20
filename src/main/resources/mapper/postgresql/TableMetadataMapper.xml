@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.TableMetadataMapper">
+
+    <!-- PostgreSQL 方言：ON CONFLICT (storage_engine, database_name, table_name) DO UPDATE -->
+    <insert id="insertOrUpdate" databaseId="postgresql">
+        INSERT INTO table_metadata (
+            datasource_id, storage_engine, catalog_name, database_name, table_name,
+            table_type, table_comment,
+            partition_columns, storage_format, compression, location, row_count, size_bytes,
+            table_create_time, hot_days, cold_days, keep_days,
+            sync_time, deleted
+        ) VALUES (
+            #{t.datasourceId}, #{t.storageEngine}, #{t.catalogName}, #{t.databaseName}, #{t.tableName},
+            #{t.tableType}, #{t.tableComment},
+            #{t.partitionColumns}, #{t.storageFormat}, #{t.compression}, #{t.location}, #{t.rowCount}, #{t.sizeBytes},
+            #{t.tableCreateTime}, #{t.hotDays}, #{t.coldDays}, #{t.keepDays},
+            #{t.syncTime}, #{t.deleted}
+        )
+        ON CONFLICT (storage_engine, database_name, table_name) DO UPDATE SET
+        catalog_name = EXCLUDED.catalog_name,
+        table_type = EXCLUDED.table_type,
+        table_comment = EXCLUDED.table_comment,
+        partition_columns = EXCLUDED.partition_columns,
+        storage_format = EXCLUDED.storage_format,
+        compression = EXCLUDED.compression,
+        location = EXCLUDED.location,
+        row_count = EXCLUDED.row_count,
+        size_bytes = EXCLUDED.size_bytes,
+        table_create_time = EXCLUDED.table_create_time,
+        hot_days = EXCLUDED.hot_days,
+        cold_days = EXCLUDED.cold_days,
+        keep_days = EXCLUDED.keep_days,
+        sync_time = EXCLUDED.sync_time,
+        deleted = EXCLUDED.deleted
+    </insert>
+
+</mapper>

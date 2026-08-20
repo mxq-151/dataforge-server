@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.OperationAuditLogMapper">
+
+    <!-- MySQL 方言：查询 operation_audit_log 表已过期的分区（基于 information_schema.PARTITIONS） -->
+    <select id="selectExpiredPartitions" databaseId="mysql" resultType="java.lang.String">
+        SELECT PARTITION_NAME
+        FROM information_schema.PARTITIONS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'operation_audit_log'
+          AND PARTITION_NAME != 'p_max'
+          AND TO_DAYS(PARTITION_DESCRIPTION) &lt;= TO_DAYS(#{beforeDate})
+        ORDER BY PARTITION_ORDINAL_POSITION ASC
+    </select>
+
+    <!-- MySQL 方言：动态 DROP PARTITION（分区名作为变量必须用 PREPARE/EXECUTE 拼装） -->
+    <update id="dropPartition" databaseId="mysql">
+        SET @sql = CONCAT('ALTER TABLE operation_audit_log DROP PARTITION ', #{partitionName});
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt
+    </update>
+
+    <!-- MySQL 方言：查询全部分区名（AuditLogPartitionTask 预创建用） -->
+    <select id="selectAllPartitionNames" databaseId="mysql" resultType="java.lang.String">
+        SELECT PARTITION_NAME
+        FROM information_schema.PARTITIONS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'operation_audit_log'
+    </select>
+
+    <!-- MySQL 方言：将 p_max 拆分为多个 [partitionDefs] 分区 + 新的 p_max。
+         分区定义是 DDL 片段，不能用 #{}, 必须用 ${} 字符串注入 -->
+    <update id="createPartitions" databaseId="mysql">
+        ALTER TABLE operation_audit_log REORGANIZE PARTITION p_max INTO
+        (${partitionDefs}, PARTITION p_max VALUES LESS THAN MAXVALUE)
+    </update>
+
+    <!-- MySQL 方言：一次删除多个过期分区（分区名来自元数据，用 ${} 注入） -->
+    <update id="dropPartitions" databaseId="mysql">
+        ALTER TABLE operation_audit_log DROP PARTITION ${partitionNames}
+    </update>
+
+</mapper>

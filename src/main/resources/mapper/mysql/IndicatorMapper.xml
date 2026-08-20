@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.IndicatorMapper">
+
+    <!-- MySQL 方言：使用 ON DUPLICATE KEY UPDATE 实现按 code 唯一键 upsert，
+         更新子句直接引用参数属性，避免已废弃的 VALUES() 函数，兼容 MySQL 8.0.20+ -->
+    <insert id="upsertByCode" databaseId="mysql">
+        INSERT INTO indicators (project_code, topic, name, code, business_definition, calc_expr,
+                                default_filter, alert_config, business_owner, tech_owner,
+                                refresh_interval, refresh_unit, refresh_desc, visibility)
+        VALUES (#{projectCode}, #{topic}, #{name}, #{code}, #{businessDefinition}, #{calcExpr},
+                #{defaultFilter}, #{alertConfig}, #{businessOwner}, #{techOwner},
+                #{refreshInterval}, #{refreshUnit}, #{refreshDesc}, #{visibility})
+        ON DUPLICATE KEY UPDATE
+        project_code = #{projectCode},
+        topic = #{topic},
+        name = #{name},
+        business_definition = #{businessDefinition},
+        calc_expr = #{calcExpr},
+        default_filter = #{defaultFilter},
+        alert_config = #{alertConfig},
+        business_owner = #{businessOwner},
+        tech_owner = #{techOwner},
+        refresh_interval = #{refreshInterval},
+        refresh_unit = #{refreshUnit},
+        refresh_desc = #{refreshDesc},
+        visibility = #{visibility},
+        updated_at = NOW()
+    </insert>
+
+</mapper>

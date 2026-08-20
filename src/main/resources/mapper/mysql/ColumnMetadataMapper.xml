@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.ColumnMetadataMapper">
+
+    <!-- MySQL 方言：单行 upsert，ON DUPLICATE KEY UPDATE 直接引用参数属性，兼容 MySQL 8.0.20+ -->
+    <insert id="insertOrUpdate" databaseId="mysql">
+        INSERT INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        ) VALUES (
+            #{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+            #{col.columnName}, #{col.columnType}, #{col.columnComment},
+            #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime}
+        )
+        ON DUPLICATE KEY UPDATE
+        column_type = #{col.columnType},
+        column_comment = #{col.columnComment},
+        is_partition = #{col.isPartition},
+        is_primary_key = #{col.isPrimaryKey},
+        ordinal_position = #{col.ordinalPosition},
+        nullable = #{col.nullable},
+        default_value = #{col.defaultValue},
+        sync_time = #{col.syncTime}
+    </insert>
+
+    <!-- MySQL 方言：批量 upsert。
+         使用 MySQL 8.0.19+ 的 AS new 行别名语法，替代 8.0.20 起废弃的 VALUES() 函数 -->
+    <insert id="batchInsertOrUpdate" databaseId="mysql">
+        INSERT INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        ) VALUES
+        <foreach item="col" collection="list" separator=",">
+            (#{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+             #{col.columnName}, #{col.columnType}, #{col.columnComment},
+             #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime})
+        </foreach>
+        AS new
+        ON DUPLICATE KEY UPDATE
+        column_type = new.column_type,
+        column_comment = new.column_comment,
+        is_partition = new.is_partition,
+        is_primary_key = new.is_primary_key,
+        ordinal_position = new.ordinal_position,
+        nullable = new.nullable,
+        default_value = new.default_value,
+        sync_time = new.sync_time
+    </insert>
+
+</mapper>

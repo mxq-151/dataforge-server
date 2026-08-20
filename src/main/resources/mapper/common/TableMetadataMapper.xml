@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.TableMetadataMapper">
+
+    <select id="getTableMetadata" resultType="com.bigdata.modules.metadata.entity.TableMetadata">
+        SELECT * FROM table_metadata
+        WHERE storage_engine = #{storageEngine}
+          AND database_name = #{databaseName}
+          AND table_name = #{tableName}
+    </select>
+
+</mapper>

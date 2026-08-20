@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.IndicatorMapper">
+
+    <!-- H2 方言：MERGE INTO ... KEY(code)，在唯一键 code 冲突时更新全部列（含 updated_at） -->
+    <insert id="upsertByCode" databaseId="h2">
+        MERGE INTO indicators (project_code, topic, name, code, business_definition, calc_expr,
+                               default_filter, alert_config, business_owner, tech_owner,
+                               refresh_interval, refresh_unit, refresh_desc, visibility, updated_at)
+        KEY(code)
+        VALUES (#{projectCode}, #{topic}, #{name}, #{code}, #{businessDefinition}, #{calcExpr},
+                #{defaultFilter}, #{alertConfig}, #{businessOwner}, #{techOwner},
+                #{refreshInterval}, #{refreshUnit}, #{refreshDesc}, #{visibility}, NOW())
+    </insert>
+
+</mapper>

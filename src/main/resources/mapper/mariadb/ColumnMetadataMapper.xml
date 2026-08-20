@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.ColumnMetadataMapper">
+
+    <!-- MariaDB 方言：单行 upsert，ODKU 更新子句直接引用参数属性 -->
+    <insert id="insertOrUpdate" databaseId="mariadb">
+        INSERT INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        ) VALUES (
+            #{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+            #{col.columnName}, #{col.columnType}, #{col.columnComment},
+            #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime}
+        )
+        ON DUPLICATE KEY UPDATE
+        column_type = #{col.columnType},
+        column_comment = #{col.columnComment},
+        is_partition = #{col.isPartition},
+        is_primary_key = #{col.isPrimaryKey},
+        ordinal_position = #{col.ordinalPosition},
+        nullable = #{col.nullable},
+        default_value = #{col.defaultValue},
+        sync_time = #{col.syncTime}
+    </insert>
+
+    <!-- MariaDB 方言：批量 upsert，使用 VALUES() 函数（MariaDB 未废弃，全版本支持） -->
+    <insert id="batchInsertOrUpdate" databaseId="mariadb">
+        INSERT INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        ) VALUES
+        <foreach item="col" collection="list" separator=",">
+            (#{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+             #{col.columnName}, #{col.columnType}, #{col.columnComment},
+             #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime})
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+        column_type = VALUES(column_type),
+        column_comment = VALUES(column_comment),
+        is_partition = VALUES(is_partition),
+        is_primary_key = VALUES(is_primary_key),
+        ordinal_position = VALUES(ordinal_position),
+        nullable = VALUES(nullable),
+        default_value = VALUES(default_value),
+        sync_time = VALUES(sync_time)
+    </insert>
+
+</mapper>

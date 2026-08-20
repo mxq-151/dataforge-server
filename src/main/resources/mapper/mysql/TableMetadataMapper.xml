@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.TableMetadataMapper">
+
+    <!-- MySQL 方言：ON DUPLICATE KEY UPDATE，依赖 (datasource_id, storage_engine, database_name, table_name)
+         上的唯一索引；更新子句直接引用参数属性，兼容 MySQL 8.0.20+ -->
+    <insert id="insertOrUpdate" databaseId="mysql">
+        INSERT INTO table_metadata (
+            datasource_id, storage_engine, catalog_name, database_name, table_name,
+            table_type, table_comment,
+            partition_columns, storage_format, compression, location, row_count, size_bytes,
+            table_create_time, hot_days, cold_days, keep_days,
+            sync_time, deleted
+        ) VALUES (
+            #{t.datasourceId}, #{t.storageEngine}, #{t.catalogName}, #{t.databaseName}, #{t.tableName},
+            #{t.tableType}, #{t.tableComment},
+            #{t.partitionColumns}, #{t.storageFormat}, #{t.compression}, #{t.location}, #{t.rowCount}, #{t.sizeBytes},
+            #{t.tableCreateTime}, #{t.hotDays}, #{t.coldDays}, #{t.keepDays},
+            #{t.syncTime}, #{t.deleted}
+        )
+        ON DUPLICATE KEY UPDATE
+        catalog_name = #{t.catalogName},
+        table_type = #{t.tableType},
+        table_comment = #{t.tableComment},
+        partition_columns = #{t.partitionColumns},
+        storage_format = #{t.storageFormat},
+        compression = #{t.compression},
+        location = #{t.location},
+        row_count = #{t.rowCount},
+        size_bytes = #{t.sizeBytes},
+        table_create_time = #{t.tableCreateTime},
+        hot_days = #{t.hotDays},
+        cold_days = #{t.coldDays},
+        keep_days = #{t.keepDays},
+        sync_time = #{t.syncTime},
+        deleted = #{t.deleted}
+    </insert>
+
+</mapper>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.metadata.mapper.ColumnMetadataMapper">
+
+    <!-- H2 方言：单行 upsert，MERGE INTO ... KEY(storage_engine, database_name, table_name, column_name) -->
+    <insert id="insertOrUpdate" databaseId="h2">
+        MERGE INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        )
+        KEY(storage_engine, database_name, table_name, column_name)
+        VALUES (
+            #{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+            #{col.columnName}, #{col.columnType}, #{col.columnComment},
+            #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime}
+        )
+    </insert>
+
+    <!-- H2 方言：批量 upsert，多行 VALUES + KEY 冲突时更新 -->
+    <insert id="batchInsertOrUpdate" databaseId="h2">
+        MERGE INTO column_metadata (
+            table_metadata_id, storage_engine, database_name, table_name,
+            column_name, column_type, column_comment,
+            is_partition, is_primary_key, ordinal_position, nullable, default_value, sync_time
+        )
+        KEY(storage_engine, database_name, table_name, column_name)
+        VALUES
+        <foreach item="col" collection="list" separator=",">
+            (#{col.tableMetadataId}, #{col.storageEngine}, #{col.databaseName}, #{col.tableName},
+             #{col.columnName}, #{col.columnType}, #{col.columnComment},
+             #{col.isPartition}, #{col.isPrimaryKey}, #{col.ordinalPosition}, #{col.nullable}, #{col.defaultValue}, #{col.syncTime})
+        </foreach>
+    </insert>
+
+</mapper>

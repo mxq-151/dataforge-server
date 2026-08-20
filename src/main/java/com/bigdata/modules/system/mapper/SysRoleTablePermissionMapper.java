@@ -2,7 +2,8 @@ package com.bigdata.modules.system.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.bigdata.modules.system.entity.SysRoleTablePermission;
-import org.apache.ibatis.annotations.*;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -10,50 +11,21 @@ import java.util.List;
 @Mapper
 public interface SysRoleTablePermissionMapper extends BaseMapper<SysRoleTablePermission> {
 
-    @Select("SELECT role_id FROM sys_role_table_permission WHERE table_permission_id = #{permissionId}")
     List<Long> selectRoleIdsByPermissionId(@Param("permissionId") Long permissionId);
 
-    @Select("<script>" +
-            "SELECT table_permission_id AS tablePermissionId, role_id AS roleId FROM sys_role_table_permission WHERE table_permission_id IN " +
-            "<foreach item='permId' collection='permissionIds' open='(' separator=',' close=')'>" +
-            "#{permId}" +
-            "</foreach>" +
-            "</script>")
     List<SysRoleTablePermission> selectByPermissionIds(@Param("permissionIds") List<Long> permissionIds);
 
-    @Select("<script>" +
-            "SELECT table_permission_id AS tablePermissionId, role_id AS roleId FROM sys_role_table_permission WHERE role_id IN " +
-            "<foreach item='roleId' collection='roleIds' open='(' separator=',' close=')'>" +
-            "#{roleId}" +
-            "</foreach>" +
-            "</script>")
     List<SysRoleTablePermission> selectByRoleIds(@Param("roleIds") List<Long> roleIds);
 
-    @Delete("DELETE FROM sys_role_table_permission WHERE table_permission_id = #{permissionId}")
     int deleteByPermissionId(@Param("permissionId") Long permissionId);
 
-    @Insert("<script>" +
-            "INSERT INTO sys_role_table_permission(role_id, table_permission_id, create_time) VALUES " +
-            "<foreach item='item' collection='list' separator=','>" +
-            "(#{item.roleId}, #{item.tablePermissionId}, #{item.createTime})" +
-            "</foreach>" +
-            "</script>")
     void batchInsert(@Param("list") List<SysRoleTablePermission> list);
 
-    @Insert("<script>" +
-            "INSERT INTO sys_role_table_permission(role_id, table_permission_id, create_time) VALUES " +
-            "<foreach item='permId' collection='permissionIds' separator=','>" +
-            "(#{roleId}, #{permId}, #{createTime})" +
-            "</foreach>" +
-            "</script>")
     void batchInsertRoleTablePermissions(@Param("roleId") Long roleId, @Param("permissionIds") List<Long> permissionIds, @Param("createTime") LocalDateTime createTime);
 
-    @Insert("INSERT INTO sys_role_table_permission(role_id, table_permission_id, create_time) VALUES(#{roleId}, #{permissionId}, #{createTime})")
     void insertRoleTablePermission(@Param("roleId") Long roleId, @Param("permissionId") Long permissionId, @Param("createTime") LocalDateTime createTime);
 
-    @Delete("DELETE FROM sys_role_table_permission WHERE role_id = #{roleId}")
     int deleteByRoleId(@Param("roleId") Long roleId);
 
-    @Select("SELECT table_permission_id FROM sys_role_table_permission WHERE role_id = #{roleId}")
     List<Long> selectTablePermissionIdsByRoleId(@Param("roleId") Long roleId);
 }

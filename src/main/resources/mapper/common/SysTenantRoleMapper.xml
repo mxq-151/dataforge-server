@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.SysTenantRoleMapper">
+
+    <select id="selectByTenantIds" resultType="com.bigdata.modules.system.entity.SysTenantRole">
+        SELECT * FROM sys_tenant_role WHERE tenant_id IN
+        <foreach item="itemId" collection="tenantIds" open="(" separator="," close=")">
+            #{itemId}
+        </foreach>
+    </select>
+
+    <select id="selectRoleIdsByTenantId" resultType="java.lang.Long">
+        SELECT role_id FROM sys_tenant_role WHERE tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectTenantIdsByRoleId" resultType="java.lang.Long">
+        SELECT tenant_id FROM sys_tenant_role WHERE role_id = #{roleId}
+    </select>
+
+    <delete id="deleteByTenantId">
+        DELETE FROM sys_tenant_role WHERE tenant_id = #{tenantId}
+    </delete>
+
+    <delete id="deleteByRoleId">
+        DELETE FROM sys_tenant_role WHERE role_id = #{roleId}
+    </delete>
+
+    <insert id="batchInsertTenantRoles">
+        INSERT INTO sys_tenant_role(tenant_id, role_id, create_time) VALUES
+        <foreach item="item" collection="list" separator=",">
+            (#{item.tenantId}, #{item.roleId}, #{item.createTime})
+        </foreach>
+    </insert>
+
+</mapper>
