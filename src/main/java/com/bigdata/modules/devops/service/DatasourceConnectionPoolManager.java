@@ -29,6 +29,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
 
     private static final String KYUUBI_DRIVER = "org.apache.kyuubi.jdbc.KyuubiHiveDriver";
     private static final String MYSQL_DRIVER = "com.mysql.cj.jdbc.Driver";
+    private static final String POSTGRESQL_DRIVER = "org.postgresql.Driver";
     private static final String CLICKHOUSE_DRIVER = "com.clickhouse.jdbc.ClickHouseDriver";
 
     private final ConcurrentHashMap<Long, HikariDataSource> poolMap = new ConcurrentHashMap<>();
@@ -46,6 +47,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
     static {
         loadDriverSilently(KYUUBI_DRIVER);
         loadDriverSilently(MYSQL_DRIVER);
+        loadDriverSilently(POSTGRESQL_DRIVER);
         loadDriverSilently(CLICKHOUSE_DRIVER);
     }
 
@@ -105,6 +107,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
 
         switch (type) {
             case MYSQL:
+            case POSTGRESQL:
             case DORIS:
             case STARROCKS:
                 // 查找 "://" 后的第一个 "/"，这才是 host:port 与数据库之间的分隔符，
@@ -381,6 +384,9 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
             case HIVE:
                 hc.setDriverClassName(KYUUBI_DRIVER);
                 break;
+            case POSTGRESQL:
+                hc.setDriverClassName(POSTGRESQL_DRIVER);
+                break;
             case CLICKHOUSE:
                 hc.setDriverClassName(CLICKHOUSE_DRIVER);
                 break;
@@ -432,6 +438,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
                 hc.setConnectionTestQuery("SELECT 1");
                 break;
             case MYSQL:
+            case POSTGRESQL:
             case DORIS:
             case STARROCKS:
                 hc.setConnectionTestQuery("SELECT 1");

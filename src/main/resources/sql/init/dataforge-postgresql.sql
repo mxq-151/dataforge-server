@@ -320,7 +320,7 @@ CREATE TABLE IF NOT EXISTS sys_file_permission (
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_sys_file_permission_storage_config_id ON sys_file_permission (storage_config_id);
-CREATE INDEX IF NOT EXISTS idx_sys_file_permission_file_path ON sys_file_permission (file_path(255));
+CREATE INDEX IF NOT EXISTS idx_sys_file_permission_file_path ON sys_file_permission (file_path);
 COMMENT ON TABLE sys_file_permission IS '文件路径权限表';
 
 -- 菜单/页面权限表
@@ -539,70 +539,19 @@ CREATE INDEX IF NOT EXISTS idx_table_metadata_table_name ON table_metadata (tabl
 COMMENT ON TABLE table_metadata IS '库表元数据表';
 
 -- ------------------------------------------------------------------
--- 初始化数据
+-- ------------------------------------------------------------------
+-- 基础初始化数据（仅 admin 用户与 SUPER_ADMIN 角色）
+--    测试数据（test 用户/角色/菜单/租户/数据源/授权/演示业务库）见 testdata/
 -- ------------------------------------------------------------------
 
 INSERT INTO sys_user (id, username, password, real_name, email, phone, status, is_admin, last_login_time, create_time, update_time, deleted) VALUES
-(1,'admin','357f3724ff339b2a1602c390d59498fd','超级管理员','admin@example.com','13800000000',1,1,'2026-07-13 15:53:37','2026-05-07 09:08:00','2026-06-04 14:48:05',0),
-(3,'test','357f3724ff339b2a1602c390d59498fd','测试用户','test@example.com','13800138000',1,0,'2026-07-13 15:59:21','2026-07-13 15:17:00','2026-07-13 15:17:00',0);
+(1,'admin','357f3724ff339b2a1602c390d59498fd','超级管理员','admin@example.com','13800000000',1,1,'2026-07-13 15:53:37','2026-05-07 09:08:00','2026-06-04 14:48:05',0);
 
 INSERT INTO sys_role (id, role_name, role_code, role_type, description, status, create_time, update_time, deleted) VALUES
-(1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03',0),
-(2,'运维工程师','OPS_ENGINEER','OPS_ENGINEER','负责系统运维和基础设施管理',1,'2026-07-13 15:17:00','2026-07-13 15:17:00',0),
-(3,'数据开发工程师','DATA_DEV_ENGINEER','DATA_DEV_ENGINEER','负责数据开发、ETL和数据处理',1,'2026-07-13 15:17:00','2026-07-13 15:17:00',0),
-(4,'业务需求方','BUSINESS_REQUESTER','BUSINESS_REQUESTER','提出业务需求并查看数据结果',1,'2026-07-13 15:17:00','2026-07-13 15:17:00',0),
-(5,'数据分析师','DATA_ANALYST','DATA_ANALYST','负责数据分析和探索',1,'2026-07-13 15:17:00','2026-07-13 15:17:00',0),
-(6,'数据架构师','DATA_ARCHITECT','DATA_ARCHITECT','负责数据架构设计和治理',1,'2026-07-13 15:17:00','2026-07-13 15:17:00',0);
-
-INSERT INTO sys_menu_permission (id, parent_id, menu_name, menu_code, path, icon, sort_order, visible, status, create_time, update_time, deleted) VALUES
-(1,0,'开发助手','dev_assist','/dev_assist','0',1,1,1,'2026-05-14 22:59:15','2026-05-14 22:59:15',0),
-(2,0,'数据探索','data_explore','/data_explore','',1,1,1,'2026-05-14 22:59:15','2026-05-14 22:59:15',0),
-(3,0,'知识库','knowledge_base','/knowledge_base','',2,1,1,'2026-05-14 22:59:15','2026-05-14 22:59:15',0),
-(4,0,'文件浏览','file_browser','/file_browser','',2,1,1,'2026-05-14 22:59:15','2026-05-14 22:59:15',0),
-(5,0,'任务调度','schedule_management','/schedule_management','',2,1,1,'2026-05-14 22:59:15','2026-05-14 22:59:15',0),
-(6,0,'系统管理','system_management','/system_management','',2,1,1,'2026-05-14 22:59:15','2026-05-14 22:59:15',0),
-(7,0,'设置','settings','/settings','',3,1,1,'2026-05-14 22:59:15','2026-05-14 22:59:15',0),
-(100,0,'指标管理','indicator_management','/indicator_management','',3,1,1,'2026-07-13 15:17:00','2026-07-13 15:47:41',0);
-
-INSERT INTO sys_role_menu_permission (id, role_id, menu_permission_id, create_time) VALUES
-(12,3,1,'2026-07-13 15:17:00'),(13,3,2,'2026-07-13 15:17:00'),(14,3,3,'2026-07-13 15:17:00'),(15,3,100,'2026-07-13 15:17:00');
-
-INSERT INTO sys_role_project_permission (id, role_id, project_id, permission_type, create_time) VALUES
-(1,1,1,3,'2026-07-13 15:17:00'),(45,3,1,2,'2026-07-13 15:59:02');
-
-INSERT INTO sys_role_table_permission (id, role_id, table_permission_id, create_time) VALUES
-(379,3,1,'2026-07-13 15:55:04'),(380,6,1,'2026-07-13 15:55:04');
-
-INSERT INTO sys_table_permission (id, permission_name, datasource_name, database_name, table_names, permission_scope, can_select, can_insert, can_update, can_delete, can_export, description, create_time, update_time, deleted) VALUES
-(1,'test_db读写权限','test_datasource','test_db','*',1,1,1,1,1,1,'test用户对test_db的全部表读写权限','2026-07-13 15:17:00','2026-07-13 15:55:04',0);
-
-INSERT INTO sys_tenant (id, tenant_name, tenant_code, contact_name, contact_phone, contact_email, description, status, owner_id, password, create_time, update_time, deleted) VALUES
-(1,'测试租户','test_tenant','测试联系人','13800138000','test@example.com','系统初始化测试租户',1,3,'3UcRXfVuO9KPvpqKUXMswQ==','2026-07-13 15:17:00','2026-07-13 15:17:00',0);
-
-INSERT INTO sys_tenant_role (id, tenant_id, role_id, create_time) VALUES
-(690,1,3,'2026-07-13 15:41:32'),(691,1,4,'2026-07-13 15:41:32'),(692,1,6,'2026-07-13 15:41:32');
-
-INSERT INTO sys_tenant_user (id, tenant_id, user_id, create_time) VALUES
-(1,1,3,'2026-07-13 15:17:00');
-
-INSERT INTO datasource_config (id, datasource_name, datasource_type, connection_type, storage_engine, url, database_name, username, password, connection_status, last_test_time, description, create_by, create_time, update_time, deleted) VALUES
-(1,'test_datasource','mysql','jdbc','MYSQL','jdbc:mysql://127.0.0.1:3306/test_db?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true','["test_db"]','test_tenant','3UcRXfVuO9KPvpqKUXMswQ==',1,'2026-07-13 15:17:00','系统初始化-连接test_db的MySQL数据源',3,'2026-07-13 15:17:00','2026-07-13 15:28:14',0);
-
-INSERT INTO dev_project (id, project_name, project_code, description, owner_id, owner_name, default_datasource_id, status, script_count, scheduled_count, create_by, create_time, update_by, update_time, deleted) VALUES
-(1,'测试项目','test_project','系统初始化测试项目',3,'test',1,1,0,0,3,'2026-07-13 15:17:00',NULL,'2026-07-13 15:17:00',0);
+(1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03',0);
 
 -- 同步各自增序列到当前最大 id
 SELECT setval(pg_get_serial_sequence('sys_user','id'), (SELECT COALESCE(MAX(id),1) FROM sys_user));
 SELECT setval(pg_get_serial_sequence('sys_role','id'), (SELECT COALESCE(MAX(id),1) FROM sys_role));
-SELECT setval(pg_get_serial_sequence('sys_menu_permission','id'), (SELECT COALESCE(MAX(id),1) FROM sys_menu_permission));
-SELECT setval(pg_get_serial_sequence('sys_role_menu_permission','id'), (SELECT COALESCE(MAX(id),1) FROM sys_role_menu_permission));
-SELECT setval(pg_get_serial_sequence('sys_role_project_permission','id'), (SELECT COALESCE(MAX(id),1) FROM sys_role_project_permission));
-SELECT setval(pg_get_serial_sequence('sys_role_table_permission','id'), (SELECT COALESCE(MAX(id),1) FROM sys_role_table_permission));
-SELECT setval(pg_get_serial_sequence('sys_table_permission','id'), (SELECT COALESCE(MAX(id),1) FROM sys_table_permission));
-SELECT setval(pg_get_serial_sequence('sys_tenant','id'), (SELECT COALESCE(MAX(id),1) FROM sys_tenant));
-SELECT setval(pg_get_serial_sequence('sys_tenant_role','id'), (SELECT COALESCE(MAX(id),1) FROM sys_tenant_role));
-SELECT setval(pg_get_serial_sequence('sys_tenant_user','id'), (SELECT COALESCE(MAX(id),1) FROM sys_tenant_user));
-SELECT setval(pg_get_serial_sequence('datasource_config','id'), (SELECT COALESCE(MAX(id),1) FROM datasource_config));
-SELECT setval(pg_get_serial_sequence('dev_project','id'), (SELECT COALESCE(MAX(id),1) FROM dev_project));
 
 COMMIT;

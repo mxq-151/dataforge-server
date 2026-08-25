@@ -25,6 +25,7 @@
         <hutool.version>5.8.24</hutool.version>
         <knife4j.version>4.4.0</knife4j.version>
         <kyuubi.version>1.11.1</kyuubi.version>
+        <postgresql.version>42.7.12</postgresql.version>
     </properties>
 
     <dependencies>
@@ -67,6 +68,14 @@
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- PostgreSQL Driver (All-in-One 镜像使用 PG 作为元数据库,同时支持 PG 外部数据源) -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
             <scope>runtime</scope>
         </dependency>
 

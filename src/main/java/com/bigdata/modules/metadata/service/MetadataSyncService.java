@@ -188,7 +188,11 @@ public class MetadataSyncService {
         return "information_schema".equals(lower)
                 || "mysql".equals(lower)
                 || "performance_schema".equals(lower)
-                || "sys".equals(lower);
+                || "sys".equals(lower)
+                // PostgreSQL 系统库
+                || "postgres".equals(lower)
+                || "template0".equals(lower)
+                || "template1".equals(lower);
     }
 
     /**

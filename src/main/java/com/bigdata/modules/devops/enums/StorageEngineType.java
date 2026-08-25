@@ -12,6 +12,7 @@ public enum StorageEngineType {
     STARROCKS("StarRocks", "实时分析数据库"),
     HBASE("HBase", "分布式列式存储"),
     MYSQL("MySQL", "关系型数据库"),
+    POSTGRESQL("PostgreSQL", "关系型数据库"),
     ES("Elasticsearch", "搜索引擎"),
     CLICKHOUSE("ClickHouse", "列式存储数据库"),
     HUDI("Apache Hudi", "数据湖格式"),

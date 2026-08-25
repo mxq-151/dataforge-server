@@ -76,6 +76,7 @@ public class ExecutionStrategyFactory {
             case STARROCKS:
             case MYSQL:
             case CLICKHOUSE:
+            case POSTGRESQL:
                 return EngineType.DORIS;
             case HBASE:
                 return EngineType.HBASE;

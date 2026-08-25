@@ -9,6 +9,7 @@ import java.util.List;
 public enum DatasourceType {
 
     MYSQL("mysql", "MySQL"),
+    POSTGRESQL("postgresql", "PostgreSQL"),
     KYUUBI("kyuubi", "Kyuubi"),
     DORIS("doris", "Doris"),
     CLICKHOUSE("clickhouse", "ClickHouse"),

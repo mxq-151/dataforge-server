@@ -13,7 +13,8 @@ public enum EngineType {
     FLINK("flink", "Apache Flink", Arrays.asList(CodeType.JAVA, CodeType.SCALA, CodeType.PYTHON, CodeType.SQL)),
     DORIS("doris", "Apache Doris", Arrays.asList(CodeType.SQL)),
     HBASE("hbase", "Apache HBase", Arrays.asList(CodeType.SQL)),
-    MYSQL("mysql", "MySQL", Arrays.asList(CodeType.SQL));
+    MYSQL("mysql", "MySQL", Arrays.asList(CodeType.SQL)),
+    POSTGRESQL("postgresql", "PostgreSQL", Arrays.asList(CodeType.SQL));
 
     @EnumValue
     @JsonValue
