@@ -73,7 +73,7 @@ ON CONFLICT (tenant_id, role_id) DO NOTHING;
 -- 数据源（PG 演示库 test_db 由 test_db-postgresql.sql 创建；
 -- PostgreSQL 类型已由 dataforge-server 原生支持：连接/测试/元数据同步/代码执行）
 INSERT INTO datasource_config (id, datasource_name, datasource_type, connection_type, storage_engine, url, database_name, username, password, connection_status, last_test_time, description, create_by, create_time, update_time, deleted) VALUES
-(1,'test_datasource','postgresql','jdbc','POSTGRESQL','jdbc:postgresql://127.0.0.1:5432/test_db','["test_db"]','test_tenant','3UcRXfVuO9KPvpqKUXMswQ==',1,'2026-07-13 15:17:00','系统初始化-连接test_db的PostgreSQL数据源',3,'2026-07-13 15:17:00','2026-07-13 15:28:14',0);
+(1,'test_datasource','postgresql','jdbc','POSTGRESQL','jdbc:postgresql://127.0.0.1:5432/test_db?currentSchema=test_db','["test_db"]','test_tenant','3UcRXfVuO9KPvpqKUXMswQ==',1,'2026-07-13 15:17:00','系统初始化-连接test_db的PostgreSQL数据源',3,'2026-07-13 15:17:00','2026-07-13 15:28:14',0);
 
 -- 库表资源授权：测试租户下数据开发/数据架构师角色对 test_db 全部表读写
 INSERT INTO sys_table_permission (id, permission_name, datasource_name, database_name, table_names, permission_scope, can_select, can_insert, can_update, can_delete, can_export, description, create_time, update_time, deleted) VALUES
