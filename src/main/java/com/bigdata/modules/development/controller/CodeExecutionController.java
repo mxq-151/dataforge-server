@@ -28,7 +28,7 @@ public class CodeExecutionController {
 
     private static final Logger log = LoggerFactory.getLogger(CodeExecutionController.class);
 
-    private static final String JAR_UPLOAD_DIR = System.getProperty("java.io.tmpdir") + "/bigdata-platform/jars/";
+    private static final String JAR_UPLOAD_DIR = System.getProperty("java.io.tmpdir") + "/dataforge-server/jars/";
 
     @Autowired
     private CodeExecutionService codeExecutionService;

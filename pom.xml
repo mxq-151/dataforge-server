@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.bigdata</groupId>
-    <artifactId>bigdata-platform</artifactId>
+    <artifactId>dataforge-server</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>jar</packaging>
-    <name>bigdata-platform</name>
+    <name>dataforge-server</name>
     <description>大数据开发运维平台 - SpringBoot主服务</description>
 
     <properties>

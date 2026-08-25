@@ -47,7 +47,7 @@ mybatis-plus:
       id-type: auto
 
 jwt:
-  secret: bigdata-platform-jwt-secret-key-2024-very-long-secret
+  secret: dataforge-server-jwt-secret-key-2024-very-long-secret
   expiration: 86400000
   header: Authorization
   prefix: Bearer

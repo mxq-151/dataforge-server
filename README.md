@@ -16,7 +16,7 @@
 ## 项目结构
 
 ```
-bigdata-platform/
+dataforge-server/
 ├── pom.xml                              # Maven配置文件
 ├── src/main/java/com/bigdata/
 │   ├── BigDataPlatformApplication.java # 主启动类
@@ -199,7 +199,7 @@ spring:
 ### 4. 启动项目
 
 ```bash
-cd bigdata-platform
+cd dataforge-server
 mvn spring-boot:run
 ```
 
