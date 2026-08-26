@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
@@ -109,7 +109,7 @@ public class MetadataController {
 
     @GetMapping("/table/columns")
     public Result<List<ColumnMetadataVO>> getTableColumns(
-            @RequestParam(required = true)  StorageEngineType storageEngine,
+            @RequestParam(required = true)  DatasourceType storageEngine,
             @RequestParam(required = true)  String databaseName,
             @RequestParam(required = true)  String tableName) {
 

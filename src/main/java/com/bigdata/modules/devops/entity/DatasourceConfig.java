@@ -6,7 +6,6 @@ import com.bigdata.common.config.JsonStringListTypeHandler;
 import com.bigdata.common.entity.BaseEntity;
 import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
-import com.bigdata.modules.devops.enums.StorageEngineType;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -16,7 +15,6 @@ public class DatasourceConfig extends BaseEntity {
     private String datasourceName;
     private DatasourceType datasourceType;
     private ConnectionType connectionType;
-    private StorageEngineType storageEngine;
     private String url;
     @TableField(typeHandler = JsonStringListTypeHandler.class)
     private List<String> databaseName;
@@ -50,14 +48,6 @@ public class DatasourceConfig extends BaseEntity {
 
     public void setConnectionType(ConnectionType connectionType) {
         this.connectionType = connectionType;
-    }
-
-    public StorageEngineType getStorageEngine() {
-        return storageEngine;
-    }
-
-    public void setStorageEngine(StorageEngineType storageEngine) {
-        this.storageEngine = storageEngine;
     }
 
     public String getUrl() {

@@ -3,7 +3,7 @@ package com.bigdata.modules.metadata.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.mapper.ColumnMetadataMapper;
@@ -62,7 +62,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
         return columnMetadataMapper.selectList(wrapper);
     }
 
-    public List<ColumnMetadata> getColumnsByNames(StorageEngineType storageEngine, String databaseName, String tableName) {
+    public List<ColumnMetadata> getColumnsByNames(DatasourceType storageEngine, String databaseName, String tableName) {
         LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ColumnMetadata::getStorageEngine, storageEngine)
                .eq(ColumnMetadata::getDatabaseName, databaseName)
@@ -72,13 +72,13 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
     }
 
     @Transactional
-    public void syncMetadataFromDatasource(StorageEngineType storageEngine,String databaseName, List<TableMetadata> tables,
+    public void syncMetadataFromDatasource(DatasourceType storageEngine,String databaseName, List<TableMetadata> tables,
                                             Map<String, List<ColumnMetadata>> columnsMap) {
         safeIncrementalSync(storageEngine, databaseName, tables, columnsMap);
     }
 
     @Transactional
-    public void safeIncrementalSync(StorageEngineType storageEngine,String databaseName, List<TableMetadata> tables,
+    public void safeIncrementalSync(DatasourceType storageEngine,String databaseName, List<TableMetadata> tables,
                                      Map<String, List<ColumnMetadata>> columnsMap) {
         Set<String> existingTableKeys = getExistingTableKeys(storageEngine, databaseName);
         Set<String> newTableKeys = new HashSet<>();
@@ -95,7 +95,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
         }
     }
 
-    private Set<String> getExistingTableKeys(StorageEngineType storageEngine,String databaseName) {
+    private Set<String> getExistingTableKeys(DatasourceType storageEngine,String databaseName) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TableMetadata::getStorageEngine, storageEngine)
                .eq(TableMetadata::getDatabaseName, databaseName);
@@ -107,7 +107,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
     }
 
     @Transactional
-    public void syncSingleTable(StorageEngineType storageEngine, TableMetadata table, List<ColumnMetadata> columns) {
+    public void syncSingleTable(DatasourceType storageEngine, TableMetadata table, List<ColumnMetadata> columns) {
         String newTableFingerprint = computeTableFingerprint(table);
         String newColumnsFingerprint = computeColumnsFingerprint(columns);
 
@@ -223,7 +223,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
     }
 
     @Transactional
-    public void deleteTableByNames(StorageEngineType storageEngine, String databaseName, String tableName) {
+    public void deleteTableByNames(DatasourceType storageEngine, String databaseName, String tableName) {
         LambdaQueryWrapper<TableMetadata> findWrapper = new LambdaQueryWrapper<>();
         findWrapper.eq(TableMetadata::getStorageEngine, storageEngine)
                    .eq(TableMetadata::getDatabaseName, databaseName)
@@ -263,7 +263,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
      * @return 被删除的孤表数量
      */
     @Transactional
-    public int deleteOrphanTablesByDatasource(Long datasourceId, StorageEngineType storageEngine, Set<String> remoteTableKeys) {
+    public int deleteOrphanTablesByDatasource(Long datasourceId, DatasourceType storageEngine, Set<String> remoteTableKeys) {
         if (datasourceId == null || storageEngine == null) return 0;
 
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();

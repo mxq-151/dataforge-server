@@ -2,7 +2,6 @@ package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
-import com.bigdata.modules.devops.enums.StorageEngineType;
 
 import java.util.Collections;
 import java.util.List;
@@ -13,7 +12,7 @@ public class CodeExecutionContext {
     private String executionId;
     private String codeContent;
     private CodeType codeType;
-    private EngineType engineType;
+    private DatasourceType engineType;
     private List<DatasourceConfig> datasourceConfigs;
     private String inputParams;
     private Long submitBy;
@@ -50,11 +49,11 @@ public class CodeExecutionContext {
         this.codeType = codeType;
     }
 
-    public EngineType getEngineType() {
+    public DatasourceType getEngineType() {
         return engineType;
     }
 
-    public void setEngineType(EngineType engineType) {
+    public void setEngineType(DatasourceType engineType) {
         this.engineType = engineType;
     }
 
@@ -173,9 +172,9 @@ public class CodeExecutionContext {
         return null;
     }
 
-    public StorageEngineType getPrimaryStorageEngine() {
+    public DatasourceType getPrimaryStorageEngine() {
         DatasourceConfig config = getPrimaryDatasourceConfig();
-        return config != null ? config.getStorageEngine() : null;
+        return config != null ? config.getDatasourceType() : null;
     }
 
     public boolean hasMultipleDatasources() {

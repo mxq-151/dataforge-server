@@ -4,7 +4,7 @@ import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
 import com.bigdata.modules.development.entity.DevScriptExecution;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -209,7 +209,7 @@ public class CodeExecutionService {
         context.setCodeType(codeType);
         log.info("   代码类型: {}", codeType);
 
-        EngineType engineType = EngineType.fromCode(request.getEngineType());
+        DatasourceType engineType = DatasourceType.fromCode(request.getEngineType());
         if (engineType == null) {
             throw new BusinessException("无法识别的引擎类型: " + request.getEngineType());
         }
@@ -324,12 +324,12 @@ public class CodeExecutionService {
         return logStr;
     }
 
-    public List<EngineType> getAvailableEngines() {
+    public List<DatasourceType> getAvailableEngines() {
         return strategyFactory.getAvailableEngines();
     }
 
     public boolean isExecutionSupported(String engineCode, String codeType) {
-        EngineType engineType = EngineType.fromCode(engineCode);
+        DatasourceType engineType = DatasourceType.fromCode(engineCode);
         CodeType type = CodeType.fromCode(codeType);
         if (engineType == null || type == null) {
             return false;
@@ -377,7 +377,7 @@ public class CodeExecutionService {
             throw new BusinessException("语法校验需要指定有效的数据源");
         }
         DatasourceConfig dsConfig = configs.get(0);
-        StorageEngineType storageEngine = dsConfig.getStorageEngine();
+        DatasourceType storageEngine = dsConfig.getDatasourceType();
         if (storageEngine == null) {
             throw new BusinessException("数据源未配置存储引擎类型");
         }
@@ -407,7 +407,7 @@ public class CodeExecutionService {
                     drainResults(stmt);
                 } catch (SQLException e) {
                     // MySQL PREPARE 不支持的语句类型(如 USE/SET 会话命令)直接跳过，不视为语法错误
-                    if (storageEngine == StorageEngineType.MYSQL && isUnsupportedPrepareStatement(e)) {
+                    if (storageEngine == DatasourceType.MYSQL && isUnsupportedPrepareStatement(e)) {
                         skipped++;
                         continue;
                     }
@@ -418,7 +418,7 @@ public class CodeExecutionService {
                     errors.add(err);
                 } finally {
                     // MySQL 的 PREPARE 会在会话中残留预编译语句，及时释放避免连接复用时的泄漏
-                    if (storageEngine == StorageEngineType.MYSQL) {
+                    if (storageEngine == DatasourceType.MYSQL) {
                         try { stmt.execute("DEALLOCATE PREPARE stmt"); } catch (Exception ignored) { }
                     }
                 }
@@ -446,7 +446,7 @@ public class CodeExecutionService {
         return result;
     }
 
-    private String buildValidateSql(StorageEngineType engine, String statement) {
+    private String buildValidateSql(DatasourceType engine, String statement) {
         switch (engine) {
             case MYSQL:
                 // 转义单引号后用 PREPARE 解析，不真正执行

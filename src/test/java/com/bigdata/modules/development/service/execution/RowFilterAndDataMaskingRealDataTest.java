@@ -1,7 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.DataAccessPermissionService;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,13 +54,13 @@ class RowFilterAndDataMaskingRealDataTest {
         }
 
         @Override
-        protected StorageEngineType resolveStorageEngineType(CodeExecutionContext context) {
-            return StorageEngineType.MYSQL;
+        protected DatasourceType resolveStorageEngineType(CodeExecutionContext context) {
+            return DatasourceType.MYSQL;
         }
 
         @Override
-        public EngineType getEngineType() {
-            return EngineType.DORIS;
+        public DatasourceType getEngineType() {
+            return DatasourceType.DORIS;
         }
 
         public List<List<String>> publicApplyRowFilter(List<List<String>> rows, List<String> columns, String rowFilterSql) {

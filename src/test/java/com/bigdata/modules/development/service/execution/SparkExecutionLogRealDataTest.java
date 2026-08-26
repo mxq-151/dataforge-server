@@ -2,6 +2,7 @@ package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.CustomUserDetails;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -261,7 +262,7 @@ class SparkExecutionLogRealDataTest {
         CodeExecutionContext context = new CodeExecutionContext();
         context.setCodeContent(sql);
         context.setCodeType(CodeType.SQL);
-        context.setEngineType(EngineType.SPARK);
+        context.setEngineType(DatasourceType.SPARK);
         context.setSubmitBy(1L);
         context.setSubmitByName("admin_test");
         return context;

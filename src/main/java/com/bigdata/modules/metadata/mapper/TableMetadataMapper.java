@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 
 @Mapper
 public interface TableMetadataMapper extends BaseMapper<TableMetadata> {
@@ -14,5 +14,5 @@ public interface TableMetadataMapper extends BaseMapper<TableMetadata> {
      */
     int insertOrUpdate(@Param("t") TableMetadata table);
 
-    TableMetadata getTableMetadata(StorageEngineType storageEngine, String databaseName, String tableName);
+    TableMetadata getTableMetadata(DatasourceType storageEngine, String databaseName, String tableName);
 }

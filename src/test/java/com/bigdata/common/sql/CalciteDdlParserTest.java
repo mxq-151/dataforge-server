@@ -1,6 +1,6 @@
 package com.bigdata.common.sql;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -37,13 +37,13 @@ class CalciteDdlParserTest {
                     "STORED AS ORC\n" +
                     "TBLPROPERTIES ('orc.compress'='ZLIB')";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info, "应识别为DDL");
             assertEquals("CREATE", info.getDbType());
             assertEquals("mydb", info.getDatabaseName());
             assertEquals("user_info", info.getTableName());
-            assertEquals(StorageEngineType.HIVE, info.getEngineType());
+            assertEquals(DatasourceType.HIVE, info.getEngineType());
 
             CalciteDdlParser.TableAttributes attrs = info.getTableAttributes();
             assertNotNull(attrs);
@@ -71,7 +71,7 @@ class CalciteDdlParserTest {
                     "LOCATION '/user/hive/warehouse/sales_db/order_sales'\n" +
                     "TBLPROPERTIES ('comment'='销售订单外部表', 'parquet.compression'='SNAPPY')";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("CREATE", info.getDbType());
@@ -102,7 +102,7 @@ class CalciteDdlParserTest {
                     "  salary DOUBLE\n" +
                     ") STORED AS ORC";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("CREATE", info.getDbType());
@@ -128,7 +128,7 @@ class CalciteDdlParserTest {
                     "LOCATION 'hdfs://namenode:8020/warehouse/analytics/user_events'\n" +
                     "TBLPROPERTIES ('parquet.compression'='SNAPPY', 'comment'='用户事件日志表')";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("analytics_db", info.getDatabaseName());
@@ -151,7 +151,7 @@ class CalciteDdlParserTest {
                     "  name STRING\n" +
                     ") STORED AS ORC";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("test_db", info.getDatabaseName());
@@ -168,7 +168,7 @@ class CalciteDdlParserTest {
         void testDropTable() {
             String sql = "DROP TABLE mydb.user_info";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("DROP", info.getDbType());
@@ -181,7 +181,7 @@ class CalciteDdlParserTest {
         void testDropTableIfExists() {
             String sql = "DROP TABLE IF EXISTS test_db.temp_table";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("DROP", info.getDbType());
@@ -194,7 +194,7 @@ class CalciteDdlParserTest {
         void testAlterTable() {
             String sql = "ALTER TABLE mydb.user_info ADD COLUMN phone STRING COMMENT '手机号'";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("ALTER", info.getDbType());
@@ -207,7 +207,7 @@ class CalciteDdlParserTest {
         void testTruncateTable() {
             String sql = "TRUNCATE TABLE mydb.temp_log";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("TRUNCATE", info.getDbType());
@@ -224,7 +224,7 @@ class CalciteDdlParserTest {
         @DisplayName("SELECT语句 - 返回null")
         void testSelectStatement_ReturnsNull() {
             assertNull(CalciteDdlParser.detect("SELECT * FROM users"));
-            assertNull(CalciteDdlParser.detect("SELECT * FROM users", StorageEngineType.HIVE));
+            assertNull(CalciteDdlParser.detect("SELECT * FROM users", DatasourceType.HIVE));
         }
 
         @Test
@@ -260,7 +260,7 @@ class CalciteDdlParserTest {
             CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql);
 
             assertNotNull(info);
-            assertEquals(StorageEngineType.HIVE, info.getEngineType());
+            assertEquals(DatasourceType.HIVE, info.getEngineType());
             assertEquals("test_db", info.getDatabaseName());
             assertEquals("t1", info.getTableName());
         }
@@ -291,13 +291,13 @@ class CalciteDdlParserTest {
                     "  'comment' = '用户行为日志表'\n" +
                     ")";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.DORIS);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.DORIS);
 
             assertNotNull(info);
             assertEquals("CREATE", info.getDbType());
             assertEquals("example_db", info.getDatabaseName());
             assertEquals("user_log", info.getTableName());
-            assertEquals(StorageEngineType.DORIS, info.getEngineType());
+            assertEquals(DatasourceType.DORIS, info.getEngineType());
 
             CalciteDdlParser.TableAttributes attrs = info.getTableAttributes();
             assertNotNull(attrs);
@@ -330,7 +330,7 @@ class CalciteDdlParserTest {
                     "  'replication_num' = '1'\n" +
                     ")";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.DORIS);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.DORIS);
 
             assertNotNull(info);
             assertEquals("metrics_db", info.getDatabaseName());
@@ -360,7 +360,7 @@ class CalciteDdlParserTest {
                     "  'replication_num' = '3'\n" +
                     ")";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.DORIS);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.DORIS);
 
             assertNotNull(info);
             assertEquals("order_db", info.getDatabaseName());
@@ -397,12 +397,12 @@ class CalciteDdlParserTest {
                     "  'replication_num' = '3'\n" +
                     ")";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.STARROCKS);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.STARROCKS);
 
             assertNotNull(info);
             assertEquals("star_db", info.getDatabaseName());
             assertEquals("user_profile", info.getTableName());
-            assertEquals(StorageEngineType.STARROCKS, info.getEngineType());
+            assertEquals(DatasourceType.STARROCKS, info.getEngineType());
 
             CalciteDdlParser.TableAttributes attrs = info.getTableAttributes();
             assertEquals("PRIMARY_KEY", attrs.keyType);
@@ -425,7 +425,7 @@ class CalciteDdlParserTest {
                     "DISTRIBUTED BY HASH(id) BUCKETS 4\n" +
                     "PROPERTIES ('replication_num' = '1')";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.STARROCKS);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.STARROCKS);
 
             assertNotNull(info);
             assertNull(info.getDatabaseName());
@@ -460,13 +460,13 @@ class CalciteDdlParserTest {
                     "SAMPLE BY user_id\n" +
                     "SETTINGS index_granularity = 8192";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.CLICKHOUSE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.CLICKHOUSE);
 
             assertNotNull(info);
             assertEquals("CREATE", info.getDbType());
             assertEquals("ch_db", info.getDatabaseName());
             assertEquals("events", info.getTableName());
-            assertEquals(StorageEngineType.CLICKHOUSE, info.getEngineType());
+            assertEquals(DatasourceType.CLICKHOUSE, info.getEngineType());
 
             CalciteDdlParser.TableAttributes attrs = info.getTableAttributes();
             assertNotNull(attrs);
@@ -492,7 +492,7 @@ class CalciteDdlParserTest {
                     "ORDER BY product_id\n" +
                     "PARTITION BY toYYYYMM(updated_at)";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.CLICKHOUSE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.CLICKHOUSE);
 
             assertNotNull(info);
             assertEquals("ch_db", info.getDatabaseName());
@@ -516,7 +516,7 @@ class CalciteDdlParserTest {
                     "ENGINE = MergeTree()\n" +
                     "ORDER BY (metric_name, timestamp)";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.CLICKHOUSE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.CLICKHOUSE);
 
             assertNotNull(info);
             assertEquals("cluster_db", info.getDatabaseName());
@@ -546,7 +546,7 @@ class CalciteDdlParserTest {
                     "  'transactional'='true'\n" +
                     ")";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
             CalciteDdlParser.TableAttributes attrs = info.getTableAttributes();
 
             assertNotNull(attrs.tblProperties);
@@ -572,7 +572,7 @@ class CalciteDdlParserTest {
                     "  'in_memory' = 'false'\n" +
                     ")";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.DORIS);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.DORIS);
             CalciteDdlParser.TableAttributes attrs = info.getTableAttributes();
 
             assertEquals(4, attrs.properties.size());
@@ -609,11 +609,11 @@ class CalciteDdlParserTest {
             CalciteDdlParser.HiveTableAttributes hiveAttrs = new CalciteDdlParser.HiveTableAttributes();
             hiveAttrs.isExternal = true;
             hiveAttrs.storageFormat = "ORC";
-            hiveAttrs.engineType = StorageEngineType.HIVE;
+            hiveAttrs.engineType = DatasourceType.HIVE;
 
             assertTrue(hiveAttrs.isExternal);
             assertEquals("ORC", hiveAttrs.storageFormat);
-            assertEquals(StorageEngineType.HIVE, hiveAttrs.engineType);
+            assertEquals(DatasourceType.HIVE, hiveAttrs.engineType);
         }
     }
 
@@ -631,7 +631,7 @@ class CalciteDdlParserTest {
                     "  `full-name` STRING\n" +
                     ") STORED AS ORC";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("my-db", info.getDatabaseName());
@@ -655,7 +655,7 @@ class CalciteDdlParserTest {
                     "STORED AS PARQUET\n" +
                     "TBLPROPERTIES ('parquet.compression'='GZIP')";
 
-            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.HIVE);
+            CalciteDdlParser.DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.HIVE);
 
             assertNotNull(info);
             assertEquals("db1", info.getDatabaseName());

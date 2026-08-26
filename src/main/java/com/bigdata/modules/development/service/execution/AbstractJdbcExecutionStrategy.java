@@ -1,6 +1,6 @@
 package com.bigdata.modules.development.service.execution;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.metadata.entity.TableMetadata;
@@ -38,7 +38,7 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
 
     protected abstract void applySessionSettings(Statement stmt, CodeExecutionContext context) throws Exception;
 
-    protected abstract StorageEngineType resolveStorageEngineType(CodeExecutionContext context);
+    protected abstract DatasourceType resolveStorageEngineType(CodeExecutionContext context);
 
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {

@@ -3,7 +3,7 @@ package com.bigdata.modules.development.service.execution;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -136,7 +136,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("MySQL 单条合法SELECT - valid=true 且使用 PREPARE")
     void mysql_validSelect_usesPrepare() throws SQLException {
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(request("SELECT 1", "mysql-ds"));
 
         assertEquals(true, result.get("valid"));
@@ -150,7 +150,7 @@ class CodeExecutionServiceValidateTest {
     @DisplayName("MySQL 多语句含一处语法错误 - valid=false 且错误索引正确")
     void mysql_multiStatement_oneSyntaxError() throws SQLException {
         syntaxErrorSnippets.add("SELEC *");
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
 
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(
                 request("SELECT 1; SELEC * FROM t; SELECT 2", "mysql-ds"));
@@ -166,7 +166,7 @@ class CodeExecutionServiceValidateTest {
     @DisplayName("MySQL PREPARE不支持的语句(USE) - 跳过且 valid=true")
     void mysql_unsupportedStatement_skipped() throws SQLException {
         unsupportedSnippets.add("USE ");
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
 
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(request("USE db", "mysql-ds"));
 
@@ -181,7 +181,7 @@ class CodeExecutionServiceValidateTest {
     void mysql_mixed_validUnsupportedSyntaxError() throws SQLException {
         unsupportedSnippets.add("USE ");
         syntaxErrorSnippets.add("SELEC *");
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
 
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(
                 request("SELECT 1; USE db; SELEC * FROM t", "mysql-ds"));
@@ -196,7 +196,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("MySQL 单引号转义 - 语句内单引号翻倍")
     void mysql_singleQuoteEscaped() throws SQLException {
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
         codeExecutionService.validateSqlSyntax(request("SELECT 'O''Brien'", "mysql-ds"));
 
         String validateSql = executedValidateSqls.stream()
@@ -210,7 +210,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("MySQL 多条全合法 - valid=true 且 statementCount 正确")
     void mysql_multiStatement_allValid() throws SQLException {
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(
                 request("SELECT 1; SELECT 2; SELECT 3", "mysql-ds"));
 
@@ -223,7 +223,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("MySQL 末尾分号 - 不产生空语句")
     void mysql_trailingSemicolon_noEmptyStatement() throws SQLException {
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(
                 request("SELECT 1;", "mysql-ds"));
 
@@ -234,9 +234,9 @@ class CodeExecutionServiceValidateTest {
     // ==================== 各引擎 buildValidateSql 产物 ====================
 
     @ParameterizedTest(name = "引擎 {0} - 校验SQL构造正确")
-    @EnumSource(StorageEngineType.class)
+    @EnumSource(DatasourceType.class)
     @DisplayName("各引擎 - buildValidateSql 产物正确")
-    void allEngines_buildCorrectValidateSql(StorageEngineType engine) throws SQLException {
+    void allEngines_buildCorrectValidateSql(DatasourceType engine) throws SQLException {
         String dsName = "ds-" + engine.name();
         prepareDatasource(newConfig(dsName, engine, "test_db"));
 
@@ -269,7 +269,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("纯注释语句 - 不执行校验且 valid=true")
     void commentOnly_notExecuted() throws SQLException {
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
 
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(
                 request("-- this is a comment", "mysql-ds"));
@@ -281,7 +281,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("字符串字面量中的分号不拆分 - 保持单条语句")
     void semicolonInStringLiteral_notSplit() throws SQLException {
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
 
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(
                 request("SELECT 'a;b;c' AS x", "mysql-ds"));
@@ -296,7 +296,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("块注释跨行 - 注释内分号不拆分")
     void blockCommentSpanningLines_notSplit() throws SQLException {
-        prepareDatasource(newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db"));
+        prepareDatasource(newConfig("mysql-ds", DatasourceType.MYSQL, "test_db"));
 
         Map<String, Object> result = codeExecutionService.validateSqlSyntax(
                 request("/* this; is\na comment */ SELECT 1", "mysql-ds"));
@@ -310,7 +310,7 @@ class CodeExecutionServiceValidateTest {
     @Test
     @DisplayName("连接数据源失败 - 返回 valid=false")
     void connectionFailure_returnsInvalid() throws SQLException {
-        DatasourceConfig c = newConfig("mysql-ds", StorageEngineType.MYSQL, "test_db");
+        DatasourceConfig c = newConfig("mysql-ds", DatasourceType.MYSQL, "test_db");
         when(datasourceConfigService.getDatasourceByName("mysql-ds")).thenReturn(c);
         when(datasourceConfigService.getConnection(eq(c.getId()), any()))
                 .thenThrow(new SQLException("connection refused"));
@@ -323,11 +323,11 @@ class CodeExecutionServiceValidateTest {
 
     // ==================== 辅助方法 ====================
 
-    private DatasourceConfig newConfig(String name, StorageEngineType engine, String db) {
+    private DatasourceConfig newConfig(String name, DatasourceType engine, String db) {
         DatasourceConfig c = new DatasourceConfig();
         c.setId(1L);
         c.setDatasourceName(name);
-        c.setStorageEngine(engine);
+        c.setDatasourceType(engine);
         if (db != null) {
             c.setDatabaseName(Collections.singletonList(db));
         }

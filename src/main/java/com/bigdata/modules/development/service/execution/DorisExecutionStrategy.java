@@ -1,7 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.modules.development.config.EngineProperties;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,12 +43,12 @@ public class DorisExecutionStrategy extends AbstractJdbcExecutionStrategy {
     }
 
     @Override
-    protected StorageEngineType resolveStorageEngineType(CodeExecutionContext context) {
-        return StorageEngineType.DORIS;
+    protected DatasourceType resolveStorageEngineType(CodeExecutionContext context) {
+        return DatasourceType.DORIS;
     }
 
     @Override
-    public EngineType getEngineType() {
-        return EngineType.DORIS;
+    public DatasourceType getEngineType() {
+        return DatasourceType.DORIS;
     }
 }

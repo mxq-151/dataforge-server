@@ -1,7 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -140,8 +140,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     }
 
     @Override
-    public EngineType getEngineType() {
-        return EngineType.KYUUBI;
+    public DatasourceType getEngineType() {
+        return DatasourceType.KYUUBI;
     }
 
     /**
@@ -445,7 +445,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         if (context == null || context.getPrimaryStorageEngine() == null) {
             return config;
         }
-        StorageEngineType storageEngine = context.getPrimaryStorageEngine();
+        DatasourceType storageEngine = context.getPrimaryStorageEngine();
 
         switch (storageEngine) {
             case HIVE:
@@ -479,7 +479,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     /** 通过REST API应用会话设置（执行SET语句） */
     private void applySessionSettingsViaRest(String baseUrl, String sessionHandle, CodeExecutionContext context) {
-        StorageEngineType storageEngine = context.getPrimaryStorageEngine();
+        DatasourceType storageEngine = context.getPrimaryStorageEngine();
         if (storageEngine == null) return;
 
         for (Map.Entry<String, String> entry : getSettingsForStorageEngine(storageEngine).entrySet()) {
@@ -493,7 +493,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         }
     }
 
-    private Map<String, String> getSettingsForStorageEngine(StorageEngineType engineType) {
+    private Map<String, String> getSettingsForStorageEngine(DatasourceType engineType) {
         Map<String, String> settings = new LinkedHashMap<>();
         switch (engineType) {
             case HIVE:

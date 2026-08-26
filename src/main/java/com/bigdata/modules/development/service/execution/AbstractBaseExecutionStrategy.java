@@ -2,7 +2,7 @@ package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.sql.CalciteDdlParser;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysTablePermission;
@@ -102,7 +102,7 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
 
     @Override
     public boolean supports(CodeType codeType) {
-        return getEngineType().supportsCodeType(codeType);
+        return getEngineType().supportsLanguage(codeType);
     }
 
     // ==================== DDL检测 ====================
@@ -141,7 +141,7 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
      *
      * @see com.bigdata.common.sql.CalciteDdlParser
      */
-    protected DdlInfo detectDdlStatement(String sql, StorageEngineType engineType) {
+    protected DdlInfo detectDdlStatement(String sql, DatasourceType engineType) {
         if (sql == null || sql.trim().isEmpty()) {
             return null;
         }

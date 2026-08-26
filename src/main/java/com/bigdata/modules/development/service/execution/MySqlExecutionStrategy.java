@@ -1,6 +1,6 @@
 package com.bigdata.modules.development.service.execution;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -40,12 +40,12 @@ public class MySqlExecutionStrategy extends AbstractJdbcExecutionStrategy {
     }
 
     @Override
-    protected StorageEngineType resolveStorageEngineType(CodeExecutionContext context) {
-        return StorageEngineType.MYSQL;
+    protected DatasourceType resolveStorageEngineType(CodeExecutionContext context) {
+        return DatasourceType.MYSQL;
     }
 
     @Override
-    public EngineType getEngineType() {
-        return EngineType.MYSQL;
+    public DatasourceType getEngineType() {
+        return DatasourceType.MYSQL;
     }
 }

@@ -1,6 +1,6 @@
 package com.bigdata.modules.metadata.service;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import org.junit.jupiter.api.*;
 
@@ -179,12 +179,12 @@ class MetadataSyncServiceRealDataTest {
 
         try {
             Method method = MetadataSyncService.class.getDeclaredMethod(
-                    "getTablesByDatabase", Connection.class, String.class, StorageEngineType.class);
+                    "getTablesByDatabase", Connection.class, String.class, DatasourceType.class);
             method.setAccessible(true);
 
             @SuppressWarnings("unchecked")
             List<TableMetadata> tables = (List<TableMetadata>) method.invoke(
-                    metadataSyncService, conn, "bigdata_platform", StorageEngineType.MYSQL);
+                    metadataSyncService, conn, "bigdata_platform", DatasourceType.MYSQL);
 
             System.out.println("=== Real MySQL: getTablesByDatabase (bigdata_platform) ===");
             System.out.println("Total tables: " + tables.size());
@@ -300,12 +300,12 @@ class MetadataSyncServiceRealDataTest {
 
         try {
             Method method = MetadataSyncService.class.getDeclaredMethod(
-                    "getAllTables", Connection.class, StorageEngineType.class);
+                    "getAllTables", Connection.class, DatasourceType.class);
             method.setAccessible(true);
 
             @SuppressWarnings("unchecked")
             Map<String, List<TableMetadata>> result = (Map<String, List<TableMetadata>>) method.invoke(
-                    metadataSyncService, conn, StorageEngineType.HIVE);
+                    metadataSyncService, conn, DatasourceType.HIVE);
 
             System.out.println("=== Real Hive: getAllTables Results ===");
             System.out.println("Total databases: " + result.size());

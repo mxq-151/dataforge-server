@@ -1,6 +1,6 @@
 package com.bigdata.modules.development.service.execution.hbase;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.service.TableMetadataService;
@@ -34,7 +34,7 @@ public class HBaseSchema extends AbstractSchema {
     public void loadMetadataFromDb() {
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TableMetadata> wrapper =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getStorageEngine, StorageEngineType.HBASE)
+        wrapper.eq(TableMetadata::getStorageEngine, DatasourceType.HBASE)
                .eq(TableMetadata::getDatasourceId, datasourceId)
                .eq(TableMetadata::getDeleted, 0);
         List<TableMetadata> tables = tableMetadataService.list(wrapper);

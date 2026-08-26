@@ -1,7 +1,7 @@
 package com.bigdata.modules.metadata.service;
 
 import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
@@ -52,7 +52,7 @@ class MetadataSyncServiceTest {
     void setUp() {
         mockConfig = new DatasourceConfig();
         mockConfig.setId(1L);
-        mockConfig.setStorageEngine(StorageEngineType.HIVE);
+        mockConfig.setDatasourceType(DatasourceType.HIVE);
         mockConfig.setDatasourceName("test-kyuubi");
     }
 
@@ -60,9 +60,9 @@ class MetadataSyncServiceTest {
 
     @Test
     void testSyncSingleTableMetadata_DROP() {
-        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "DROP", null);
+        boolean result = metadataSyncService.syncSingleTableMetadata(1L, DatasourceType.HIVE, "ods", "user_info", "DROP", null);
         assertTrue(result);
-        verify(tableMetadataService).deleteTableByNames(StorageEngineType.HIVE, "ods", "user_info");
+        verify(tableMetadataService).deleteTableByNames(DatasourceType.HIVE, "ods", "user_info");
     }
 
     @Test
@@ -73,7 +73,7 @@ class MetadataSyncServiceTest {
         TableMetadata existingTable = new TableMetadata();
         existingTable.setId(100L);
         existingTable.setTableName("user_info");
-        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, "ods", "user_info")).thenReturn(existingTable);
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, "ods", "user_info")).thenReturn(existingTable);
 
         ColumnMetadataVO colVo = new ColumnMetadataVO();
         colVo.setColumnName("id");
@@ -82,15 +82,15 @@ class MetadataSyncServiceTest {
         when(executionStrategy.listColumns(eq(mockConfig), eq("ods"), eq("user_info")))
                 .thenReturn(Collections.singletonList(colVo));
 
-        boolean result = metadataSyncService.syncSingleTableMetadata(1L, StorageEngineType.HIVE, "ods", "user_info", "CREATE", null);
+        boolean result = metadataSyncService.syncSingleTableMetadata(1L, DatasourceType.HIVE, "ods", "user_info", "CREATE", null);
         assertTrue(result);
-        verify(tableMetadataService).syncSingleTable(eq(StorageEngineType.HIVE), eq(existingTable), anyList());
+        verify(tableMetadataService).syncSingleTable(eq(DatasourceType.HIVE), eq(existingTable), anyList());
     }
 
     @Test
     void testSyncSingleTableMetadata_configNotFound() {
         when(datasourceConfigService.getDatasourceById(999L)).thenReturn(null);
-        boolean result = metadataSyncService.syncSingleTableMetadata(999L, StorageEngineType.HIVE, "ods", "t", "CREATE", null);
+        boolean result = metadataSyncService.syncSingleTableMetadata(999L, DatasourceType.HIVE, "ods", "t", "CREATE", null);
         assertFalse(result);
     }
 
@@ -220,7 +220,7 @@ class MetadataSyncServiceTest {
     @Test
     void testConvertToColumnMetadataEntities() throws Exception {
         java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("convertToColumnMetadataEntities",
-                List.class, TableMetadata.class, StorageEngineType.class, String.class);
+                List.class, TableMetadata.class, DatasourceType.class, String.class);
         method.setAccessible(true);
 
         TableMetadata table = new TableMetadata();
@@ -250,13 +250,13 @@ class MetadataSyncServiceTest {
 
         @SuppressWarnings("unchecked")
         List<ColumnMetadata> columns = (List<ColumnMetadata>) method.invoke(
-                metadataSyncService, vos, table, StorageEngineType.HIVE, "test_db");
+                metadataSyncService, vos, table, DatasourceType.HIVE, "test_db");
 
         assertEquals(2, columns.size());
 
         ColumnMetadata col1 = columns.get(0);
         assertEquals(10L, col1.getTableMetadataId());
-        assertEquals(StorageEngineType.HIVE, col1.getStorageEngine());
+        assertEquals(DatasourceType.HIVE, col1.getStorageEngine());
         assertEquals("test_db", col1.getDatabaseName());
         assertEquals("test_table", col1.getTableName());
         assertEquals("id", col1.getColumnName());
@@ -276,17 +276,17 @@ class MetadataSyncServiceTest {
     @Test
     void testConvertToColumnMetadataEntities_nullInput() throws Exception {
         java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("convertToColumnMetadataEntities",
-                List.class, TableMetadata.class, StorageEngineType.class, String.class);
+                List.class, TableMetadata.class, DatasourceType.class, String.class);
         method.setAccessible(true);
 
         @SuppressWarnings("unchecked")
         List<ColumnMetadata> result1 = (List<ColumnMetadata>) method.invoke(
-                metadataSyncService, null, null, StorageEngineType.HIVE, "db");
+                metadataSyncService, null, null, DatasourceType.HIVE, "db");
         assertTrue(result1.isEmpty());
 
         @SuppressWarnings("unchecked")
         List<ColumnMetadata> result2 = (List<ColumnMetadata>) method.invoke(
-                metadataSyncService, Collections.emptyList(), null, StorageEngineType.HIVE, "db");
+                metadataSyncService, Collections.emptyList(), null, DatasourceType.HIVE, "db");
         assertTrue(result2.isEmpty());
     }
 
@@ -385,14 +385,14 @@ class MetadataSyncServiceTest {
     @Test
     void testDetectDdlStatement_CreateExternalTable() throws Exception {
         java.lang.reflect.Method detectMethod = AbstractBaseExecutionStrategy.class.getDeclaredMethod(
-                "detectDdlStatement", String.class, StorageEngineType.class);
+                "detectDdlStatement", String.class, DatasourceType.class);
         detectMethod.setAccessible(true);
 
         // 创建一个可测试的具体子类，实现getLog()返回真实Logger
         TestableBaseStrategy strategy = new TestableBaseStrategy();
 
         // 通过detectDdlStatement调用（内部会先stripHiveSpecificClauses再解析）
-        Object result = detectMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL, StorageEngineType.HIVE);
+        Object result = detectMethod.invoke(strategy, CREATE_EXTERNAL_TABLE_SQL, DatasourceType.HIVE);
 
         assertNotNull(result, "CREATE EXTERNAL TABLE 应被识别为DDL语句");
 
@@ -427,19 +427,19 @@ class MetadataSyncServiceTest {
                 .thenReturn(buildOdsProductColumns());
 
         // 3. Mock表元数据查询：表不存在（首次建表），返回null → 走新建逻辑
-        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, DB_NAME, TABLE_NAME))
                 .thenReturn(null);
 
         // 4. 执行同步（模拟handleDdlMetadataSync的调用）
         boolean result = metadataSyncService.syncSingleTableMetadata(
-                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
+                DATASOURCE_ID, DatasourceType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
 
         // 5. 断言同步成功
         assertTrue(result, "CREATE TABLE同步应成功");
 
         // 6. 验证tableMetadataService.syncSingleTable被调用，且传入了正确的表+列数据
         verify(tableMetadataService).syncSingleTable(
-                eq(StorageEngineType.HIVE),
+                eq(DatasourceType.HIVE),
                 argThat(table -> {
                     // 验证表基本信息
                     if (table == null) return false;
@@ -493,17 +493,17 @@ class MetadataSyncServiceTest {
         existingTable.setTableName(TABLE_NAME);
         existingTable.setDatabaseName(DB_NAME);
         existingTable.setTableComment("旧的注释");
-        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, DB_NAME, TABLE_NAME))
                 .thenReturn(existingTable);
 
         boolean result = metadataSyncService.syncSingleTableMetadata(
-                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
+                DATASOURCE_ID, DatasourceType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
 
         assertTrue(result);
 
         // 已有表时，targetTable应该是已有的existingTable（id=200L），而非新建
         verify(tableMetadataService).syncSingleTable(
-                eq(StorageEngineType.HIVE),
+                eq(DatasourceType.HIVE),
                 argThat(table -> table != null && table.getId() != null && table.getId().equals(200L)),
                 anyList()
         );
@@ -519,11 +519,11 @@ class MetadataSyncServiceTest {
     void testHandleDdlMetadataSync_endToEnd() throws Exception {
         // ---- 准备Mock ----
         when(datasourceConfigService.getDatasourceById(DATASOURCE_ID)).thenReturn(mockConfig);
-        mockConfig.setStorageEngine(StorageEngineType.HIVE);
+        mockConfig.setDatasourceType(DatasourceType.HIVE);
         when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
         when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
                 .thenReturn(buildOdsProductColumns());
-        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, DB_NAME, TABLE_NAME))
                 .thenReturn(null);
 
         // 构造CodeExecutionContext
@@ -561,7 +561,7 @@ class MetadataSyncServiceTest {
 
         // 3. 最终写入了table_metadata + column_metadata（6个字段）
         verify(tableMetadataService).syncSingleTable(
-                eq(StorageEngineType.HIVE),
+                eq(DatasourceType.HIVE),
                 argThat(t -> t != null && TABLE_NAME.equals(t.getTableName())),
                 argThat(cols -> cols != null && cols.size() == 6)
         );
@@ -579,11 +579,11 @@ class MetadataSyncServiceTest {
         when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
         when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
                 .thenReturn(buildOdsProductColumns());
-        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, DB_NAME, TABLE_NAME))
                 .thenReturn(null);
 
         metadataSyncService.syncSingleTableMetadata(
-                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
+                DATASOURCE_ID, DatasourceType.HIVE, DB_NAME, TABLE_NAME, "CREATE", null);
 
         // 捕获实际传入syncSingleTable的columns参数
         java.util.ArrayList<List<ColumnMetadata>> capturedColumns = new java.util.ArrayList<>();
@@ -655,7 +655,7 @@ class MetadataSyncServiceTest {
         when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
         when(executionStrategy.listColumns(eq(mockConfig), eq(DB_NAME), eq(TABLE_NAME)))
                 .thenReturn(buildOdsProductColumns());
-        when(tableMetadataMapper.getTableMetadata(StorageEngineType.HIVE, DB_NAME, TABLE_NAME))
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, DB_NAME, TABLE_NAME))
                 .thenReturn(null);
 
         // 2. 构造真实的HiveTableAttributes（模拟extractAndStripHiveAttributes的提取结果）
@@ -669,12 +669,12 @@ class MetadataSyncServiceTest {
 
         // 3. 执行同步，传入真实的Hive属性
         boolean result = metadataSyncService.syncSingleTableMetadata(
-                DATASOURCE_ID, StorageEngineType.HIVE, DB_NAME, TABLE_NAME, "CREATE", hiveAttrs);
+                DATASOURCE_ID, DatasourceType.HIVE, DB_NAME, TABLE_NAME, "CREATE", hiveAttrs);
         assertTrue(result);
 
         // 4. 验证table_metadata中写入了所有Hive属性
         verify(tableMetadataService).syncSingleTable(
-                eq(StorageEngineType.HIVE),
+                eq(DatasourceType.HIVE),
                 argThat(table -> {
                     if (table == null) return false;
                     // === 验证表类型 ===
@@ -766,7 +766,7 @@ class MetadataSyncServiceTest {
         }
 
         @Override
-        public com.bigdata.modules.development.service.execution.EngineType getEngineType() {
+        public com.bigdata.modules.devops.enums.DatasourceType getEngineType() {
             return null;
         }
 

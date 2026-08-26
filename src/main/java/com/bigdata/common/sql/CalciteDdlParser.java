@@ -1,6 +1,6 @@
 package com.bigdata.common.sql;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.apache.calcite.config.Lex;
 import org.apache.calcite.sql.*;
 import org.apache.calcite.sql.parser.SqlParser;
@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
  * <p>
  * 使用方式：
  * <pre>
- * DdlInfo info = CalciteDdlParser.detect(sql, StorageEngineType.DORIS);
+ * DdlInfo info = CalciteDdlParser.detect(sql, DatasourceType.DORIS);
  * if (info != null) {
  *     info.getDbType();      // "CREATE" / "ALTER" / "DROP" / "TRUNCATE"
  *     info.getDatabaseName();
@@ -45,7 +45,7 @@ public final class CalciteDdlParser {
      * @return DDL信息对象，非DDL返回null
      */
     public static DdlInfo detect(String sql) {
-        return detect(sql, StorageEngineType.HIVE);
+        return detect(sql, DatasourceType.HIVE);
     }
 
     /**
@@ -55,7 +55,7 @@ public final class CalciteDdlParser {
      * @param engineType 存储引擎类型（Hive/Doris/StarRocks/ClickHouse等）
      * @return DDL信息对象，非DDL返回null
      */
-    public static DdlInfo detect(String sql, StorageEngineType engineType) {
+    public static DdlInfo detect(String sql, DatasourceType engineType) {
         if (sql == null || sql.trim().isEmpty()) {
             return null;
         }
@@ -100,7 +100,7 @@ public final class CalciteDdlParser {
     /**
      * 从原始SQL中提取表级属性（按引擎类型自适应）。
      */
-    public static TableAttributes extractTableAttributes(String sql, StorageEngineType engineType) {
+    public static TableAttributes extractTableAttributes(String sql, DatasourceType engineType) {
         if (sql == null) return null;
         return doExtractTableAttributes(sql, engineType);
     }
@@ -109,20 +109,20 @@ public final class CalciteDdlParser {
      * 从原始SQL中提取Hive表级属性（向后兼容）。
      */
     public static TableAttributes extractHiveAttributes(String sql) {
-        return extractTableAttributes(sql, StorageEngineType.HIVE);
+        return extractTableAttributes(sql, DatasourceType.HIVE);
     }
 
     // ==================== 引擎特定属性提取 ====================
 
-    private static TableAttributes doExtractTableAttributes(String sql, StorageEngineType engineType) {
+    private static TableAttributes doExtractTableAttributes(String sql, DatasourceType engineType) {
         TableAttributes attrs = new TableAttributes();
         attrs.tblProperties = new LinkedHashMap<>();
         attrs.engineType = engineType;
 
         // Hive / Doris / StarRocks 通用属性
-        if (engineType == StorageEngineType.HIVE
-                || engineType == StorageEngineType.DORIS
-                || engineType == StorageEngineType.STARROCKS) {
+        if (engineType == DatasourceType.HIVE
+                || engineType == DatasourceType.DORIS
+                || engineType == DatasourceType.STARROCKS) {
             extractCommonTableProperties(sql, attrs);
         }
 
@@ -372,7 +372,7 @@ public final class CalciteDdlParser {
     /**
      * 按引擎类型预处理SQL使其能被Calcite正确解析。
      */
-    private static String preprocessForEngine(String sql, StorageEngineType engineType) {
+    private static String preprocessForEngine(String sql, DatasourceType engineType) {
         switch (engineType) {
             case HIVE:
                 return preprocessHiveForCalcite(sql);
@@ -653,7 +653,7 @@ public final class CalciteDdlParser {
     /**
      * Calcite主解析失败时的回退策略。
      */
-    private static DdlInfo tryFallbackParse(String rawSql, TableAttributes tableAttrs, StorageEngineType engineType) {
+    private static DdlInfo tryFallbackParse(String rawSql, TableAttributes tableAttrs, DatasourceType engineType) {
         // 匹配 DDL 类型、可选库名、表名（支持反引号标识符）
         Pattern ddlPattern = Pattern.compile(
                 "(?i)^(CREATE|ALTER|DROP)\\s+(?:\\w+\\s+)?TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?(?:`?([\\w\\-]+)`?\\.)?`?([\\w\\-]+)`?");
@@ -754,7 +754,7 @@ public final class CalciteDdlParser {
         /** 表级属性（引擎特定） */
         private TableAttributes tableAttributes;
         /** 所属存储引擎类型 */
-        private StorageEngineType engineType;
+        private DatasourceType engineType;
         /** 是否使用了正则回退模式 */
         private boolean fallbackMode;
 
@@ -766,7 +766,7 @@ public final class CalciteDdlParser {
         public TableAttributes getTableAttributes() { return tableAttributes; }
         /** 向后兼容：返回 tableAttributes */
         public TableAttributes getHiveAttributes() { return tableAttributes; }
-        public StorageEngineType getEngineType() { return engineType; }
+        public DatasourceType getEngineType() { return engineType; }
         public boolean isFallbackMode() { return fallbackMode; }
 
         @Override
@@ -784,7 +784,7 @@ public final class CalciteDdlParser {
      */
     public static class TableAttributes {
         /** 所属存储引擎类型 */
-        public StorageEngineType engineType;
+        public DatasourceType engineType;
 
         // ===== Hive 属性 =====
         /** 是否为外部表 */

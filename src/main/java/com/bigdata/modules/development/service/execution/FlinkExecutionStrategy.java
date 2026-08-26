@@ -3,7 +3,6 @@ package com.bigdata.modules.development.service.execution;
 import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
-import com.bigdata.modules.devops.enums.StorageEngineType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -327,7 +326,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
         for (DatasourceConfig dsConfig : datasourceConfigs) {
             String dsName = dsConfig.getDatasourceName();
             DatasourceType dsType = dsConfig.getDatasourceType();
-            StorageEngineType storageEngine = dsConfig.getStorageEngine();
+            DatasourceType storageEngine = dsConfig.getDatasourceType();
             String confPrefix = "flink." + dsName;
 
             command.add("--conf");
@@ -358,7 +357,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     }
 
     private void addDatasourceSpecificConf(List<String> command, String confPrefix,
-                                            DatasourceConfig dsConfig, StorageEngineType storageEngine) {
+                                            DatasourceConfig dsConfig, DatasourceType storageEngine) {
         DatasourceType dsType = dsConfig.getDatasourceType();
 
         switch (dsType) {
@@ -589,12 +588,12 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     }
 
     @Override
-    public EngineType getEngineType() {
-        return EngineType.FLINK;
+    public DatasourceType getEngineType() {
+        return DatasourceType.FLINK;
     }
 
     @Override
     public boolean supports(CodeType codeType) {
-        return getEngineType().supportsCodeType(codeType);
+        return getEngineType().supportsLanguage(codeType);
     }
 }

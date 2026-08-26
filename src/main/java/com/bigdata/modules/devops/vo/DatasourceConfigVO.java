@@ -2,7 +2,6 @@ package com.bigdata.modules.devops.vo;
 
 import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
-import com.bigdata.modules.devops.enums.StorageEngineType;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
@@ -16,7 +15,6 @@ public class DatasourceConfigVO implements Serializable {
     private String datasourceName;
     private DatasourceType datasourceType;
     private ConnectionType connectionType;
-    private StorageEngineType storageEngine;
     private String url;
     private List<String> databaseName;
     private String username;
@@ -57,14 +55,6 @@ public class DatasourceConfigVO implements Serializable {
 
     public void setConnectionType(ConnectionType connectionType) {
         this.connectionType = connectionType;
-    }
-
-    public StorageEngineType getStorageEngine() {
-        return storageEngine;
-    }
-
-    public void setStorageEngine(StorageEngineType storageEngine) {
-        this.storageEngine = storageEngine;
     }
 
     public String getUrl() {

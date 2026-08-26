@@ -6,7 +6,7 @@ import com.bigdata.modules.development.service.execution.hbase.HBaseRowkeyFilter
 import com.bigdata.modules.development.service.execution.hbase.HBaseSchema;
 import com.bigdata.modules.development.service.execution.hbase.HBaseTableMeta;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.service.TableMetadataService;
@@ -87,8 +87,8 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
     private ExecutionLogListener executionLogListener;
 
     @Override
-    public EngineType getEngineType() {
-        return EngineType.HBASE;
+    public DatasourceType getEngineType() {
+        return DatasourceType.HBASE;
     }
 
     @Override
@@ -300,7 +300,7 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
         try {
             TableMetadata tableMeta = new TableMetadata();
             tableMeta.setDatasourceId(datasourceConfig.getId());
-            tableMeta.setStorageEngine(StorageEngineType.HBASE);
+            tableMeta.setStorageEngine(DatasourceType.HBASE);
             tableMeta.setDatabaseName(datasourceConfig.getDatabaseName() != null && !datasourceConfig.getDatabaseName().isEmpty()
                     ? datasourceConfig.getDatabaseName().get(0) : "default");
             tableMeta.setTableName(tableName);
@@ -336,7 +336,7 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
                 }
             }
 
-            tableMetadataService.syncSingleTable(StorageEngineType.HBASE, tableMeta, columns);
+            tableMetadataService.syncSingleTable(DatasourceType.HBASE, tableMeta, columns);
             log.info("CREATE TABLE元数据同步成功: {}", tableName);
         } catch (Exception e) {
             log.error("CREATE TABLE元数据同步失败: {}", tableName, e);

@@ -1,6 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import java.util.ArrayList;
@@ -18,7 +19,7 @@ public interface ExecutionStrategy {
         // 默认无权限检查
     }
 
-    EngineType getEngineType();
+    DatasourceType getEngineType();
 
     boolean supports(CodeType codeType);
 

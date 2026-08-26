@@ -1,6 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -57,7 +58,7 @@ class FlinkExecutionLogRealDataTest {
         CodeExecutionContext context = new CodeExecutionContext();
         context.setCodeContent(sql);
         context.setCodeType(CodeType.SQL);
-        context.setEngineType(EngineType.FLINK);
+        context.setEngineType(DatasourceType.FLINK);
         context.setSubmitBy(1L);
         context.setSubmitByName("admin_test");
         return context;
@@ -67,7 +68,7 @@ class FlinkExecutionLogRealDataTest {
         CodeExecutionContext context = new CodeExecutionContext();
         context.setCodeContent(code);
         context.setCodeType(CodeType.PYTHON);
-        context.setEngineType(EngineType.FLINK);
+        context.setEngineType(DatasourceType.FLINK);
         context.setSubmitBy(1L);
         context.setSubmitByName("admin_test");
         return context;

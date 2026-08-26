@@ -1,6 +1,6 @@
 package com.bigdata.modules.metadata.service;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
@@ -39,7 +39,7 @@ public class MetadataSyncService {
     private ExecutionStrategyFactory executionStrategyFactory;
 
     @Transactional
-    public boolean syncSingleTableMetadata(Long datasourceId, StorageEngineType storageEngine, String databaseName, String tableName, String ddlType,
+    public boolean syncSingleTableMetadata(Long datasourceId, DatasourceType storageEngine, String databaseName, String tableName, String ddlType,
                                             AbstractBaseExecutionStrategy.HiveTableAttributes hiveAttrs) {
         log.info("[DDL-DEBUG-D3] syncSingleTableMetadata 入口: dsId={}, engine={}, db={}, table={}, type={}",
                 datasourceId, storageEngine, databaseName, tableName, ddlType);
@@ -103,7 +103,7 @@ public class MetadataSyncService {
                 return false;
             }
 
-            StorageEngineType storageEngine = config.getStorageEngine();
+            DatasourceType storageEngine = config.getDatasourceType();
 
             // 通过ExecutionStrategy获取库表元信息
             ExecutionStrategy strategy = executionStrategyFactory.getStrategy(config);
@@ -253,7 +253,7 @@ public class MetadataSyncService {
      */
     private List<ColumnMetadata> convertToColumnMetadataEntities(List<ColumnMetadataVO> columnVOs,
                                                                  TableMetadata table,
-                                                                 StorageEngineType storageEngine,
+                                                                 DatasourceType storageEngine,
                                                                  String databaseName) {
         List<ColumnMetadata> columns = new ArrayList<>();
         if (columnVOs == null) return columns;

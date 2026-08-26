@@ -1,6 +1,6 @@
 package com.bigdata.modules.development.service.execution;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -40,12 +40,12 @@ public class PgSqlExecutionStrategy extends AbstractJdbcExecutionStrategy {
     }
 
     @Override
-    protected StorageEngineType resolveStorageEngineType(CodeExecutionContext context) {
-        return StorageEngineType.POSTGRESQL;
+    protected DatasourceType resolveStorageEngineType(CodeExecutionContext context) {
+        return DatasourceType.POSTGRESQL;
     }
 
     @Override
-    public EngineType getEngineType() {
-        return EngineType.POSTGRESQL;
+    public DatasourceType getEngineType() {
+        return DatasourceType.POSTGRESQL;
     }
 }

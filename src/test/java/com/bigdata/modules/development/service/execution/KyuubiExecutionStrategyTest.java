@@ -1,7 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.modules.devops.entity.DatasourceConfig;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import org.junit.jupiter.api.*;
@@ -96,7 +96,7 @@ class KyuubiExecutionStrategyTest {
         @Test
         @DisplayName("HIVE存储引擎配置")
         void testHiveEngineConfig() throws Exception {
-            var config = invokeBuildSessionConfiguration(StorageEngineType.HIVE);
+            var config = invokeBuildSessionConfiguration(DatasourceType.HIVE);
             assertEquals("true", config.get("hive.exec.parallel"));
             assertEquals("8", config.get("hive.exec.parallel.thread.number"));
         }
@@ -254,7 +254,7 @@ class KyuubiExecutionStrategyTest {
         @Test
         @DisplayName("engineType 为 KYUUBI")
         void testGetEngineType() {
-            assertEquals(EngineType.KYUUBI, strategy.getEngineType());
+            assertEquals(DatasourceType.KYUUBI, strategy.getEngineType());
         }
 
         @Test
@@ -280,7 +280,7 @@ class KyuubiExecutionStrategyTest {
         config.setUrl(KYUUBI_URL);
         config.setUsername(KYUUBI_USERNAME);
         config.setPassword(KYUUBI_PASSWORD);
-        config.setStorageEngine(StorageEngineType.HIVE);
+        config.setDatasourceType(DatasourceType.HIVE);
         return config;
     }
 
@@ -298,10 +298,10 @@ class KyuubiExecutionStrategyTest {
     }
 
     @SuppressWarnings("unchecked")
-    private java.util.Map<String, String> invokeBuildSessionConfiguration(StorageEngineType engineType) throws Exception {
+    private java.util.Map<String, String> invokeBuildSessionConfiguration(DatasourceType engineType) throws Exception {
         CodeExecutionContext ctx = new CodeExecutionContext();
         DatasourceConfig ds = new DatasourceConfig();
-        ds.setStorageEngine(engineType);
+        ds.setDatasourceType(engineType);
         ctx.setDatasourceConfigs(java.util.Collections.singletonList(ds));
 
         Method method = KyuubiExecutionStrategy.class.getDeclaredMethod("buildSessionConfiguration", CodeExecutionContext.class);

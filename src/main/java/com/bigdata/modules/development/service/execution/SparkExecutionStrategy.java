@@ -3,7 +3,6 @@ package com.bigdata.modules.development.service.execution;
 import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
-import com.bigdata.modules.devops.enums.StorageEngineType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -217,7 +216,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         for (DatasourceConfig dsConfig : datasourceConfigs) {
             String dsName = dsConfig.getDatasourceName();
             DatasourceType dsType = dsConfig.getDatasourceType();
-            StorageEngineType storageEngine = dsConfig.getStorageEngine();
+            DatasourceType storageEngine = dsConfig.getDatasourceType();
             String confPrefix = "spark." + dsName;
 
             command.add("--conf");
@@ -248,19 +247,19 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     }
 
     private void addDatasourceSpecificConf(List<String> command, String confPrefix,
-                                            DatasourceConfig dsConfig, StorageEngineType storageEngine) {
+                                            DatasourceConfig dsConfig, DatasourceType storageEngine) {
         DatasourceType dsType = dsConfig.getDatasourceType();
 
         switch (dsType) {
             case HIVE:
                 command.add("--conf");
                 command.add(confPrefix + ".metastore.uris=" + dsConfig.getUrl());
-                if (storageEngine == StorageEngineType.HUDI) {
+                if (storageEngine == DatasourceType.HUDI) {
                     command.add("--conf");
                     command.add(confPrefix + ".sql.extensions=org.apache.spark.sql.hudi.HudiSparkSessionExtension");
                     command.add("--conf");
                     command.add(confPrefix + ".serializer=org.apache.spark.serializer.KryoSerializer");
-                } else if (storageEngine == StorageEngineType.ICEBERG) {
+                } else if (storageEngine == DatasourceType.ICEBERG) {
                     command.add("--conf");
                     command.add(confPrefix + ".sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions");
                     command.add("--conf");
@@ -569,12 +568,12 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     }
 
     @Override
-    public EngineType getEngineType() {
-        return EngineType.SPARK;
+    public DatasourceType getEngineType() {
+        return DatasourceType.SPARK;
     }
 
     @Override
     public boolean supports(CodeType codeType) {
-        return getEngineType().supportsCodeType(codeType);
+        return getEngineType().supportsLanguage(codeType);
     }
 }

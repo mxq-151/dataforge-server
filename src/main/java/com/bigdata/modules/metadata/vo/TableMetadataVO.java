@@ -1,6 +1,6 @@
 package com.bigdata.modules.metadata.vo;
 
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 
 import java.io.Serializable;
 import java.util.Date;
@@ -11,7 +11,7 @@ public class TableMetadataVO implements Serializable {
 
     private Long id;
     private Long datasourceId;
-    private StorageEngineType storageEngine;
+    private DatasourceType storageEngine;
     private String catalogName;
     private String databaseName;
     private String tableName;
@@ -48,11 +48,11 @@ public class TableMetadataVO implements Serializable {
         this.datasourceId = datasourceId;
     }
 
-    public StorageEngineType getStorageEngine() {
+    public DatasourceType getStorageEngine() {
         return storageEngine;
     }
 
-    public void setStorageEngine(StorageEngineType storageEngine) {
+    public void setStorageEngine(DatasourceType storageEngine) {
         this.storageEngine = storageEngine;
     }
 

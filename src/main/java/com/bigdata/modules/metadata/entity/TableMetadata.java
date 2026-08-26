@@ -3,7 +3,7 @@ package com.bigdata.modules.metadata.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.bigdata.modules.devops.enums.StorageEngineType;
+import com.bigdata.modules.devops.enums.DatasourceType;
 import java.util.Date;
 
 @TableName("table_metadata")
@@ -13,7 +13,7 @@ public class TableMetadata {
     private Long id;
 
     private Long datasourceId;
-    private StorageEngineType storageEngine;
+    private DatasourceType storageEngine;
     private String catalogName;
     private String databaseName;
     private String tableName;
@@ -42,8 +42,8 @@ public class TableMetadata {
     public void setId(Long id) { this.id = id; }
     public Long getDatasourceId() { return datasourceId; }
     public void setDatasourceId(Long datasourceId) { this.datasourceId = datasourceId; }
-    public StorageEngineType getStorageEngine() { return storageEngine; }
-    public void setStorageEngine(StorageEngineType storageEngine) { this.storageEngine = storageEngine; }
+    public DatasourceType getStorageEngine() { return storageEngine; }
+    public void setStorageEngine(DatasourceType storageEngine) { this.storageEngine = storageEngine; }
     public String getCatalogName() { return catalogName; }
     public void setCatalogName(String catalogName) { this.catalogName = catalogName; }
     public String getDatabaseName() { return databaseName; }

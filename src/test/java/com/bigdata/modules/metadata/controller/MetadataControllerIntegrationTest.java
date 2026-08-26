@@ -5,7 +5,6 @@ import com.bigdata.common.security.CustomUserDetails;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
-import com.bigdata.modules.devops.enums.StorageEngineType;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
@@ -98,11 +97,11 @@ class MetadataControllerIntegrationTest {
         SecurityContextHolder.getContext().setAuthentication(authentication);
     }
 
-    private DatasourceConfig createTestDatasource(String name, StorageEngineType engine) {
+    private DatasourceConfig createTestDatasource(String name, DatasourceType engine) {
         DatasourceConfig ds = new DatasourceConfig();
         ds.setDatasourceName(name);
         ds.setDatasourceType(DatasourceType.HIVE);
-        ds.setStorageEngine(engine);
+        ds.setDatasourceType(engine);
         ds.setUrl("jdbc:mysql://localhost:3306/" + name);
         ds.setUsername("test");
         ds.setPassword("test");
@@ -112,7 +111,7 @@ class MetadataControllerIntegrationTest {
         return ds;
     }
 
-    private TableMetadata createTestTable(Long datasourceId, StorageEngineType engine,
+    private TableMetadata createTestTable(Long datasourceId, DatasourceType engine,
                                            String dbName, String tableName, String comment) {
         TableMetadata table = new TableMetadata();
         table.setDatasourceId(datasourceId);
@@ -127,7 +126,7 @@ class MetadataControllerIntegrationTest {
         return table;
     }
 
-    private ColumnMetadata createTestColumn(Long tableId, StorageEngineType engine,
+    private ColumnMetadata createTestColumn(Long tableId, DatasourceType engine,
                                              String dbName, String tableName,
                                              String colName, String colType, int ordinal) {
         ColumnMetadata col = new ColumnMetadata();
@@ -208,10 +207,10 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景1.1: 无筛选条件分页查询 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_nofilter", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "table_alpha", "alpha表");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "table_beta", "beta表");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db2", "table_gamma", "gamma表");
+            DatasourceConfig ds = createTestDatasource("test_ds_nofilter", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "table_alpha", "alpha表");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "table_beta", "beta表");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db2", "table_gamma", "gamma表");
 
             Result<Page<TableMetadataVO>> result = metadataController.getTableList(1, 10, null, null, null, null);
 
@@ -227,11 +226,11 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景1.2: 按数据源ID筛选 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds1 = createTestDatasource("test_ds_filter1", StorageEngineType.HIVE);
-            DatasourceConfig ds2 = createTestDatasource("test_ds_filter2", StorageEngineType.DORIS);
-            createTestTable(ds1.getId(), StorageEngineType.HIVE, "db1", "hive_table1", "hive表1");
-            createTestTable(ds1.getId(), StorageEngineType.HIVE, "db1", "hive_table2", "hive表2");
-            createTestTable(ds2.getId(), StorageEngineType.DORIS, "db1", "doris_table1", "doris表1");
+            DatasourceConfig ds1 = createTestDatasource("test_ds_filter1", DatasourceType.HIVE);
+            DatasourceConfig ds2 = createTestDatasource("test_ds_filter2", DatasourceType.DORIS);
+            createTestTable(ds1.getId(), DatasourceType.HIVE, "db1", "hive_table1", "hive表1");
+            createTestTable(ds1.getId(), DatasourceType.HIVE, "db1", "hive_table2", "hive表2");
+            createTestTable(ds2.getId(), DatasourceType.DORIS, "db1", "doris_table1", "doris表1");
 
             Result<Page<TableMetadataVO>> result = metadataController.getTableList(1, 10, ds1.getId(), null, null, null);
 
@@ -248,10 +247,10 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景1.3: 按数据库名筛选 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_dbfilter", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "sales_db", "orders", "订单表");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "sales_db", "products", "产品表");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "hr_db", "employees", "员工表");
+            DatasourceConfig ds = createTestDatasource("test_ds_dbfilter", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "sales_db", "orders", "订单表");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "sales_db", "products", "产品表");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "hr_db", "employees", "员工表");
 
             Result<Page<TableMetadataVO>> result = metadataController.getTableList(1, 10, null, "sales_db", null, null);
 
@@ -268,10 +267,10 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景1.4: 按表名模糊筛选 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_tblfilter", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "user_info", "用户信息");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "user_order", "用户订单");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "product_info", "产品信息");
+            DatasourceConfig ds = createTestDatasource("test_ds_tblfilter", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "user_info", "用户信息");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "user_order", "用户订单");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "product_info", "产品信息");
 
             Result<Page<TableMetadataVO>> result = metadataController.getTableList(1, 10, null, null, "user", null);
 
@@ -288,10 +287,10 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景1.5: 按关键字搜索 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_kw", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "order_detail", "订单明细");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "payment_record", "支付记录");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db1", "user_profile", "用户画像");
+            DatasourceConfig ds = createTestDatasource("test_ds_kw", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "order_detail", "订单明细");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "payment_record", "支付记录");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db1", "user_profile", "用户画像");
 
             Result<Page<TableMetadataVO>> result = metadataController.getTableList(1, 10, null, null, null, "订单");
 
@@ -309,10 +308,10 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景1.6: 组合条件筛选 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_combo", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "target_db", "target_table_1", "目标1");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "target_db", "target_table_2", "目标2");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "other_db", "target_table_3", "目标3");
+            DatasourceConfig ds = createTestDatasource("test_ds_combo", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "target_db", "target_table_1", "目标1");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "target_db", "target_table_2", "目标2");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "other_db", "target_table_3", "目标3");
 
             Result<Page<TableMetadataVO>> result = metadataController.getTableList(
                     1, 10, ds.getId(), "target_db", "target", null);
@@ -337,9 +336,9 @@ class MetadataControllerIntegrationTest {
         void testNonAdmin_FilterByDatabasePermission() {
             System.out.println("\n=== 场景2.1: 非ADMIN用户数据库权限过滤 ===");
 
-            DatasourceConfig ds = createTestDatasource("test_ds_permdb", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "permitted_db", "table_a", "有权限库的表");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "restricted_db", "table_b", "无权限库的表");
+            DatasourceConfig ds = createTestDatasource("test_ds_permdb", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "permitted_db", "table_a", "有权限库的表");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "restricted_db", "table_b", "无权限库的表");
 
             Long tenantId = setupUserWithTablePermission(
                     "test_ds_permdb", "permitted_db", "table_a", 1, 0);
@@ -357,9 +356,9 @@ class MetadataControllerIntegrationTest {
         void testNonAdmin_FilterByTablePermission() {
             System.out.println("\n=== 场景2.2: 非ADMIN用户表级权限过滤 ===");
 
-            DatasourceConfig ds = createTestDatasource("test_ds_permtbl", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "shared_db", "visible_table", "可见表");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "shared_db", "hidden_table", "隐藏表");
+            DatasourceConfig ds = createTestDatasource("test_ds_permtbl", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "shared_db", "visible_table", "可见表");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "shared_db", "hidden_table", "隐藏表");
 
             Long tenantId = setupUserWithTablePermission(
                     "test_ds_permtbl", "shared_db", "visible_table", 1, 0);
@@ -384,10 +383,10 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景3.1: ADMIN用户看到所有表 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_admin", StorageEngineType.HIVE);
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db_x", "admin_table1", "管理员表1");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db_y", "admin_table2", "管理员表2");
-            createTestTable(ds.getId(), StorageEngineType.HIVE, "db_z", "admin_table3", "管理员表3");
+            DatasourceConfig ds = createTestDatasource("test_ds_admin", DatasourceType.HIVE);
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db_x", "admin_table1", "管理员表1");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db_y", "admin_table2", "管理员表2");
+            createTestTable(ds.getId(), DatasourceType.HIVE, "db_z", "admin_table3", "管理员表3");
 
             Result<Page<TableMetadataVO>> result = metadataController.getTableList(1, 10, null, null, null, null);
 
@@ -408,14 +407,14 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景4.1: ADMIN查询列信息无脱敏 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_colmask", StorageEngineType.HIVE);
-            TableMetadata table = createTestTable(ds.getId(), StorageEngineType.HIVE, "mask_db", "mask_table", "脱敏测试表");
-            createTestColumn(table.getId(), StorageEngineType.HIVE, "mask_db", "mask_table", "name", "string", 1);
-            createTestColumn(table.getId(), StorageEngineType.HIVE, "mask_db", "mask_table", "phone", "string", 2);
-            createTestColumn(table.getId(), StorageEngineType.HIVE, "mask_db", "mask_table", "age", "int", 3);
+            DatasourceConfig ds = createTestDatasource("test_ds_colmask", DatasourceType.HIVE);
+            TableMetadata table = createTestTable(ds.getId(), DatasourceType.HIVE, "mask_db", "mask_table", "脱敏测试表");
+            createTestColumn(table.getId(), DatasourceType.HIVE, "mask_db", "mask_table", "name", "string", 1);
+            createTestColumn(table.getId(), DatasourceType.HIVE, "mask_db", "mask_table", "phone", "string", 2);
+            createTestColumn(table.getId(), DatasourceType.HIVE, "mask_db", "mask_table", "age", "int", 3);
 
             Result<List<ColumnMetadataVO>> result = metadataController.getTableColumns(
-                    StorageEngineType.HIVE, "mask_db", "mask_table");
+                    DatasourceType.HIVE, "mask_db", "mask_table");
 
             assertEquals(200, result.getCode());
             assertEquals(3, result.getData().size(), "应返回3列");
@@ -427,10 +426,10 @@ class MetadataControllerIntegrationTest {
         void testGetColumns_WithMasking() {
             System.out.println("\n=== 场景4.2: 查询列信息带脱敏规则 ===");
 
-            DatasourceConfig ds = createTestDatasource("test_ds_maskrule", StorageEngineType.HIVE);
-            TableMetadata table = createTestTable(ds.getId(), StorageEngineType.HIVE, "mask_db2", "sensitive_table", "敏感数据表");
-            createTestColumn(table.getId(), StorageEngineType.HIVE, "mask_db2", "sensitive_table", "name", "string", 1);
-            createTestColumn(table.getId(), StorageEngineType.HIVE, "mask_db2", "sensitive_table", "phone", "string", 2);
+            DatasourceConfig ds = createTestDatasource("test_ds_maskrule", DatasourceType.HIVE);
+            TableMetadata table = createTestTable(ds.getId(), DatasourceType.HIVE, "mask_db2", "sensitive_table", "敏感数据表");
+            createTestColumn(table.getId(), DatasourceType.HIVE, "mask_db2", "sensitive_table", "name", "string", 1);
+            createTestColumn(table.getId(), DatasourceType.HIVE, "mask_db2", "sensitive_table", "phone", "string", 2);
 
             setUpAdminSecurityContext();
 
@@ -450,7 +449,7 @@ class MetadataControllerIntegrationTest {
             System.out.println("  已创建脱敏权限: " + maskingPerm.getId());
 
             Result<List<ColumnMetadataVO>> result = metadataController.getTableColumns(
-                    StorageEngineType.HIVE, "mask_db2", "sensitive_table");
+                    DatasourceType.HIVE, "mask_db2", "sensitive_table");
 
             assertEquals(200, result.getCode(), "ADMIN查询列信息应成功");
             List<ColumnMetadataVO> columns = result.getData();
@@ -485,8 +484,8 @@ class MetadataControllerIntegrationTest {
             System.out.println("\n=== 场景5.1: ADMIN查询表权限 ===");
             setUpAdminSecurityContext();
 
-            DatasourceConfig ds = createTestDatasource("test_ds_tblperm", StorageEngineType.HIVE);
-            TableMetadata table = createTestTable(ds.getId(), StorageEngineType.HIVE, "perm_db", "perm_table", "权限测试表");
+            DatasourceConfig ds = createTestDatasource("test_ds_tblperm", DatasourceType.HIVE);
+            TableMetadata table = createTestTable(ds.getId(), DatasourceType.HIVE, "perm_db", "perm_table", "权限测试表");
 
             Result<SysTablePermission> result = metadataController.getTablePermission(table.getId());
 
@@ -511,8 +510,8 @@ class MetadataControllerIntegrationTest {
         void testGetTablePermission_NonAdmin() {
             System.out.println("\n=== 场景5.3: 非ADMIN用户查询表权限 ===");
 
-            DatasourceConfig ds = createTestDatasource("test_ds_tblperm_na", StorageEngineType.HIVE);
-            TableMetadata table = createTestTable(ds.getId(), StorageEngineType.HIVE, "perm_db2", "perm_table2", "权限测试表2");
+            DatasourceConfig ds = createTestDatasource("test_ds_tblperm_na", DatasourceType.HIVE);
+            TableMetadata table = createTestTable(ds.getId(), DatasourceType.HIVE, "perm_db2", "perm_table2", "权限测试表2");
 
             Long tenantId = setupUserWithTablePermission(
                     "test_ds_tblperm_na", "perm_db2", "perm_table2", 1, 1);
@@ -585,7 +584,7 @@ class MetadataControllerIntegrationTest {
             setUpAdminSecurityContext();
 
             Result<List<ColumnMetadataVO>> result = metadataController.getTableColumns(
-                    StorageEngineType.HBASE, "nonexistent_db", "nonexistent_table");
+                    DatasourceType.HBASE, "nonexistent_db", "nonexistent_table");
 
             assertEquals(200, result.getCode());
             assertTrue(result.getData().isEmpty(), "不存在的表列信息应为空");
