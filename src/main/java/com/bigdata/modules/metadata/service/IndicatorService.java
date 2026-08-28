@@ -3,12 +3,18 @@ package com.bigdata.modules.metadata.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.metadata.dto.IndicatorDTO;
 import com.bigdata.modules.metadata.dto.IndicatorFieldDTO;
+import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.Indicator;
 import com.bigdata.modules.metadata.entity.IndicatorField;
+import com.bigdata.modules.metadata.entity.TableMetadata;
+import com.bigdata.modules.metadata.mapper.ColumnMetadataMapper;
 import com.bigdata.modules.metadata.mapper.IndicatorFieldMapper;
 import com.bigdata.modules.metadata.mapper.IndicatorMapper;
+import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +30,15 @@ public class IndicatorService {
 
     @Autowired
     private IndicatorFieldMapper indicatorFieldMapper;
+
+    @Autowired
+    private DatasourceConfigMapper datasourceConfigMapper;
+
+    @Autowired
+    private TableMetadataMapper tableMetadataMapper;
+
+    @Autowired
+    private ColumnMetadataMapper columnMetadataMapper;
 
     public List<Indicator> getIndicatorsByFilter(String projectCode, String topic, String keyword) {
         LambdaQueryWrapper<Indicator> wrapper = new LambdaQueryWrapper<>();
@@ -89,6 +104,8 @@ public class IndicatorService {
 
     @Transactional
     public void saveIndicator(IndicatorDTO dto) {
+        validateFields(dto.getFields());
+
         Indicator indicator = new Indicator();
         indicator.setProjectCode(dto.getProjectCode());
         indicator.setTopic(dto.getTopic());
@@ -129,6 +146,8 @@ public class IndicatorService {
         if (existing == null) {
             throw new BusinessException("指标不存在");
         }
+
+        validateFields(dto.getFields());
 
         existing.setProjectCode(dto.getProjectCode());
         existing.setTopic(dto.getTopic());
@@ -196,6 +215,47 @@ public class IndicatorService {
         }
         for (Long id : ids) {
             deleteIndicator(id);
+        }
+    }
+
+    /**
+     * 保存指标前校验指标字段引用的数据源、表、字段是否存在且对应关系正确
+     */
+    private void validateFields(List<IndicatorFieldDTO> fields) {
+        if (fields == null || fields.isEmpty()) {
+            return;
+        }
+        for (IndicatorFieldDTO field : fields) {
+            // 校验数据源是否存在
+            DatasourceConfig datasource = datasourceConfigMapper.selectOne(
+                    new LambdaQueryWrapper<DatasourceConfig>()
+                            .eq(DatasourceConfig::getDatasourceName, field.getDatasourceName()));
+            if (datasource == null) {
+                throw new BusinessException("数据源不存在: " + field.getDatasourceName());
+            }
+
+            // 校验库.表是否存在于该数据源的元数据中
+            Long tableCount = tableMetadataMapper.selectCount(
+                    new LambdaQueryWrapper<TableMetadata>()
+                            .eq(TableMetadata::getDatasourceId, datasource.getId())
+                            .eq(TableMetadata::getDatabaseName, field.getDbName())
+                            .eq(TableMetadata::getTableName, field.getTblName()));
+            if (tableCount == null || tableCount == 0) {
+                throw new BusinessException("表不存在: 数据源=["
+                        + field.getDatasourceName() + "], 库=[" + field.getDbName()
+                        + "], 表=[" + field.getTblName() + "]");
+            }
+
+            // 校验字段是否存在于该表中
+            Long columnCount = columnMetadataMapper.selectCount(
+                    new LambdaQueryWrapper<ColumnMetadata>()
+                            .eq(ColumnMetadata::getDatabaseName, field.getDbName())
+                            .eq(ColumnMetadata::getTableName, field.getTblName())
+                            .eq(ColumnMetadata::getColumnName, field.getFieldName()));
+            if (columnCount == null || columnCount == 0) {
+                throw new BusinessException("字段不存在: 表=[" + field.getTblName()
+                        + "], 字段=[" + field.getFieldName() + "]");
+            }
         }
     }
 
