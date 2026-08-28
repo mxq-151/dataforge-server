@@ -27,7 +27,7 @@ public enum DatasourceType {
     POSTGRESQL("postgresql", "PostgreSQL", true, true, Arrays.asList(CodeType.SQL)),
     CLICKHOUSE("clickhouse", "ClickHouse", true, true, Arrays.asList(CodeType.SQL)),
     HIVE("hive", "Hive", false, true, Arrays.asList(CodeType.SQL)),
-    STARROCKS("starrocks", "StarRocks", false, true, Arrays.asList(CodeType.SQL)),
+    STARROCKS("starrocks", "StarRocks", true, true, Arrays.asList(CodeType.SQL)),
     ES("es", "Elasticsearch", false, true, Arrays.asList()),
     HUDI("hudi", "Apache Hudi", false, true, Arrays.asList(CodeType.SQL)),
     ICEBERG("iceberg", "Apache Iceberg", false, true, Arrays.asList(CodeType.SQL));

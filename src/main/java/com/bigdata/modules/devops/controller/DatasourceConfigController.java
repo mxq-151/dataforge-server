@@ -10,6 +10,7 @@ import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.devops.service.DatasourceConfigService;
 import com.bigdata.modules.devops.vo.ConnectionTestResult;
 import com.bigdata.modules.devops.vo.DatasourceConfigVO;
+import com.bigdata.modules.devops.vo.DatasourceTypeMetaVO;
 import com.bigdata.modules.development.service.execution.ExecutionStrategyFactory;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import jakarta.validation.Valid;
@@ -104,8 +105,10 @@ public class DatasourceConfigController {
     }
 
     @GetMapping("/types")
-    public Result<List<DatasourceType>> getDatasourceTypes() {
-        return Result.success(DatasourceType.allTypes());
+    public Result<List<DatasourceTypeMetaVO>> getDatasourceTypes() {
+        return Result.success(DatasourceType.allTypes().stream()
+                .map(DatasourceTypeMetaVO::from)
+                .collect(Collectors.toList()));
     }
 
     @GetMapping("/connection-types")

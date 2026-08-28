@@ -231,6 +231,63 @@ class CodeExecutionServiceValidateTest {
         assertEquals(1, result.get("statementCount"));
     }
 
+    // ==================== PostgreSQL 校验 ====================
+
+    @Test
+    @DisplayName("PostgreSQL 合法建表DDL - valid=true 且使用 BEGIN...ROLLBACK 包裹")
+    void postgresql_validCreateTable_usesTransactionWrap() throws SQLException {
+        prepareDatasource(newConfig("pg-ds", DatasourceType.POSTGRESQL, "test_db"));
+
+        Map<String, Object> result = codeExecutionService.validateSqlSyntax(
+                request("CREATE TABLE t (id INT, name VARCHAR(20))", "pg-ds"));
+
+        assertEquals(true, result.get("valid"));
+        assertEquals("POSTGRESQL", result.get("engine"));
+        assertTrue(errors(result).isEmpty());
+
+        String validateSql = executedValidateSqls.stream()
+                .filter(s -> s.startsWith("BEGIN; "))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("未捕获到 PostgreSQL 校验SQL"));
+        assertEquals("BEGIN; CREATE TABLE t (id INT, name VARCHAR(20)); ROLLBACK", validateSql);
+    }
+
+    @Test
+    @DisplayName("PostgreSQL 建表语法错误 - valid=false 且错误信息被收集")
+    void postgresql_invalidCreateTable_reportsError() throws SQLException {
+        syntaxErrorSnippets.add("SELEC *");
+        prepareDatasource(newConfig("pg-ds", DatasourceType.POSTGRESQL, "test_db"));
+
+        Map<String, Object> result = codeExecutionService.validateSqlSyntax(
+                request("SELEC * FROM t", "pg-ds"));
+
+        assertEquals(false, result.get("valid"));
+        List<Map<String, Object>> errors = errors(result);
+        assertEquals(1, errors.size());
+        assertEquals(1, errors.get(0).get("index"));
+        assertEquals("SELEC * FROM t", errors.get(0).get("sql"));
+        // 失败后留下 aborted 事务，finally 中 ROLLBACK 清理
+        assertTrue(executedValidateSqls.stream().anyMatch(s -> s.trim().equals("ROLLBACK")));
+    }
+
+    @Test
+    @DisplayName("PostgreSQL 前一条出错后仍继续校验下一条 - valid=false 但两条均被校验")
+    void postgresql_afterError_continueToNextStatement() throws SQLException {
+        syntaxErrorSnippets.add("SELEC *");
+        prepareDatasource(newConfig("pg-ds", DatasourceType.POSTGRESQL, "test_db"));
+
+        Map<String, Object> result = codeExecutionService.validateSqlSyntax(
+                request("SELEC * FROM t; SELECT 1", "pg-ds"));
+
+        assertEquals(false, result.get("valid"));
+        assertEquals(2, result.get("statementCount"));
+        assertEquals(1, errors(result).size());
+        // 两条语句都构造了 BEGIN...ROLLBACK 校验（出错后未中断）
+        long beginCount = executedValidateSqls.stream()
+                .filter(s -> s.startsWith("BEGIN; ")).count();
+        assertEquals(2, beginCount);
+    }
+
     // ==================== 各引擎 buildValidateSql 产物 ====================
 
     @ParameterizedTest(name = "引擎 {0} - 校验SQL构造正确")
@@ -256,6 +313,10 @@ class CodeExecutionServiceValidateTest {
                 break;
             case CLICKHOUSE:
                 assertTrue(validateSql.startsWith("EXPLAIN SYNTAX"), engine + " 应使用 EXPLAIN SYNTAX");
+                break;
+            case POSTGRESQL:
+                assertTrue(validateSql.startsWith("BEGIN; "), engine + " 应使用 BEGIN...ROLLBACK 事务包裹");
+                assertTrue(validateSql.endsWith("ROLLBACK"), engine + " 应以 ROLLBACK 结尾");
                 break;
             default:
                 assertTrue(validateSql.startsWith("EXPLAIN ") && !validateSql.startsWith("EXPLAIN SYNTAX"),

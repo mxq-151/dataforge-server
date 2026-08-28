@@ -411,6 +411,8 @@ public class CodeExecutionService {
                         skipped++;
                         continue;
                     }
+                    log.error("SQL语法校验失败, 引擎={}, 数据源={}, 第{}条语句: [{}], 错误: {}",
+                            storageEngine, dsConfig.getDatasourceName(), i + 1, statement, e.getMessage());
                     Map<String, Object> err = new LinkedHashMap<>();
                     err.put("index", i + 1);
                     err.put("sql", statement);
@@ -421,9 +423,16 @@ public class CodeExecutionService {
                     if (storageEngine == DatasourceType.MYSQL) {
                         try { stmt.execute("DEALLOCATE PREPARE stmt"); } catch (Exception ignored) { }
                     }
+                    // PostgreSQL 的事务包裹校验在语句失败后会留下 aborted 事务，
+                    // 回滚清理，避免影响下一条语句的 BEGIN
+                    if (storageEngine == DatasourceType.POSTGRESQL) {
+                        try { stmt.execute("ROLLBACK"); } catch (Exception ignored) { }
+                    }
                 }
             }
         } catch (SQLException e) {
+            log.error("SQL语法校验失败, 引擎={}, 数据源={}, 连接数据源失败: {}",
+                    storageEngine, dsConfig.getDatasourceName(), e.getMessage());
             result.put("valid", false);
             result.put("message", "连接数据源失败: " + e.getMessage());
             return result;
@@ -454,6 +463,11 @@ public class CodeExecutionService {
                 return "PREPARE stmt FROM '" + escaped + "'";
             case CLICKHOUSE:
                 return "EXPLAIN SYNTAX " + statement;
+            case POSTGRESQL:
+                // 利用事务包裹 + 回滚做纯语法校验：
+                // PostgreSQL 的语法错误在 parse/analyze 阶段即抛出；
+                // DDL(CREATE TABLE等) 在事务内执行后可回滚，不落盘
+                return "BEGIN; " + statement + "; ROLLBACK";
             case DORIS:
             case STARROCKS:
             default:
