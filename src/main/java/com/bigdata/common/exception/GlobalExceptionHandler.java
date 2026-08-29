@@ -12,6 +12,7 @@ import org.springframework.security.authentication.InsufficientAuthenticationExc
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -69,6 +70,22 @@ public class GlobalExceptionHandler {
         String message = fieldError != null ? fieldError.getDefaultMessage() : "参数绑定失败";
         logger.error("参数绑定异常: {}", message);
         return Result.error(400, message);
+    }
+
+    /**
+     * 请求参数类型不匹配（如 {@code storageEngine=nope} 无法转换为 {@code DatasourceType}）。
+     * <p>
+     * 该异常此前会落到下面的 {@code Exception} 兜底分支，被当成系统异常返回 500；
+     * 实际属于调用方传参错误，应返回 400 并给出可读提示。
+     * </p>
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleTypeMismatchException(MethodArgumentTypeMismatchException e) {
+        logger.warn("参数类型不匹配: name={}, value={}, requiredType={}",
+                e.getName(), e.getValue(),
+                e.getRequiredType() != null ? e.getRequiredType().getSimpleName() : null);
+        return Result.error(400, "参数 " + e.getName() + " 取值非法: " + e.getValue());
     }
 
     @ExceptionHandler(Exception.class)

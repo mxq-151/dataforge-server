@@ -64,8 +64,11 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
 
     public List<ColumnMetadata> getColumnsByNames(DatasourceType storageEngine, String databaseName, String tableName) {
         LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ColumnMetadata::getStorageEngine, storageEngine)
-               .eq(ColumnMetadata::getDatabaseName, databaseName)
+        // 未指定存储引擎时（storageEngine 为空）省略该过滤条件，按库+表查询
+        if (storageEngine != null) {
+            wrapper.eq(ColumnMetadata::getStorageEngine, storageEngine);
+        }
+        wrapper.eq(ColumnMetadata::getDatabaseName, databaseName)
                .eq(ColumnMetadata::getTableName, tableName)
                .orderByAsc(ColumnMetadata::getOrdinalPosition);
         return columnMetadataMapper.selectList(wrapper);

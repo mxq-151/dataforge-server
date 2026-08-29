@@ -109,7 +109,7 @@ public class MetadataController {
 
     @GetMapping("/table/columns")
     public Result<List<ColumnMetadataVO>> getTableColumns(
-            @RequestParam(required = true)  DatasourceType storageEngine,
+            @RequestParam(required = false) DatasourceType storageEngine,
             @RequestParam(required = true)  String databaseName,
             @RequestParam(required = true)  String tableName) {
 

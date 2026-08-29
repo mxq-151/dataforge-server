@@ -1,5 +1,6 @@
 package com.bigdata.common.config;
 
+import com.bigdata.modules.devops.converter.StringToDatasourceTypeConverter;
 import com.bigdata.modules.knowledge.converter.StringToDocTypeConverter;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -25,6 +26,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addFormatters(FormatterRegistry registry) {
         registry.addConverter(new StringToDocTypeConverter());
+        registry.addConverter(new StringToDatasourceTypeConverter());
     }
 
     @Bean
