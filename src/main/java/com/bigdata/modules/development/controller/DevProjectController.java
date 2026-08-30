@@ -103,7 +103,7 @@ public class DevProjectController {
         dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_READ);
         ProgramParams params = programParamsService.getByProjectIdAndFilePath(projectId, filePath);
         if (params == null) {
-            throw new BusinessException("未找到对应的程序参数记录");
+            return Result.success();
         }
         return Result.success(toParamsVO(params));
     }
