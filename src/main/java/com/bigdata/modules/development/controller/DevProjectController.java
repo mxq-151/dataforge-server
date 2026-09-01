@@ -10,6 +10,7 @@ import com.bigdata.modules.development.entity.DevProject;
 import com.bigdata.modules.development.entity.ProgramParams;
 import com.bigdata.modules.development.service.DevProjectService;
 import com.bigdata.modules.development.service.ProgramParamsService;
+import com.bigdata.modules.development.vo.DevJarDependencyVO;
 import com.bigdata.modules.development.vo.DevProjectVO;
 import com.bigdata.modules.development.vo.ProgramParamsVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -108,37 +109,19 @@ public class DevProjectController {
         return Result.success(toParamsVO(params));
     }
 
-    @PostMapping("/{projectId}/params")
-    public Result<Void> saveProgramParams(
+    @PutMapping("/{projectId}/params")
+    public Result<Void> upsertProgramParams(
             @PathVariable Long projectId,
             @Valid @RequestBody ProgramParamsDTO dto) {
         dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_EDIT);
         try {
             dto.setProjectId(projectId);
-            programParamsService.save(dto);
+            programParamsService.upsert(dto);
             return Result.success();
         } catch (BusinessException e) {
             return Result.error(e.getMessage());
         } catch (Exception e) {
             return Result.error("保存程序参数失败: " + e.getMessage());
-        }
-    }
-
-    @PutMapping("/{projectId}/params")
-    public Result<Void> updateProgramParams(
-            @PathVariable Long projectId,
-            @RequestParam(required = true) String filePath,
-            @Valid @RequestBody ProgramParamsDTO dto) {
-        dataAccessPermissionService.checkProjectPermission(projectId, DataAccessPermissionService.PROJECT_PERMISSION_EDIT);
-        try {
-            dto.setProjectId(projectId);
-            dto.setFilePath(filePath);
-            programParamsService.update(dto);
-            return Result.success();
-        } catch (BusinessException e) {
-            return Result.error(e.getMessage());
-        } catch (Exception e) {
-            return Result.error("更新程序参数失败: " + e.getMessage());
         }
     }
 
@@ -177,7 +160,7 @@ public class DevProjectController {
                 vo.setDatasources(objectMapper.readValue(entity.getDatasources(), new TypeReference<List<String>>() {}));
             }
             if (entity.getJarDependencyCatalogs() != null && !entity.getJarDependencyCatalogs().isEmpty()) {
-                vo.setJarDependencyCatalogs(objectMapper.readValue(entity.getJarDependencyCatalogs(), new TypeReference<List<String>>() {}));
+                vo.setJarDependencyCatalogs(objectMapper.readValue(entity.getJarDependencyCatalogs(), new TypeReference<List<DevJarDependencyVO>>() {}));
             }
             if (entity.getRunParams() != null && !entity.getRunParams().isEmpty()) {
                 vo.setRunParams(objectMapper.readValue(entity.getRunParams(), new TypeReference<java.util.Map<String, Object>>() {}));

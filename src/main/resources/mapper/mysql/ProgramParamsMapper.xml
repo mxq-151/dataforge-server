@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.development.mapper.ProgramParamsMapper">
+
+    <!-- MySQL 方言：按联合主键 (project_id, file_path) upsert，ON DUPLICATE KEY UPDATE。
+         更新子句直接引用参数属性，避免已废弃的 VALUES() 函数，兼容 MySQL 8.0.20+ -->
+    <insert id="upsert" databaseId="mysql">
+        INSERT INTO dev_program_params
+          (project_id, file_path, engine, datasources, jar_dependency_catalogs,
+           run_params, compute_resources, remark, create_time, update_time, deleted)
+        VALUES
+          (#{entity.projectId}, #{entity.filePath}, #{entity.engine}, #{entity.datasources}, #{entity.jarDependencyCatalogs},
+           #{entity.runParams}, #{entity.computeResources}, #{entity.remark}, NOW(), NOW(), 0)
+        ON DUPLICATE KEY UPDATE
+          engine = #{entity.engine},
+          datasources = #{entity.datasources},
+          jar_dependency_catalogs = #{entity.jarDependencyCatalogs},
+          run_params = #{entity.runParams},
+          compute_resources = #{entity.computeResources},
+          remark = #{entity.remark},
+          update_time = NOW()
+    </insert>
+
+</mapper>

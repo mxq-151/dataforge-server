@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.development.mapper.ProgramParamsMapper">
+
+    <!-- H2 方言：MERGE INTO ... KEY(project_id, file_path)，联合主键冲突时更新全部业务列。
+         注意：H2 MERGE 在冲突更新时也会刷新 update_time（与现有 IndicatorMapper 的 H2 处理一致） -->
+    <insert id="upsert" databaseId="h2">
+        MERGE INTO dev_program_params
+          (project_id, file_path, engine, datasources, jar_dependency_catalogs,
+           run_params, compute_resources, remark, create_time, update_time, deleted)
+        KEY(project_id, file_path)
+        VALUES
+          (#{entity.projectId}, #{entity.filePath}, #{entity.engine}, #{entity.datasources}, #{entity.jarDependencyCatalogs},
+           #{entity.runParams}, #{entity.computeResources}, #{entity.remark}, NOW(), NOW(), 0)
+    </insert>
+
+</mapper>

@@ -1,10 +1,22 @@
 package com.bigdata.modules.development.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.bigdata.common.entity.BaseEntity;
 
+import java.io.Serializable;
+import java.time.LocalDateTime;
+
+/**
+ * 程序运行参数表。
+ * <p>
+ * 主键为联合主键 (project_id, file_path)，无自增 id 列。
+ * upsert 由数据库原生 SQL 实现（见 mapper/{mysql,mariadb,postgresql,h2}/ProgramParamsMapper.xml）。
+ */
 @TableName("dev_program_params")
-public class ProgramParams extends BaseEntity {
+public class ProgramParams implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private Long projectId;
 
@@ -21,6 +33,14 @@ public class ProgramParams extends BaseEntity {
     private String computeResources;
 
     private String remark;
+
+    @TableField(fill = FieldFill.INSERT)
+    private LocalDateTime createTime;
+
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime updateTime;
+
+    private Integer deleted;
 
     public Long getProjectId() {
         return projectId;
@@ -84,5 +104,29 @@ public class ProgramParams extends BaseEntity {
 
     public void setRemark(String remark) {
         this.remark = remark;
+    }
+
+    public LocalDateTime getCreateTime() {
+        return createTime;
+    }
+
+    public void setCreateTime(LocalDateTime createTime) {
+        this.createTime = createTime;
+    }
+
+    public LocalDateTime getUpdateTime() {
+        return updateTime;
+    }
+
+    public void setUpdateTime(LocalDateTime updateTime) {
+        this.updateTime = updateTime;
+    }
+
+    public Integer getDeleted() {
+        return deleted;
+    }
+
+    public void setDeleted(Integer deleted) {
+        this.deleted = deleted;
     }
 }

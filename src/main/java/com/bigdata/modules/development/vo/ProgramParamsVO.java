@@ -13,7 +13,7 @@ public class ProgramParamsVO implements Serializable {
     private String filePath;
     private String engine;
     private List<String> datasources;
-    private List<String> jarDependencyCatalogs;
+    private List<DevJarDependencyVO> jarDependencyCatalogs;
     private Map<String, Object> runParams;
     private Map<String, Object> computeResources;
     private String remark;
@@ -52,11 +52,11 @@ public class ProgramParamsVO implements Serializable {
         this.datasources = datasources;
     }
 
-    public List<String> getJarDependencyCatalogs() {
+    public List<DevJarDependencyVO> getJarDependencyCatalogs() {
         return jarDependencyCatalogs;
     }
 
-    public void setJarDependencyCatalogs(List<String> jarDependencyCatalogs) {
+    public void setJarDependencyCatalogs(List<DevJarDependencyVO> jarDependencyCatalogs) {
         this.jarDependencyCatalogs = jarDependencyCatalogs;
     }
 

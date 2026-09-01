@@ -116,7 +116,6 @@ COMMENT ON TABLE dev_jar_dependency IS 'JAR包依赖配置表';
 
 -- 程序运行参数表
 CREATE TABLE IF NOT EXISTS dev_program_params (
-  id BIGSERIAL,
   project_id BIGINT NOT NULL,
   file_path VARCHAR(500) NOT NULL,
   engine VARCHAR(50),
@@ -128,10 +127,8 @@ CREATE TABLE IF NOT EXISTS dev_program_params (
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted SMALLINT NOT NULL DEFAULT 0,
-  PRIMARY KEY (id),
-  CONSTRAINT uk_project_file UNIQUE (project_id, file_path)
+  PRIMARY KEY (project_id, file_path)
 );
-CREATE INDEX IF NOT EXISTS idx_dev_program_params_project_id ON dev_program_params (project_id);
 COMMENT ON TABLE dev_program_params IS '程序运行参数表';
 
 -- 开发项目管理表

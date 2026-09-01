@@ -40,42 +40,27 @@ public class ProgramParamsService {
         );
     }
 
+    /**
+     * 保存或更新程序参数（upsert）：
+     * 由数据库原生 SQL 按联合主键 (project_id, file_path) 实现原子 upsert，
+     * 存在则更新，不存在则插入，避免先查后写的两段式逻辑与并发竞态。
+     */
     @Transactional
-    public void save(ProgramParamsDTO dto) {
-        ProgramParams existing = getByProjectIdAndFilePath(dto.getProjectId(), dto.getFilePath());
-        if (existing != null) {
-            throw new BusinessException("该项目的文件运行参数已存在，请使用更新接口");
-        }
-
+    public void upsert(ProgramParamsDTO dto) {
         ProgramParams entity = convertToEntity(dto);
-        programParamsMapper.insert(entity);
-        log.info("程序参数保存成功: projectId={}, filePath={}", dto.getProjectId(), dto.getFilePath());
-    }
-
-    @Transactional
-    public void update(ProgramParamsDTO dto) {
-        ProgramParams existing = getByProjectIdAndFilePath(dto.getProjectId(), dto.getFilePath());
-        if (existing == null) {
-            throw new BusinessException("未找到对应的程序参数记录");
-        }
-
-        ProgramParams entity = convertToEntity(dto);
-        entity.setId(existing.getId());
-
-        int rows = programParamsMapper.updateById(entity);
-        if (rows == 0) {
-            throw new BusinessException("更新失败");
-        }
-        log.info("程序参数更新成功: projectId={}, filePath={}", dto.getProjectId(), dto.getFilePath());
+        programParamsMapper.upsert(entity);
+        log.info("程序参数upsert成功: projectId={}, filePath={}", dto.getProjectId(), dto.getFilePath());
     }
 
     @Transactional
     public void delete(Long projectId, String filePath) {
-        ProgramParams existing = getByProjectIdAndFilePath(projectId, filePath);
-        if (existing == null) {
+        int rows = programParamsMapper.delete(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ProgramParams>()
+                        .eq(ProgramParams::getProjectId, projectId)
+                        .eq(ProgramParams::getFilePath, filePath));
+        if (rows == 0) {
             throw new BusinessException("未找到对应的程序参数记录");
         }
-        programParamsMapper.deleteById(existing.getId());
         log.info("程序参数删除成功: projectId={}, filePath={}", projectId, filePath);
     }
 

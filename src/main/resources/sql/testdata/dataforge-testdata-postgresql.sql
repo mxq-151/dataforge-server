@@ -8,6 +8,7 @@
 --   * 测试租户、租户用户、租户角色
 --   * 测试数据源 test_datasource（指向 PG 演示库 test_db，见 test_db-postgresql.sql）
 --   * 库表资源授权（test_db 读写）与项目权限、测试项目
+--   * JAR 依赖包配置 dev_jar_dependency（spark 核心依赖 + PG JDBC 驱动）
 -- 说明：带唯一键的语句走 ON CONFLICT，可重复执行；datasource_config /
 --       sys_table_permission 无唯一键，重复导入会插入重复行（init 脚本已按
 --       test 用户存在性做幂等保护，正常流程不会重复执行）
@@ -55,6 +56,15 @@ INSERT INTO sys_role_project_permission (id, role_id, project_id, permission_typ
 (1,1,1,3,'2026-07-13 15:17:00'),(45,3,1,2,'2026-07-13 15:59:02')
 ON CONFLICT (role_id, project_id) DO NOTHING;
 
+-- JAR 依赖包配置（与 dataforge-allinone 容器内已初始化的数据保持一致）：
+--   * spark-sql/spark-core：source=system，jar 位于 Spark 安装目录 lib/，auto_choose=1 自动随任务携带
+--   * postgresql JDBC 驱动：source=custom，jar 位于 /opt/dataforge/jars/，需显式勾选
+INSERT INTO dev_jar_dependency (id, jar_name, group_id, artifact_id, version, scope, source, jar_path, repository_url, file_size, checksum, status, description, category, program_type, auto_choose, create_time, update_time, deleted) VALUES
+(1,'spark-sql_2.12-3.5.9.jar','org.apache.spark','spark-sql_2.12','3.5.9','compile','system',NULL,NULL,NULL,NULL,1,NULL,'','spark',1,'2026-07-13 15:17:00','2026-07-13 15:17:00',0),
+(2,'spark-core_2.12-3.5.9.jar','org.apache.spark','spark-core_2.12','3.5.9','compile','system',NULL,NULL,NULL,NULL,1,NULL,'','spark',1,'2026-07-13 15:17:00','2026-07-13 15:17:00',0),
+(3,'postgresql-42.7.12.jar','org.postgresql','postgresql','42.7.12','compile','custom','postgresql-42.7.12.jar',NULL,NULL,NULL,1,'PostgreSQL JDBC 驱动','数据库驱动','spark',0,'2026-07-13 15:17:00','2026-07-13 15:17:00',0)
+ON CONFLICT (id) DO NOTHING;
+
 -- 测试租户（密码与 test 用户一致，AES 加密）
 INSERT INTO sys_tenant (id, tenant_name, tenant_code, contact_name, contact_phone, contact_email, description, status, owner_id, password, create_time, update_time, deleted) VALUES
 (1,'测试租户','test_tenant','测试联系人','13800138000','test@example.com','系统初始化测试租户',1,3,'3UcRXfVuO9KPvpqKUXMswQ==','2026-07-13 15:17:00','2026-07-13 15:17:00',0)
@@ -98,5 +108,6 @@ SELECT setval(pg_get_serial_sequence('sys_tenant_role','id'), (SELECT COALESCE(M
 SELECT setval(pg_get_serial_sequence('datasource_config','id'), (SELECT COALESCE(MAX(id),1) FROM datasource_config));
 SELECT setval(pg_get_serial_sequence('sys_table_permission','id'), (SELECT COALESCE(MAX(id),1) FROM sys_table_permission));
 SELECT setval(pg_get_serial_sequence('sys_role_table_permission','id'), (SELECT COALESCE(MAX(id),1) FROM sys_role_table_permission));
+SELECT setval(pg_get_serial_sequence('dev_jar_dependency','id'), (SELECT COALESCE(MAX(id),1) FROM dev_jar_dependency));
 
 COMMIT;

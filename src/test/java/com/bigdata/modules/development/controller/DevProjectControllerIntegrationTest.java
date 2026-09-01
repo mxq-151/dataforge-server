@@ -5,15 +5,21 @@ import com.bigdata.common.security.CustomUserDetails;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.dto.DevProjectDTO;
+import com.bigdata.modules.development.dto.DevJarDependencyDTO;
 import com.bigdata.modules.development.dto.ProgramParamsDTO;
 import com.bigdata.modules.development.entity.DevProject;
+import com.bigdata.modules.development.entity.ProgramParams;
 import com.bigdata.modules.development.mapper.DevProjectMapper;
+import com.bigdata.modules.development.service.ProgramParamsService;
+import com.bigdata.modules.development.vo.DevJarDependencyVO;
 import com.bigdata.modules.development.vo.DevProjectVO;
 import com.bigdata.modules.development.vo.ProgramParamsVO;
 import com.bigdata.modules.system.entity.SysRoleProjectPermission;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysRoleProjectPermissionMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -47,6 +53,9 @@ class DevProjectControllerIntegrationTest {
 
     @Autowired
     private SysRoleProjectPermissionMapper sysRoleProjectPermissionMapper;
+
+    @Autowired
+    private ProgramParamsService programParamsService;
 
     @BeforeEach
     void setUp() {
@@ -102,6 +111,18 @@ class DevProjectControllerIntegrationTest {
         project.setDeleted(0);
         devProjectMapper.insert(project);
         return project.getId();
+    }
+
+    private List<DevJarDependencyDTO> buildJarDependencies(String... jarNames) {
+        List<DevJarDependencyDTO> list = new ArrayList<>();
+        for (String jarName : jarNames) {
+            DevJarDependencyDTO dep = new DevJarDependencyDTO();
+            dep.setJarName(jarName);
+            dep.setArtifactId(jarName);
+            dep.setVersion("1.0.0");
+            list.add(dep);
+        }
+        return list;
     }
 
     private void grantProjectPermissionToRole(Long roleId, Long projectId, int permissionType) {
@@ -385,7 +406,7 @@ class DevProjectControllerIntegrationTest {
             dto.setFilePath("/scripts/test_script.sql");
             dto.setEngine("spark");
             dto.setDatasources(Arrays.asList("ds_mysql", "ds_clickhouse"));
-            dto.setJarDependencyCatalogs(Arrays.asList("jar_spark", "jar_hive"));
+            dto.setJarDependencyCatalogs(buildJarDependencies("jar_spark", "jar_hive"));
             Map<String, Object> runParams = new HashMap<>();
             runParams.put("driverMemory", "4g");
             runParams.put("executorMemory", "8g");
@@ -397,7 +418,7 @@ class DevProjectControllerIntegrationTest {
             dto.setComputeResources(computeResources);
             dto.setRemark("测试参数备注");
 
-            Result<Void> result = devProjectController.saveProgramParams(projectId, dto);
+            Result<Void> result = devProjectController.upsertProgramParams(projectId, dto);
 
             assertEquals(200, result.getCode(), "保存程序参数应成功");
             System.out.println("  项目ID: " + projectId);
@@ -431,7 +452,7 @@ class DevProjectControllerIntegrationTest {
             dto.setFilePath("/scripts/parse_test.sql");
             dto.setEngine("flink");
             dto.setDatasources(Arrays.asList("ds1", "ds2", "ds3"));
-            dto.setJarDependencyCatalogs(Arrays.asList("jar1"));
+            dto.setJarDependencyCatalogs(buildJarDependencies("jar1"));
             Map<String, Object> runParams = new LinkedHashMap<>();
             runParams.put("parallelism", 8);
             runParams.put("checkpointInterval", 60000);
@@ -439,7 +460,7 @@ class DevProjectControllerIntegrationTest {
             dto.setComputeResources(Collections.singletonMap("taskManagerMemory", "4g"));
             dto.setRemark("JSON解析测试");
 
-            devProjectController.saveProgramParams(projectId, dto);
+            devProjectController.upsertProgramParams(projectId, dto);
 
             Result<ProgramParamsVO> result = devProjectController.getProgramParams(projectId, "/scripts/parse_test.sql");
 
@@ -452,7 +473,8 @@ class DevProjectControllerIntegrationTest {
             assertTrue(vo.getDatasources().contains("ds3"), "应包含ds3");
 
             assertEquals(1, vo.getJarDependencyCatalogs().size(), "jarDependencyCatalogs应为1个元素");
-            assertEquals("jar1", vo.getJarDependencyCatalogs().get(0));
+            assertEquals("jar1", vo.getJarDependencyCatalogs().get(0).getJarName(), "JAR名称应为jar1");
+            assertEquals("jar1", vo.getJarDependencyCatalogs().get(0).getArtifactId(), "artifactId应为jar1");
 
             assertEquals(8, vo.getRunParams().get("parallelism"));
             assertEquals(60000, vo.getRunParams().get("checkpointInterval"));
@@ -480,19 +502,19 @@ class DevProjectControllerIntegrationTest {
             originalDto.setEngine("spark");
             originalDto.setDatasources(Arrays.asList("original_ds"));
             originalDto.setRemark("原始参数");
-            devProjectController.saveProgramParams(projectId, originalDto);
+            devProjectController.upsertProgramParams(projectId, originalDto);
 
             ProgramParamsDTO updateDto = new ProgramParamsDTO();
             updateDto.setFilePath(filePath);
             updateDto.setEngine("flink");
             updateDto.setDatasources(Arrays.asList("updated_ds1", "updated_ds2"));
-            updateDto.setJarDependencyCatalogs(Arrays.asList("new_jar"));
+            updateDto.setJarDependencyCatalogs(buildJarDependencies("new_jar"));
             Map<String, Object> newRunParams = new HashMap<>();
             newRunParams.put("newKey", "newValue");
             updateDto.setRunParams(newRunParams);
             updateDto.setRemark("更新后的参数");
 
-            Result<Void> result = devProjectController.updateProgramParams(projectId, filePath, updateDto);
+            Result<Void> result = devProjectController.upsertProgramParams(projectId, updateDto);
 
             assertEquals(200, result.getCode(), "更新应成功");
 
@@ -521,7 +543,7 @@ class DevProjectControllerIntegrationTest {
             dto.setFilePath(filePath);
             dto.setEngine("spark");
             dto.setRemark("待删除的参数");
-            devProjectController.saveProgramParams(projectId, dto);
+            devProjectController.upsertProgramParams(projectId, dto);
 
             Result<ProgramParamsVO> beforeDelete = devProjectController.getProgramParams(projectId, filePath);
             assertNotNull(beforeDelete.getData(), "删除前参数应存在");
@@ -529,17 +551,16 @@ class DevProjectControllerIntegrationTest {
             Result<Void> deleteResult = devProjectController.deleteProgramParams(projectId, filePath);
             assertEquals(200, deleteResult.getCode(), "删除应返回200");
 
-            BusinessException exception = assertThrows(BusinessException.class, () -> {
-                devProjectController.getProgramParams(projectId, filePath);
-            }, "删除后再查询应抛出BusinessException");
-            assertTrue(exception.getMessage().contains("未找到"), "提示未找到记录");
-            System.out.println("  删除后再查询: 抛出BusinessException ✓");
+            Result<ProgramParamsVO> afterDelete = devProjectController.getProgramParams(projectId, filePath);
+            assertEquals(200, afterDelete.getCode(), "删除后查询应返回200");
+            assertNull(afterDelete.getData(), "删除后查询data应为null");
+            System.out.println("  删除后再查询: data为null ✓");
         }
 
         @Test
-        @DisplayName("❌ 保存重复的程序参数 - 抛出BusinessException")
-        void testSaveProgramParams_Duplicate_ThrowsException() {
-            System.out.println("\n=== 场景3.5: 保存重复程序参数被拒 ===");
+        @DisplayName("✅ upsert重复的程序参数 - 覆盖更新为最新值")
+        void testUpsertProgramParams_Duplicate_Overwrites() {
+            System.out.println("\n=== 场景3.5: upsert重复程序参数覆盖更新 ===");
             setUpAdminSecurityContext();
 
             Long projectId = createProjectInDB("ParamDupProj", "PDUP001");
@@ -548,50 +569,59 @@ class DevProjectControllerIntegrationTest {
             ProgramParamsDTO dto1 = new ProgramParamsDTO();
             dto1.setFilePath(filePath);
             dto1.setEngine("spark");
-            devProjectController.saveProgramParams(projectId, dto1);
+            dto1.setRemark("第一次保存");
+            Result<Void> firstResult = devProjectController.upsertProgramParams(projectId, dto1);
+            assertEquals(200, firstResult.getCode(), "首次upsert应创建成功");
 
             ProgramParamsDTO dto2 = new ProgramParamsDTO();
             dto2.setFilePath(filePath);
             dto2.setEngine("flink");
+            dto2.setRemark("第二次覆盖");
 
-            Result<Void> result = devProjectController.saveProgramParams(projectId, dto2);
-            assertEquals(500, result.getCode(), "重复保存应返回错误");
-            assertTrue(result.getMessage().contains("已存在") || result.getMessage().contains("更新"),
-                    "错误消息应提示使用更新接口");
-            System.out.println("  重复保存: " + result.getMessage() + " ✓");
+            Result<Void> result = devProjectController.upsertProgramParams(projectId, dto2);
+            assertEquals(200, result.getCode(), "重复upsert应覆盖更新成功而非报错");
+
+            Result<ProgramParamsVO> queryResult = devProjectController.getProgramParams(projectId, filePath);
+            assertEquals("flink", queryResult.getData().getEngine(), "引擎应被覆盖为flink");
+            assertEquals("第二次覆盖", queryResult.getData().getRemark(), "备注应被覆盖");
+            System.out.println("  重复upsert: 覆盖更新成功, engine=" + queryResult.getData().getEngine() + " ✓");
         }
 
         @Test
-        @DisplayName("❌ 查询不存在的程序参数 - 抛出BusinessException")
-        void testGetProgramParams_NotFound_ThrowsException() {
+        @DisplayName("✅ 查询不存在的程序参数 - 返回200且data为null")
+        void testGetProgramParams_NotFound_ReturnsNull() {
             System.out.println("\n=== 场景3.6: 查询不存在的程序参数 ===");
             setUpAdminSecurityContext();
 
             Long projectId = createProjectInDB("ParamNotFoundProj", "PNFP001");
 
-            BusinessException exception = assertThrows(BusinessException.class, () -> {
-                devProjectController.getProgramParams(projectId, "/scripts/non_existent.sql");
-            }, "不存在的程序参数应抛出BusinessException");
-
-            assertTrue(exception.getMessage().contains("未找到"), "异常消息应包含'未找到'");
-            System.out.println("  异常消息: " + exception.getMessage() + " ✓");
+            Result<ProgramParamsVO> result = devProjectController.getProgramParams(projectId, "/scripts/non_existent.sql");
+            assertEquals(200, result.getCode(), "查询不存在应返回200");
+            assertNull(result.getData(), "查询不存在data应为null");
+            System.out.println("  查询不存在参数: 返回200, data为null ✓");
         }
 
         @Test
-        @DisplayName("❌ 更新不存在的程序参数 - 抛出BusinessException")
-        void testUpdateProgramParams_NotFound_ThrowsException() {
-            System.out.println("\n=== 场景3.7: 更新不存在的程序参数 ===");
+        @DisplayName("✅ upsert不存在的程序参数 - 自动创建记录")
+        void testUpsertProgramParams_NotFound_Creates() {
+            System.out.println("\n=== 场景3.7: upsert不存在程序参数自动创建 ===");
             setUpAdminSecurityContext();
 
             Long projectId = createProjectInDB("ParamUpdNotFoundProj", "PUNFP001");
+            String filePath = "/scripts/non_existent.sql";
 
             ProgramParamsDTO dto = new ProgramParamsDTO();
+            dto.setFilePath(filePath);
             dto.setEngine("spark");
+            dto.setRemark("upsert自动创建");
 
-            Result<Void> result = devProjectController.updateProgramParams(projectId, "/scripts/non_existent.sql", dto);
-            assertEquals(500, result.getCode(), "更新不存在参数应返回错误");
-            assertTrue(result.getMessage().contains("未找到"), "错误消息应包含'未找到'");
-            System.out.println("  更新不存在参数: " + result.getMessage() + " ✓");
+            Result<Void> result = devProjectController.upsertProgramParams(projectId, dto);
+            assertEquals(200, result.getCode(), "upsert不存在的参数应自动创建成功");
+
+            Result<ProgramParamsVO> queryResult = devProjectController.getProgramParams(projectId, filePath);
+            assertNotNull(queryResult.getData(), "创建后应能查询到记录");
+            assertEquals("spark", queryResult.getData().getEngine(), "引擎应为spark");
+            System.out.println("  upsert不存在参数: 自动创建成功, engine=" + queryResult.getData().getEngine() + " ✓");
         }
 
         @Test
@@ -621,7 +651,7 @@ class DevProjectControllerIntegrationTest {
             dto.setEngine("spark");
             dto.setRemark("仅设置必填字段和engine");
 
-            Result<Void> result = devProjectController.saveProgramParams(projectId, dto);
+            Result<Void> result = devProjectController.upsertProgramParams(projectId, dto);
             assertEquals(200, result.getCode(), "仅必填字段应保存成功");
 
             Result<ProgramParamsVO> queryResult = devProjectController.getProgramParams(projectId, "/scripts/empty_json.sql");
@@ -631,6 +661,105 @@ class DevProjectControllerIntegrationTest {
             assertNullOrNull(vo.getRunParams(), "未设置runParams应为null或空");
             assertNullOrNull(vo.getComputeResources(), "未设置computeResources应为null或空");
             System.out.println("  空JSON字段正常处理 ✓");
+        }
+    }
+
+    @Nested
+    @DisplayName("场景3补充: ProgramParamsService.upsert 服务层验证(绕过Controller权限检查)")
+    class ProgramParamsServiceUpsertTests {
+
+        private ProgramParamsDTO buildParamsDTO(Long projectId, String filePath, String engine, String remark) {
+            ProgramParamsDTO dto = new ProgramParamsDTO();
+            dto.setProjectId(projectId);
+            dto.setFilePath(filePath);
+            dto.setEngine(engine);
+            dto.setRemark(remark);
+            return dto;
+        }
+
+        @Test
+        @DisplayName("✅ upsert - 不存在记录时执行insert插入")
+        void testUpsert_InsertWhenNotExists() {
+            System.out.println("\n=== upsert服务层: 不存在则插入 ===");
+            Long projectId = createProjectInDB("UpsertInsertProj", "UIP001");
+
+            programParamsService.upsert(buildParamsDTO(projectId, "/scripts/upsert_insert.sql", "spark", "插入分支"));
+
+            ProgramParams inserted = programParamsService.getByProjectIdAndFilePath(projectId, "/scripts/upsert_insert.sql");
+            assertNotNull(inserted, "upsert后应能查询到记录");
+            assertEquals("spark", inserted.getEngine(), "引擎应为spark");
+            assertEquals("插入分支", inserted.getRemark(), "备注应为插入分支");
+            System.out.println("  插入分支验证通过: filePath=" + inserted.getFilePath() + " ✓");
+        }
+
+        @Test
+        @DisplayName("✅ upsert - 已存在记录时执行update覆盖且不产生新记录")
+        void testUpsert_UpdateWhenExists() {
+            System.out.println("\n=== upsert服务层: 存在则覆盖更新 ===");
+            Long projectId = createProjectInDB("UpsertUpdateProj", "UUP001");
+            String filePath = "/scripts/upsert_update.sql";
+
+            programParamsService.upsert(buildParamsDTO(projectId, filePath, "spark", "旧值"));
+            ProgramParams first = programParamsService.getByProjectIdAndFilePath(projectId, filePath);
+            assertEquals("spark", first.getEngine(), "首次应为spark");
+
+            programParamsService.upsert(buildParamsDTO(projectId, filePath, "flink", "新值"));
+
+            ProgramParams updated = programParamsService.getByProjectIdAndFilePath(projectId, filePath);
+            assertEquals("flink", updated.getEngine(), "引擎应覆盖为flink");
+            assertEquals("新值", updated.getRemark(), "备注应覆盖为新值");
+            assertEquals(1, programParamsService.listByProjectId(projectId).size(), "覆盖更新不应产生新记录");
+            System.out.println("  覆盖更新分支验证通过: filePath=" + updated.getFilePath() + " ✓");
+        }
+
+        @Test
+        @DisplayName("✅ upsert - jarDependencyCatalogs对象JSON入库并反序列化为DevJarDependencyVO")
+        void testUpsert_JarDependencyCatalogsRoundTrip() {
+            System.out.println("\n=== upsert服务层: jarDependencyCatalogs 对象JSON往返 ===");
+            Long projectId = createProjectInDB("UpsertJarProj", "UJP001");
+
+            DevJarDependencyDTO dep = new DevJarDependencyDTO();
+            dep.setJarName("hive-connector");
+            dep.setArtifactId("hive-connector");
+            dep.setGroupId("org.apache.hive");
+            dep.setVersion("3.1.3");
+            dep.setProgramType("spark");
+
+            ProgramParamsDTO dto = buildParamsDTO(projectId, "/scripts/jar_test.sql", "spark", "JAR测试");
+            dto.setJarDependencyCatalogs(Collections.singletonList(dep));
+            programParamsService.upsert(dto);
+
+            ProgramParams saved = programParamsService.getByProjectIdAndFilePath(projectId, "/scripts/jar_test.sql");
+            assertNotNull(saved.getJarDependencyCatalogs(), "入库JSON不应为null");
+            assertTrue(saved.getJarDependencyCatalogs().contains("hive-connector"), "JSON应包含jarName字段");
+
+            try {
+                List<DevJarDependencyVO> vos = new ObjectMapper()
+                        .readValue(saved.getJarDependencyCatalogs(), new TypeReference<List<DevJarDependencyVO>>() {});
+                assertEquals(1, vos.size(), "应反序列化为1个DevJarDependencyVO");
+                assertEquals("hive-connector", vos.get(0).getJarName(), "jarName应正确");
+                assertEquals("org.apache.hive", vos.get(0).getGroupId(), "groupId应正确");
+                assertEquals("3.1.3", vos.get(0).getVersion(), "version应正确");
+                System.out.println("  jarDependencyCatalogs JSON往返验证通过: " + saved.getJarDependencyCatalogs() + " ✓");
+            } catch (Exception e) {
+                fail("反序列化为DevJarDependencyVO失败: " + e.getMessage());
+            }
+        }
+
+        @Test
+        @DisplayName("✅ delete - 按联合主键(projectId,filePath)删除记录")
+        void testDelete_ByCompositeKey() {
+            System.out.println("\n=== 服务层: 按联合主键删除 ===");
+            Long projectId = createProjectInDB("UpsertDeleteProj", "UDP001");
+            String filePath = "/scripts/upsert_delete.sql";
+
+            programParamsService.upsert(buildParamsDTO(projectId, filePath, "spark", "待删除"));
+            assertNotNull(programParamsService.getByProjectIdAndFilePath(projectId, filePath), "删除前记录应存在");
+
+            programParamsService.delete(projectId, filePath);
+
+            assertNull(programParamsService.getByProjectIdAndFilePath(projectId, filePath), "删除后记录应不存在");
+            System.out.println("  按联合主键删除验证通过 ✓");
         }
     }
 
@@ -984,12 +1113,7 @@ class DevProjectControllerIntegrationTest {
             sparkConf.put("spark.driver.maxResultSize", "4g");
             complexRunParams.put("spark.conf", sparkConf);
 
-            List<String> extraJars = Arrays.asList(
-                    "hdfs:///jars/dep1.jar",
-                    "hdfs:///jars/dep2.jar",
-                    "hdfs:///jars/dep3.jar"
-            );
-            dto.setJarDependencyCatalogs(extraJars);
+            dto.setJarDependencyCatalogs(buildJarDependencies("dep1", "dep2", "dep3"));
             dto.setRunParams(complexRunParams);
 
             Map<String, Object> resources = new LinkedHashMap<>();
@@ -999,7 +1123,7 @@ class DevProjectControllerIntegrationTest {
             resources.put("executorMemory", "16g");
             dto.setComputeResources(resources);
 
-            Result<Void> result = devProjectController.saveProgramParams(projectId, dto);
+            Result<Void> result = devProjectController.upsertProgramParams(projectId, dto);
             assertEquals(200, result.getCode(), "复杂嵌套JSON应保存成功");
 
             Result<ProgramParamsVO> queryResult = devProjectController.getProgramParams(projectId, "/scripts/nested_test.sql");
@@ -1033,7 +1157,7 @@ class DevProjectControllerIntegrationTest {
             dto.setRunParams(Collections.emptyMap());
             dto.setComputeResources(Collections.emptyMap());
 
-            Result<Void> result = devProjectController.saveProgramParams(projectId, dto);
+            Result<Void> result = devProjectController.upsertProgramParams(projectId, dto);
             assertEquals(200, result.getCode(), "空列表应保存成功");
 
             Result<ProgramParamsVO> queryResult = devProjectController.getProgramParams(projectId, "/scripts/empty_list.sql");
@@ -1057,13 +1181,13 @@ class DevProjectControllerIntegrationTest {
             dtoA.setFilePath(samePath);
             dtoA.setEngine("spark");
             dtoA.setRemark("项目A的参数");
-            devProjectController.saveProgramParams(projectA, dtoA);
+            devProjectController.upsertProgramParams(projectA, dtoA);
 
             ProgramParamsDTO dtoB = new ProgramParamsDTO();
             dtoB.setFilePath(samePath);
             dtoB.setEngine("flink");
             dtoB.setRemark("项目B的参数");
-            devProjectController.saveProgramParams(projectB, dtoB);
+            devProjectController.upsertProgramParams(projectB, dtoB);
 
             Result<ProgramParamsVO> resultA = devProjectController.getProgramParams(projectA, samePath);
             Result<ProgramParamsVO> resultB = devProjectController.getProgramParams(projectB, samePath);
@@ -1093,7 +1217,7 @@ class DevProjectControllerIntegrationTest {
                 dto.setFilePath(files[i]);
                 dto.setEngine(engines[i]);
                 dto.setRemark("文件" + (i + 1) + "的参数");
-                devProjectController.saveProgramParams(projectId, dto);
+                devProjectController.upsertProgramParams(projectId, dto);
             }
 
             for (int i = 0; i < files.length; i++) {

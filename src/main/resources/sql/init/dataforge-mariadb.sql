@@ -106,7 +106,6 @@ CREATE TABLE IF NOT EXISTS `dev_jar_dependency` (
 
 -- 程序运行参数表
 CREATE TABLE IF NOT EXISTS `dev_program_params` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID(自增)',
   `project_id` bigint NOT NULL COMMENT '项目ID',
   `file_path` varchar(500) NOT NULL COMMENT '文件路径',
   `engine` varchar(50) DEFAULT NULL COMMENT '执行引擎类型',
@@ -118,10 +117,8 @@ CREATE TABLE IF NOT EXISTS `dev_program_params` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_project_file` (`project_id`,`file_path`),
-  KEY `idx_project_id` (`project_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='程序运行参数表';
+  PRIMARY KEY (`project_id`,`file_path`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='程序运行参数表';
 
 -- 开发项目管理表
 CREATE TABLE IF NOT EXISTS `dev_project` (

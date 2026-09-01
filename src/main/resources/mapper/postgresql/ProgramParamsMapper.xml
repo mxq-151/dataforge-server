@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.development.mapper.ProgramParamsMapper">
+
+    <!-- PostgreSQL 方言：按联合主键 (project_id, file_path) upsert，
+         ON CONFLICT ... DO UPDATE + EXCLUDED 伪表 -->
+    <insert id="upsert" databaseId="postgresql">
+        INSERT INTO dev_program_params
+          (project_id, file_path, engine, datasources, jar_dependency_catalogs,
+           run_params, compute_resources, remark, create_time, update_time, deleted)
+        VALUES
+          (#{entity.projectId}, #{entity.filePath}, #{entity.engine}, #{entity.datasources}, #{entity.jarDependencyCatalogs},
+           #{entity.runParams}, #{entity.computeResources}, #{entity.remark}, NOW(), NOW(), 0)
+        ON CONFLICT (project_id, file_path) DO UPDATE SET
+          engine = EXCLUDED.engine,
+          datasources = EXCLUDED.datasources,
+          jar_dependency_catalogs = EXCLUDED.jar_dependency_catalogs,
+          run_params = EXCLUDED.run_params,
+          compute_resources = EXCLUDED.compute_resources,
+          remark = EXCLUDED.remark,
+          update_time = NOW()
+    </insert>
+
+</mapper>
