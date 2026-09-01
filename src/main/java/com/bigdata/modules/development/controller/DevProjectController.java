@@ -6,6 +6,7 @@ import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.dto.DevProjectDTO;
 import com.bigdata.modules.development.dto.ProgramParamsDTO;
+import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.development.entity.DevProject;
 import com.bigdata.modules.development.entity.ProgramParams;
 import com.bigdata.modules.development.service.DevProjectService;
@@ -37,6 +38,9 @@ public class DevProjectController {
 
     @Autowired
     private DataAccessPermissionService dataAccessPermissionService;
+
+    @Autowired
+    private EngineProperties engineProperties;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -160,7 +164,10 @@ public class DevProjectController {
                 vo.setDatasources(objectMapper.readValue(entity.getDatasources(), new TypeReference<List<String>>() {}));
             }
             if (entity.getJarDependencyCatalogs() != null && !entity.getJarDependencyCatalogs().isEmpty()) {
-                vo.setJarDependencyCatalogs(objectMapper.readValue(entity.getJarDependencyCatalogs(), new TypeReference<List<DevJarDependencyVO>>() {}));
+                List<DevJarDependencyVO> jarDependencyCatalogs = objectMapper.readValue(entity.getJarDependencyCatalogs(), new TypeReference<List<DevJarDependencyVO>>() {});
+                String basePath = engineProperties.getJar().getBasePath();
+                jarDependencyCatalogs.forEach(item -> item.setBasePath(basePath));
+                vo.setJarDependencyCatalogs(jarDependencyCatalogs);
             }
             if (entity.getRunParams() != null && !entity.getRunParams().isEmpty()) {
                 vo.setRunParams(objectMapper.readValue(entity.getRunParams(), new TypeReference<java.util.Map<String, Object>>() {}));

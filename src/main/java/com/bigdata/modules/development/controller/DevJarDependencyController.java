@@ -2,6 +2,7 @@ package com.bigdata.modules.development.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
+import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.development.dto.DevJarDependencyDTO;
 import com.bigdata.modules.development.entity.DevJarDependency;
 import com.bigdata.modules.development.service.DevJarDependencyService;
@@ -21,6 +22,9 @@ public class DevJarDependencyController {
 
     @Autowired
     private DevJarDependencyService devJarDependencyService;
+
+    @Autowired
+    private EngineProperties engineProperties;
 
     @GetMapping("/list")
     public Result<Page<DevJarDependencyVO>> getList(
@@ -89,6 +93,7 @@ public class DevJarDependencyController {
     private DevJarDependencyVO toVO(DevJarDependency entity) {
         DevJarDependencyVO vo = new DevJarDependencyVO();
         BeanUtils.copyProperties(entity, vo);
+        vo.setBasePath(engineProperties.getJar().getBasePath());
         return vo;
     }
 }

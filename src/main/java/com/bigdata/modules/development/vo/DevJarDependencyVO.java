@@ -15,6 +15,7 @@ public class DevJarDependencyVO implements Serializable {
     private String scope;
     private String source;
     private String jarPath;
+    private String basePath;
     private String repositoryUrl;
     private Long fileSize;
     private String checksum;
@@ -88,6 +89,14 @@ public class DevJarDependencyVO implements Serializable {
 
     public void setJarPath(String jarPath) {
         this.jarPath = jarPath;
+    }
+
+    public String getBasePath() {
+        return basePath;
+    }
+
+    public void setBasePath(String basePath) {
+        this.basePath = basePath;
     }
 
     public String getRepositoryUrl() {
