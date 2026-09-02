@@ -23,7 +23,7 @@ public class CodeExecutionRequest {
 
     private String uploadedJarPath;
 
-    private List<String> jarDependencyCatalogs;
+    private List<DevJarDependencyDTO> jarDependencyCatalogs;
 
     private Map<String, Object> runParams;
 
@@ -87,11 +87,11 @@ public class CodeExecutionRequest {
         this.datasources = datasources;
     }
 
-    public List<String> getJarDependencyCatalogs() {
+    public List<DevJarDependencyDTO> getJarDependencyCatalogs() {
         return jarDependencyCatalogs;
     }
 
-    public void setJarDependencyCatalogs(List<String> jarDependencyCatalogs) {
+    public void setJarDependencyCatalogs(List<DevJarDependencyDTO> jarDependencyCatalogs) {
         this.jarDependencyCatalogs = jarDependencyCatalogs;
     }
 

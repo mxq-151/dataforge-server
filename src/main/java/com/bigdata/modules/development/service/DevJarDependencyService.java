@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.development.config.EngineProperties;
+import com.bigdata.modules.development.dto.DevJarDependencyDTO;
 import com.bigdata.modules.development.entity.DevJarDependency;
 import com.bigdata.modules.development.mapper.DevJarDependencyMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -85,22 +86,29 @@ public class DevJarDependencyService {
     }
 
     /**
-     * 将 JAR 目录名（catalog）解析为完整的文件路径 {@code basePath/{jarPath}}。
+     * 将 JAR 依赖对象列表解析为完整的文件路径 {@code basePath/{jarPath}}。
      * <p>
-     * 目录名可能是 JAR 名称、artifactId 或 jarPath，这里统一按 jarName/jarPath 精确匹配，
+     * 优先使用对象携带的 jarPath；若缺失，则按 jarName/jarPath 精确匹配数据库，
      * 解析后拼接配置文件中的 jar.base-path，得到 Spark/Flink 提交时 --jars 使用的完整路径。
      */
-    public List<String> resolveJarFullPaths(List<String> catalogs) {
+    public List<String> resolveJarFullPaths(List<DevJarDependencyDTO> catalogs) {
         List<String> result = new java.util.ArrayList<>();
         if (catalogs == null || catalogs.isEmpty()) {
             return result;
         }
         String basePath = engineProperties.getJar().getBasePath();
-        for (String catalog : catalogs) {
-            if (catalog == null || catalog.trim().isEmpty()) {
+        for (DevJarDependencyDTO catalog : catalogs) {
+            if (catalog == null) {
                 continue;
             }
-            String fullPath = resolveToFullPath(catalog.trim(), basePath);
+            String jarPath = catalog.getJarPath();
+            if (jarPath == null || jarPath.trim().isEmpty()) {
+                jarPath = catalog.getJarName();
+            }
+            if (jarPath == null || jarPath.trim().isEmpty()) {
+                continue;
+            }
+            String fullPath = resolveToFullPath(jarPath.trim(), basePath);
             if (fullPath != null) {
                 result.add(fullPath);
             }

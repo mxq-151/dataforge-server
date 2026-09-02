@@ -1,6 +1,7 @@
 package com.bigdata.modules.development.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 public class DevJarDependencyDTO {
@@ -11,14 +12,21 @@ public class DevJarDependencyDTO {
     @Size(max = 200, message = "JAR名称不能超过200字符")
     private String jarName;
 
+    @NotBlank(message = "groupId不能为空")
     private String groupId;
 
+    @NotBlank(message = "artifactId不能为空")
     private String artifactId;
 
+    @NotBlank(message = "version不能为空")
     private String version;
 
+    @NotBlank(message = "作用域(scope)不能为空")
+    @Size(max = 20, message = "作用域不能超过20字符")
     private String scope;
 
+    @NotBlank(message = "来源(source)不能为空")
+    @Size(max = 20, message = "来源不能超过20字符")
     private String source;
 
     private String jarPath;
@@ -29,6 +37,7 @@ public class DevJarDependencyDTO {
 
     private String checksum;
 
+
     private Integer status;
 
     @Size(max = 500, message = "描述不能超过500字符")
@@ -37,8 +46,10 @@ public class DevJarDependencyDTO {
     private String category;
 
     @NotBlank(message = "程序类型不能为空")
+    @Size(max = 20, message = "程序类型不能超过20字符")
     private String programType;
 
+    @NotNull(message = "自动选择(autoChoose)不能为空")
     private Integer autoChoose;
 
     public Long getId() {
