@@ -253,15 +253,19 @@ public class AuditLogService {
         String dateStr = beforeTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         try {
             List<String> expiredPartitions = auditLogMapper.selectExpiredPartitions(dateStr);
-            for (String partitionName : expiredPartitions) {
-                auditLogMapper.dropPartition(partitionName);
+            if (!expiredPartitions.isEmpty()) {
+                for (String partitionName : expiredPartitions) {
+                    auditLogMapper.dropPartition(partitionName);
+                }
+                return expiredPartitions.size();
             }
-            return expiredPartitions.size();
         } catch (Exception e) {
-            LambdaQueryWrapper<OperationAuditLog> wrapper = new LambdaQueryWrapper<>();
-            wrapper.lt(OperationAuditLog::getOperationTime, beforeTime);
-            return auditLogMapper.delete(wrapper);
+            // 分区查询/删除失败时回退到普通 DELETE
         }
+        // PostgreSQL/H2 等普通表（无分区）或无需清理分区时，走 DELETE 兜底
+        LambdaQueryWrapper<OperationAuditLog> wrapper = new LambdaQueryWrapper<>();
+        wrapper.lt(OperationAuditLog::getOperationTime, beforeTime);
+        return auditLogMapper.delete(wrapper);
     }
 
     private String getClientIp(HttpServletRequest request) {

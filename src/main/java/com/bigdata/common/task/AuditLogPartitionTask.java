@@ -20,9 +20,10 @@ import java.util.Set;
  * 审计日志分区维护定时任务。
  *
  * <p>分区的查询与 DDL 语句统一定义在各方言 mapper XML 中：
- * MySQL/MariaDB 见 mapper/mysql|mariadb/OperationAuditLogMapper.xml（REORGANIZE/DROP PARTITION），
- * PostgreSQL 见 mapper/postgresql/OperationAuditLogMapper.xml（CREATE TABLE ... PARTITION OF / DROP TABLE）。
- * H2 2.x 不支持表分区，任务直接跳过。</p>
+ * MySQL/MariaDB 见 mapper/mysql|mariadb/OperationAuditLogMapper.xml（REORGANIZE/DROP PARTITION）。
+ * PostgreSQL 的 operation_audit_log 按普通表建立（见 dataforge-postgresql.sql），
+ * 不参与分区预创建/清理，过期数据清理走 AuditLogService#deleteLogsBefore 的 DELETE 兜底；
+ * H2 2.x 同样不支持表分区，任务直接跳过。</p>
  *
  * <p>operation_audit_log 子分区统一命名为 pYYYYMMDD（按日 RANGE），跨库保持一致。</p>
  */
@@ -69,21 +70,16 @@ public class AuditLogPartitionTask {
         return "mysql".equals(d) || "mariadb".equals(d);
     }
 
-    private boolean isPostgres() {
-        return "postgresql".equals(dialect());
-    }
-
     /**
      * 每日 02:00 执行：确保未来 CREATE_DAYS_AHEAD 天每天都有 pYYYYMMDD 分区。
+     * 仅 MySQL/MariaDB 使用日分区；PostgreSQL/H2 为普通表，跳过。
      */
     @Scheduled(cron = "0 0 2 * * ?")
     public void createNextPartition() {
         if (isPartitionFamily()) {
             createNextPartitionMySQL();
-        } else if (isPostgres()) {
-            createNextPartitionPostgres();
         } else {
-            logger.info("数据库 {} 不支持表分区，跳过审计日志分区预创建", dialect());
+            logger.info("数据库 {} 不支持表分区（PostgreSQL/H2 采用普通表 + DELETE 兜底清理），跳过审计日志分区预创建", dialect());
         }
     }
 
@@ -112,38 +108,12 @@ public class AuditLogPartitionTask {
     }
 
     /**
-     * PostgreSQL：逐日 CREATE TABLE ... PARTITION OF，边界为 [当日, 次日)。
-     */
-    private void createNextPartitionPostgres() {
-        try {
-            Set<String> existing = new HashSet<>(auditLogMapper.selectAllPartitionNames());
-            List<String> created = new ArrayList<>();
-            for (int i = 0; i < CREATE_DAYS_AHEAD; i++) {
-                LocalDate partDate = LocalDate.now().plusDays(i);
-                String partitionName = "p" + partDate.format(PARTITION_DATE_FMT);
-                if (!existing.contains(partitionName)) {
-                    auditLogMapper.createPartition(partitionName,
-                            partDate.format(CUTOFF_DATE_FMT),
-                            partDate.plusDays(1).format(CUTOFF_DATE_FMT));
-                    created.add(partitionName);
-                }
-            }
-            if (!created.isEmpty()) {
-                logger.info("已创建审计日志分区: {}", created);
-            }
-            logger.info("审计日志分区自动检查完成，已保障未来 {} 天分区", CREATE_DAYS_AHEAD);
-        } catch (Exception e) {
-            logger.error("审计日志分区自动创建失败", e);
-        }
-    }
-
-    /**
      * 每月 1 号 03:00 执行：清理 RETENTION_DAYS 天之前的过期日分区（永不删除 p_max）。
-     * 仅 MySQL/MariaDB/PostgreSQL 使用分区清理；H2 等不支持分区的库跳过。
+     * 仅 MySQL/MariaDB 使用分区清理；PostgreSQL/H2 等不支持分区的库跳过。
      */
     @Scheduled(cron = "0 0 3 1 * ?")
     public void cleanupExpiredPartitions() {
-        if (!isPartitionFamily() && !isPostgres()) {
+        if (!isPartitionFamily()) {
             logger.info("数据库 {} 不支持表分区，跳过审计日志分区清理", dialect());
             return;
         }
