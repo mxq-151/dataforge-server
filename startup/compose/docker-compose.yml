@@ -1,0 +1,19 @@
+# dataforge All-in-One 运行编排(单容器)
+# 先构建镜像: docker build --network=host -t dataforge-allinone:1.0 .
+# 再启动:     docker compose up -d
+name: dataforge-docker
+services:
+  dataforge:
+    image: dataforge-allinone:1.0
+    container_name: dataforge-allinone
+    restart: unless-stopped
+    ports:
+      - "8082:8082"   # dataforge-server (http://localhost:8082/api)
+      - "5432:5432"   # PostgreSQL
+      - "12345:12345" # DolphinScheduler UI (http://localhost:12345/dolphinscheduler/ui)
+      - "5000:5000"   # Marquez API (macOS 本机 5000 常被 AirPlay 占用,故映射 5001)
+      - "5001:5001"   # Marquez API admin
+      - "3000:3000"   # Marquez Web UI (http://localhost:3000)
+    # 不挂载数据卷:数据(PostgreSQL / opt/dataforge)写入容器内,
+    # 便于镜像自包含分发;容器删除后数据随之丢失,如需持久化再挂载命名卷。
+    mem_limit: 8g

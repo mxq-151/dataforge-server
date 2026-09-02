@@ -2,6 +2,12 @@
 # ============================================================
 # dataforge All-in-One 镜像构建脚本(调整版)
 #
+# 全量构建脚本(已收敛到本目录,不依赖父目录脚本)
+#
+#   * Dockerfile 源文件: build/Dockerfile(DolphinScheduler 已内置 Spark 任务插件)。
+#   * 构建上下文 = 项目根 dataforge-server/(src / pom 供 Maven 编译),
+#     镜像构建产物(dist/conf/scripts/sql)均收敛在 build/ 下。
+#
 # 相比原 dataforge-docker/build.sh 的改进:
 #   * 默认只增量更新 dataforge-server 的 jar:宿主机 mvn 重编译 -> 基于已有
 #     基础镜像 Dockerfile 覆盖新 jar 生成新镜像,秒级完成,适合日常迭代。
@@ -29,15 +35,20 @@
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVER_DIR="$SCRIPT_DIR"
-DOCKER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"     # dataforge-docker(基础 Dockerfile / dist / scripts / conf)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"     # 本脚本所在目录 build/
+SERVER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"      # 项目根 dataforge-server/(构建上下文: pom / src 在其下)
+BUILD_DIR="$SCRIPT_DIR"                          # 镜像构建目录 build/(Dockerfile / dist / conf / scripts / sql)
+DIST_DIR="$BUILD_DIR/dist"                      # 发行包目录 build/dist/
 
 IMAGE_NAME="${IMAGE_NAME:-dataforge-allinone}"
 IMAGE_TAG="${IMAGE_TAG:-dataforge-allinone:1.0}"
 IMAGE_VER="${IMAGE_VER:-1.0}"
 REGISTRY="${REGISTRY:-}"                       # 多平台 push 的仓库前缀,如 docker.io/me
-PROXY="${PROXY:-http://127.0.0.1:7890}"        # 仅 FULL=1 全量构建使用
+# 仅 FULL=1 全量构建使用;不设置 / 置空 / 置 `off` 均走直连(本机无法连通 7890 时必须直连)
+case "${PROXY:-no_proxy}" in
+  no_proxy|off|OFF|none) PROXY="" ;;   # 不设置 / 空 / off => 直连
+  *) : ;;
+esac
 FULL="${FULL:-0}"                              # 1=全量重建,0=仅更新 jar(默认)
 SKIP_TESTS="${SKIP_TESTS:-true}"
 JAR_NAME="${JAR_NAME:-dataforge-server-1.0.0-SNAPSHOT.jar}"
@@ -90,8 +101,8 @@ build_jar_only() {
   fi
   [ -f "$HOST_JAR" ] || { echo "!! 打包产物不存在: $HOST_JAR"; exit 1; }
 
-  # 搭建独立的精简构建上下文(仅 jar + Dockerfile),避免父目录 .dockerignore
-  # 中 `**/target/` 排除 jar,也不把 dataforge-server/target 其余文件送入上下文。
+  # 搭建独立的精简构建上下文(仅 jar + Dockerfile),避免 dataforge-server/.dockerignore
+  # 中 `**/target/` 排除 jar,也不把 target 其余文件送入上下文。
   local staging; staging="$(mktemp -d)"
   trap 'rm -rf "$staging"' EXIT
   cp "$HOST_JAR" "$staging/dataforge-server.jar"
@@ -112,13 +123,13 @@ DOCKEREOF
 
 # ---------- 2) 全量重建(基础镜像) ----------
 ensure_dist() {
-  mkdir -p "$DOCKER_DIR/dist"
+  mkdir -p "$DIST_DIR"
   fetch_one() {
     local name="${1:?}" url="${2:?}"
-    if [ -f "$DOCKER_DIR/dist/$name" ]; then echo "    已存在: dist/$name"; return 0; fi
+    if [ -f "$DIST_DIR/$name" ]; then echo "    已存在: build/dist/$name"; return 0; fi
     echo "==> 下载发行包: $name"
-    if [ -n "$PROXY" ]; then curl -fsSL --proxy "$PROXY" -o "$DOCKER_DIR/dist/$name" "$url"
-    else curl -fsSL -o "$DOCKER_DIR/dist/$name" "$url"; fi
+    if [ -n "$PROXY" ]; then curl -fsSL --proxy "$PROXY" -o "$DIST_DIR/$name" "$url"
+    else curl -fsSL -o "$DIST_DIR/$name" "$url"; fi
   }
   fetch_one spark-3.5.9-bin-hadoop3.tgz \
             https://archive.apache.org/dist/spark/spark-3.5.9/spark-3.5.9-bin-hadoop3.tgz
@@ -126,15 +137,21 @@ ensure_dist() {
             https://archive.apache.org/dist/dolphinscheduler/3.4.1/apache-dolphinscheduler-3.4.1-bin.tar.gz
   fetch_one marquez-0.51.1.tar.gz \
             https://github.com/MarquezProject/marquez/archive/refs/tags/0.51.1.tar.gz
+  # DolphinScheduler 3.4.1 发行包不内置任务插件(plugins/为空)!
+  # 必须单独补下 Spark 任务插件(shade 包),放入 plugins/task-plugins/,
+  # 否则创建 SPARK 任务会报: Cannot find TaskChannel for : SPARK
+  fetch_one dolphinscheduler-task-spark-3.4.1-shade.jar \
+            https://repo1.maven.org/maven2/org/apache/dolphinscheduler/dolphinscheduler-task-spark/3.4.1/dolphinscheduler-task-spark-3.4.1-shade.jar
 }
 
 build_full() {
-  echo "==> 检查/补下本地发行包($DOCKER_DIR/dist/)"
+  echo "==> 检查/补下本地发行包($DIST_DIR/)"
   ensure_dist
 
   # docker-container 构建器容器内通过 host.docker.internal 访问宿主代理
   HOST_PROXY="http://host.docker.internal:7890"
-  local args=(-t "$FULL_TAG" --platform "$PLATFORMS" $(load_push) -f "$DOCKER_DIR/Dockerfile")
+  # Dockerfile: build/Dockerfile; 构建上下文 = 项目根 $SERVER_DIR(需 src / pom 供 app-builder 阶段)
+  local args=(-t "$FULL_TAG" --platform "$PLATFORMS" $(load_push) -f "$BUILD_DIR/Dockerfile")
 
   if [ -n "$PROXY" ]; then
     echo "==> 宿代理: $PROXY -> buildkit 内地址: $HOST_PROXY(请确认代理已开启)"
@@ -155,7 +172,7 @@ build_full() {
   fi
 
   echo "==> 全量构建 $FULL_TAG(编译 dataforge-server / Marquez 依赖耗时较长)"
-  docker buildx build $builder "${args[@]}" "$DOCKER_DIR"
+  docker buildx build $builder "${args[@]}" "$SERVER_DIR"
   echo "==> 全量构建完成: $FULL_TAG"
 }
 
@@ -170,6 +187,6 @@ else
 fi
 
 echo
-echo "下一步: docker compose up -d (-f $DOCKER_DIR/docker-compose.yml)"
+echo "下一步: ./startup/macos/compose.sh up -d (默认无卷; PERSIST=1 持久化; ./startup/macos/compose.sh reset 清旧卷数据)"
 echo "日志:   docker logs -f dataforge-allinone"
-echo "热替换(不改镜像): $SERVER_DIR/hot-update-dataforge-server.sh"
+echo "热替换(不改镜像): $SCRIPT_DIR/hot-update-dataforge-server.sh"

@@ -1,0 +1,19 @@
+# dataforge All-in-One 可选持久化 override
+#
+# 用途: 以命名卷持久化 PostgreSQL 数据与 /opt/dataforge 数据。
+# 用法(与基础 docker-compose.yml 叠加, 两者均位于 startup/compose/):
+#   docker compose -f docker-compose.yml -f docker-compose.persist.yml up -d
+#   或使用封装脚本: PERSIST=1 ./startup/macos/compose.sh up -d (Windows: startup\windows\compose.bat)
+#
+# 基础文件(docker-compose.yml)默认无卷挂载, 数据写在容器内;
+# 叠加本文件后挂载命名卷, 容器删除/重建数据保留。
+name: dataforge-docker
+services:
+  dataforge:
+    volumes:
+      - df-pgdata:/var/lib/postgresql/14/main          # PostgreSQL 数据
+      - df-data:/opt/dataforge                          # warehouse / DS-H2 / 上传 jar
+
+volumes:
+  df-pgdata:
+  df-data:

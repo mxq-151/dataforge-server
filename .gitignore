@@ -84,8 +84,12 @@ jacoco.exec
 # Package Files
 *.zip
 *.tar.gz
+*.tgz
 *.rar
 
 # H2 database (if used locally)
 *.mv.db
 *.trace.db
+
+# Docker 构建产物(build/dist 为下载型发行包, 由 build.sh ensure_dist 运行时补齐, 不入库)
+build/dist/

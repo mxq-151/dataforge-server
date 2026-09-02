@@ -18,7 +18,7 @@
 # ============================================================
 set -euo pipefail
 
-SERVER_DIR="$(cd "$(dirname "$0")" && pwd)"
+SERVER_DIR="$(cd "$(dirname "$0")/.." && pwd)"     # 项目根 dataforge-server/(target/ 在其下)
 
 CONTAINER="${CONTAINER:-dataforge-allinone}"
 CONTAINER_JAR_PATH="${CONTAINER_JAR_PATH:-/opt/dataforge/dataforge-server.jar}"
