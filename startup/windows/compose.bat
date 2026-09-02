@@ -25,9 +25,9 @@ if "%CMD%"=="" set "CMD=up"
 
 if /i "%CMD%"=="reset" goto :reset
 
-set "FILES=-f "%COMPOSE_DIR%\docker-compose.yml"
+set "FILES=-f "%COMPOSE_DIR%\docker-compose.yml""
 if "%PERSIST%"=="1" (
-  set "FILES=!FILES! -f "%COMPOSE_DIR%\docker-compose.persist.yml"
+  set "FILES=!FILES! -f "%COMPOSE_DIR%\docker-compose.persist.yml""
   echo ==^> 持久化模式: 挂载命名卷 df-pgdata / df-data
 ) else (
   echo ==^> 无卷模式: 数据写入容器内 (如需持久化请 set PERSIST=1)
