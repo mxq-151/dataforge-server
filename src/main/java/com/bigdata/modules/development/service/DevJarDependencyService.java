@@ -84,6 +84,46 @@ public class DevJarDependencyService {
         devJarDependencyMapper.deleteById(id);
     }
 
+    /**
+     * 将 JAR 目录名（catalog）解析为完整的文件路径 {@code basePath/{jarPath}}。
+     * <p>
+     * 目录名可能是 JAR 名称、artifactId 或 jarPath，这里统一按 jarName/jarPath 精确匹配，
+     * 解析后拼接配置文件中的 jar.base-path，得到 Spark/Flink 提交时 --jars 使用的完整路径。
+     */
+    public List<String> resolveJarFullPaths(List<String> catalogs) {
+        List<String> result = new java.util.ArrayList<>();
+        if (catalogs == null || catalogs.isEmpty()) {
+            return result;
+        }
+        String basePath = engineProperties.getJar().getBasePath();
+        for (String catalog : catalogs) {
+            if (catalog == null || catalog.trim().isEmpty()) {
+                continue;
+            }
+            String fullPath = resolveToFullPath(catalog.trim(), basePath);
+            if (fullPath != null) {
+                result.add(fullPath);
+            }
+        }
+        return result;
+    }
+
+    private String resolveToFullPath(String catalog, String basePath) {
+        // 已含基础路径的绝对/相对完整路径，直接返回
+        if (catalog.startsWith("/") || catalog.contains("://")) {
+            return catalog;
+        }
+        // 精确匹配 jarName 或 jarPath
+        LambdaQueryWrapper<DevJarDependency> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(q -> q.eq(DevJarDependency::getJarName, catalog)
+                         .or().eq(DevJarDependency::getJarPath, catalog))
+               .eq(DevJarDependency::getStatus, 1)
+               .last("LIMIT 1");
+        DevJarDependency dep = devJarDependencyMapper.selectOne(wrapper);
+        String jarPath = dep != null ? dep.getJarPath() : catalog;
+        return basePath.trim().endsWith("/") ? basePath + jarPath : basePath + "/" + jarPath;
+    }
+
     public List<String> getJarSources() {
         return List.of("system", "custom");
     }

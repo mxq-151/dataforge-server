@@ -68,11 +68,19 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     private CodeExecutionResult executeFlinkJob(CodeExecutionContext context, String executionId) throws Exception {
         List<String> command = buildFlinkRunCommand(context);
 
-        log.info("Flink提交命令: {}", String.join(" ", command));
+        // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd）
+        Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs());
+
+        log.info("Flink提交命令: {}", DatasourceEnvHelper.maskPasswords(
+                String.join(" ", command), context.getDatasourceConfigs()));
         log.info("   - 执行ID: {}", executionId);
+        log.info("   - 数据源环境变量: {}", DatasourceEnvHelper.buildEnvDescription(datasourceEnv));
 
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.redirectErrorStream(true);
+        if (!datasourceEnv.isEmpty()) {
+            pb.environment().putAll(datasourceEnv);
+        }
 
         if (context.isJarExecutionMode() || context.getCodeType() == CodeType.PYTHON) {
             Process process = pb.start();
@@ -178,11 +186,19 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     private CodeExecutionResult executeFlinkSql(CodeExecutionContext context, String executionId) throws Exception {
         List<String> command = buildFlinkSqlCommand(context);
 
-        log.info("Flink SQL提交命令: {}", String.join(" ", command));
+        // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd）
+        Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs());
+
+        log.info("Flink SQL提交命令: {}", DatasourceEnvHelper.maskPasswords(
+                String.join(" ", command), context.getDatasourceConfigs()));
         log.info("   - 执行ID: {}", executionId);
+        log.info("   - 数据源环境变量: {}", DatasourceEnvHelper.buildEnvDescription(datasourceEnv));
 
         ProcessBuilder pb = new ProcessBuilder(command);
         pb.redirectErrorStream(true);
+        if (!datasourceEnv.isEmpty()) {
+            pb.environment().putAll(datasourceEnv);
+        }
         pb.redirectInput(ProcessBuilder.Redirect.PIPE);
         Process process = pb.start();
         String registeredId = processManager.registerProcess(
@@ -261,32 +277,24 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
     private void addComputeResources(List<String> command, CodeExecutionContext context) {
         Map<String, Object> resources = context.getComputeResources();
-        if (resources == null || resources.isEmpty()) {
-            return;
+        if (resources == null) {
+            resources = new java.util.HashMap<>();
         }
 
-        Object parallelism = resources.get("parallelism");
-        if (parallelism != null) {
-            command.add("-p");
-            command.add(parallelism.toString());
-        }
+        // 内存/cpu/实例数 未指定时使用默认值：2G / 1 CORE / 1 实例
+        command.add("-ytm");
+        command.add(String.valueOf(resources.getOrDefault("taskmanager-memory", "2G")));
+
+        command.add("-ys");
+        command.add(String.valueOf(resources.getOrDefault("task-slots", "1")));
+
+        command.add("-p");
+        command.add(String.valueOf(resources.getOrDefault("parallelism", "1")));
 
         Object jobManagerMemory = resources.get("jobmanager-memory");
         if (jobManagerMemory != null) {
             command.add("-yjm");
             command.add(jobManagerMemory.toString());
-        }
-
-        Object taskManagerMemory = resources.get("taskmanager-memory");
-        if (taskManagerMemory != null) {
-            command.add("-ytm");
-            command.add(taskManagerMemory.toString());
-        }
-
-        Object taskSlots = resources.get("task-slots");
-        if (taskSlots != null) {
-            command.add("-ys");
-            command.add(taskSlots.toString());
         }
 
         for (Map.Entry<String, Object> entry : resources.entrySet()) {
@@ -301,15 +309,13 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
     private void addComputeResourcesForSqlClient(List<String> command, CodeExecutionContext context) {
         Map<String, Object> resources = context.getComputeResources();
-        if (resources == null || resources.isEmpty()) {
-            return;
+        if (resources == null) {
+            resources = new java.util.HashMap<>();
         }
 
-        Object parallelism = resources.get("parallelism");
-        if (parallelism != null) {
-            command.add("--conf");
-            command.add("parallelism.default=" + parallelism.toString());
-        }
+        // 未指定并发度时使用默认值：1
+        command.add("--conf");
+        command.add("parallelism.default=" + resources.getOrDefault("parallelism", "1"));
     }
 
     private boolean isStandardResourceKey(String key) {
@@ -423,12 +429,10 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     }
 
     private void addJarDependencies(List<String> command, CodeExecutionContext context) {
+        // jarDependencies 为已解析的完整路径 basePath/{jarPath}，直接拼接
         List<String> jarDependencies = context.getJarDependencies();
         if (jarDependencies != null && !jarDependencies.isEmpty()) {
-            String basePath = engineProperties.getJar().getBasePath();
-            String joined = jarDependencies.stream()
-                    .map(jar -> basePath.trim().endsWith("/") ? basePath + jar : basePath + "/" + jar)
-                    .collect(java.util.stream.Collectors.joining(","));
+            String joined = String.join(",", jarDependencies);
             command.add("-C");
             command.add(joined);
         }

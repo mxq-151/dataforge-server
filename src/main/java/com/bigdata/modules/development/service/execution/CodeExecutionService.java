@@ -46,6 +46,9 @@ public class CodeExecutionService {
     @Autowired
     private ExecutionLogListener executionLogListener;
 
+    @Autowired
+    private com.bigdata.modules.development.service.DevJarDependencyService devJarDependencyService;
+
     /**
      * 同步执行代码（兼容旧接口）
      */
@@ -268,8 +271,10 @@ public class CodeExecutionService {
 
     private void loadJarDependencies(CodeExecutionContext context, List<String> jarCatalogs) {
         if (jarCatalogs != null && !jarCatalogs.isEmpty()) {
-            context.setJarDependencies(jarCatalogs);
-            log.info("   JAR依赖: {}", jarCatalogs);
+            // 解析为 basePath/{jarPath} 的完整路径，供 Spark/Flink 的 --jars 使用
+            List<String> fullPaths = devJarDependencyService.resolveJarFullPaths(jarCatalogs);
+            context.setJarDependencies(fullPaths);
+            log.info("   JAR依赖: {}", fullPaths);
         } else {
             log.debug("未指定JAR依赖");
         }

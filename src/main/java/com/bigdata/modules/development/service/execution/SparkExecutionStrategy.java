@@ -42,16 +42,24 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         try {
             List<String> command = buildCommand(context);
 
-            log.info("Spark提交命令: {}", String.join(" ", command));
+            // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd）
+            Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs());
+
+            log.info("Spark提交命令: {}", DatasourceEnvHelper.maskPasswords(
+                    String.join(" ", command), context.getDatasourceConfigs()));
             log.info("   - 执行ID: {}", executionId);
             log.info("   - 引擎类型: {}", context.getEngineType());
             log.info("   - 代码类型: {}", context.getCodeType());
             log.info("   - 数据源数量: {}", context.getDatasourceConfigs().size());
+            log.info("   - 数据源环境变量: {}", DatasourceEnvHelper.buildEnvDescription(datasourceEnv));
             log.info("   - 运行参数: {}", context.getRunParams());
             log.info("   - 计算资源: {}", context.getComputeResources());
 
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.redirectErrorStream(true);
+            if (!datasourceEnv.isEmpty()) {
+                pb.environment().putAll(datasourceEnv);
+            }
             Process process = pb.start();
 
             String registeredId = processManager.registerProcess(
@@ -150,34 +158,26 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
     private void addComputeResources(List<String> command, CodeExecutionContext context) {
         Map<String, Object> resources = context.getComputeResources();
-        if (resources == null || resources.isEmpty()) {
-            return;
+        if (resources == null) {
+            resources = new java.util.HashMap<>();
         }
 
         log.info("添加计算资源配置:");
+
+        // 内存/cpu/实例数 未指定时使用默认值：2G / 1 CORE / 1 实例
+        command.add("--executor-memory");
+        command.add(String.valueOf(resources.getOrDefault("executor-memory", "2G")));
+
+        command.add("--executor-cores");
+        command.add(String.valueOf(resources.getOrDefault("executor-cores", "1")));
+
+        command.add("--num-executors");
+        command.add(String.valueOf(resources.getOrDefault("num-executors", "1")));
 
         Object driverMemory = resources.get("driver-memory");
         if (driverMemory != null) {
             command.add("--driver-memory");
             command.add(driverMemory.toString());
-        }
-
-        Object executorMemory = resources.get("executor-memory");
-        if (executorMemory != null) {
-            command.add("--executor-memory");
-            command.add(executorMemory.toString());
-        }
-
-        Object executorCores = resources.get("executor-cores");
-        if (executorCores != null) {
-            command.add("--executor-cores");
-            command.add(executorCores.toString());
-        }
-
-        Object numExecutors = resources.get("num-executors");
-        if (numExecutors != null) {
-            command.add("--num-executors");
-            command.add(numExecutors.toString());
         }
 
         Object master = resources.get("master");
@@ -194,6 +194,10 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
         for (Map.Entry<String, Object> entry : resources.entrySet()) {
             String key = entry.getKey();
+            // 忽略线路(血缘)追踪配置，避免默认提交 spark.lineage.enabled=true
+            if (key.equals("lineage.enabled") || key.equals("spark.lineage.enabled") || key.startsWith("openlineage")) {
+                continue;
+            }
             if (!isStandardResourceKey(key)) {
                 Object value = entry.getValue();
                 command.add("--conf");
@@ -318,12 +322,10 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     }
 
     private void addJarDependencies(List<String> command, CodeExecutionContext context) {
+        // jarDependencies 为已解析的完整路径 basePath/{jarPath}，直接拼接
         List<String> jarDependencies = context.getJarDependencies();
         if (jarDependencies != null && !jarDependencies.isEmpty()) {
-            String basePath = engineProperties.getJar().getBasePath();
-            String joined = jarDependencies.stream()
-                    .map(jar -> basePath.trim().endsWith("/") ? basePath + jar : basePath + "/" + jar)
-                    .collect(java.util.stream.Collectors.joining(","));
+            String joined = String.join(",", jarDependencies);
             command.add("--jars");
             command.add(joined);
         }
