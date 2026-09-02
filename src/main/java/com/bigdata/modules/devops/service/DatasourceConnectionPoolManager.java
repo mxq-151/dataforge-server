@@ -315,10 +315,7 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
             hc.setPoolName("ds-" + config.getId() + "-" + SecurityUtils.getCurrentUsername());
             hc.setUsername(config.getUsername());
             // 数据库取出的密码已加密需要解密；测试连接传入的是明文不需要解密
-            String password = config.getPassword();
-            if (decryptConfigPassword) {
-                password = aesUtils.decryptStored(password);
-            }
+            String password = decryptConfigPassword ? config.getPlainPassword(aesUtils) : config.getPassword();
             hc.setPassword(password);
         } else {
             // 租户密码始终从数据库取（已加密），需要解密

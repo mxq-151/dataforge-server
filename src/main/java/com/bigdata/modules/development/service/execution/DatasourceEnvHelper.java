@@ -1,5 +1,6 @@
 package com.bigdata.modules.development.service.execution;
 
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 
 import java.util.LinkedHashMap;
@@ -27,8 +28,11 @@ public final class DatasourceEnvHelper {
 
     /**
      * 根据引用的数据源列表构造环境变量。
+     * <p>
+     * 数据库中保存的密码为密文，此处会通过 {@link AesUtils#decryptStored} 还原为明文，
+     * 供作业程序直接使用；若 {@code aesUtils} 为 null（如单元测试）则原样保留。
      */
-    public static Map<String, String> buildEnv(List<DatasourceConfig> datasourceConfigs) {
+    public static Map<String, String> buildEnv(List<DatasourceConfig> datasourceConfigs, AesUtils aesUtils) {
         Map<String, String> env = new LinkedHashMap<>();
         if (datasourceConfigs == null || datasourceConfigs.isEmpty()) {
             return env;
@@ -45,7 +49,7 @@ public final class DatasourceEnvHelper {
                 env.put(dsName + ".user", dsConfig.getUsername());
             }
             if (dsConfig.getPassword() != null) {
-                env.put(dsName + ".passwd", dsConfig.getPassword());
+                env.put(dsName + ".passwd", dsConfig.getPlainPassword(aesUtils));
             }
         }
         return env;
@@ -53,8 +57,9 @@ public final class DatasourceEnvHelper {
 
     /**
      * 将文本中的密码替换为掩码，用于安全打印（如提交命令、环境变量）。
+     * 需与 {@link #buildEnv} 使用相同的解密逻辑，才能匹配命令中的明文密码。
      */
-    public static String maskPasswords(String text, List<DatasourceConfig> datasourceConfigs) {
+    public static String maskPasswords(String text, List<DatasourceConfig> datasourceConfigs, AesUtils aesUtils) {
         if (text == null || datasourceConfigs == null || datasourceConfigs.isEmpty()) {
             return text;
         }
@@ -62,7 +67,7 @@ public final class DatasourceEnvHelper {
         for (DatasourceConfig dsConfig : datasourceConfigs) {
             String pwd = dsConfig.getPassword();
             if (pwd != null && !pwd.isBlank()) {
-                result = result.replace(pwd, MASK);
+                result = result.replace(dsConfig.getPlainPassword(aesUtils), MASK);
             }
         }
         return result;

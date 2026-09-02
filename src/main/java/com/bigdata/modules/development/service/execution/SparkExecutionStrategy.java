@@ -1,5 +1,6 @@
 package com.bigdata.modules.development.service.execution;
 
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
@@ -34,6 +35,9 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     @Autowired
     private ExecutionLogListener executionLogListener;
 
+    @Autowired
+    private AesUtils aesUtils;
+
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
         String executionId = context.getExecutionId();
@@ -42,11 +46,11 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         try {
             List<String> command = buildCommand(context);
 
-            // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd）
-            Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs());
+            // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd），密码自动解密为明文
+            Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs(), aesUtils);
 
             log.info("Spark提交命令: {}", DatasourceEnvHelper.maskPasswords(
-                    String.join(" ", command), context.getDatasourceConfigs()));
+                    String.join(" ", command), context.getDatasourceConfigs(), aesUtils));
             log.info("   - 执行ID: {}", executionId);
             log.info("   - 引擎类型: {}", context.getEngineType());
             log.info("   - 代码类型: {}", context.getCodeType());
@@ -238,7 +242,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
             if (dsConfig.getPassword() != null) {
                 command.add("--conf");
-                command.add(confPrefix + ".password=" + dsConfig.getPassword());
+                command.add(confPrefix + ".password=" + dsConfig.getPlainPassword(aesUtils));
             }
 
             if (dsConfig.getDatabaseName() != null && !dsConfig.getDatabaseName().isEmpty()) {

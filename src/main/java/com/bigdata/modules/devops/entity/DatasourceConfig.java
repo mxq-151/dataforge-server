@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.common.config.JsonStringListTypeHandler;
 import com.bigdata.common.entity.BaseEntity;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.modules.devops.enums.ConnectionType;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import java.time.LocalDateTime;
@@ -80,6 +81,22 @@ public class DatasourceConfig extends BaseEntity {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    /**
+     * 获取原始（明文）密码。数据库中存储的密码为 {@link AesUtils#encryptStored} 加密后的密文，
+     * 需要通过 {@link AesUtils#decryptStored} 还原为明文供连接、提交等场景使用。
+     * <p>
+     * 各业务方应统一调用本方法，避免各自重复实现解密逻辑。
+     *
+     * @param aesUtils AES 工具（实体非 Spring Bean，由调用方注入传入）
+     * @return 解密后的明文密码；密码为空或 aesUtils 为 null 时原样返回
+     */
+    public String getPlainPassword(AesUtils aesUtils) {
+        if (password == null || password.isEmpty() || aesUtils == null) {
+            return password;
+        }
+        return aesUtils.decryptStored(password);
     }
 
     public String getExtraParams() {

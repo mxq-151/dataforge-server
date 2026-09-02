@@ -1,5 +1,6 @@
 package com.bigdata.modules.development.service.execution;
 
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
@@ -36,6 +37,9 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     @Autowired
     private ExecutionLogListener executionLogListener;
 
+    @Autowired
+    private AesUtils aesUtils;
+
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
         String executionId = context.getExecutionId();
@@ -68,11 +72,11 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     private CodeExecutionResult executeFlinkJob(CodeExecutionContext context, String executionId) throws Exception {
         List<String> command = buildFlinkRunCommand(context);
 
-        // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd）
-        Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs());
+        // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd），密码自动解密为明文
+        Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs(), aesUtils);
 
         log.info("Flink提交命令: {}", DatasourceEnvHelper.maskPasswords(
-                String.join(" ", command), context.getDatasourceConfigs()));
+                String.join(" ", command), context.getDatasourceConfigs(), aesUtils));
         log.info("   - 执行ID: {}", executionId);
         log.info("   - 数据源环境变量: {}", DatasourceEnvHelper.buildEnvDescription(datasourceEnv));
 
@@ -186,11 +190,11 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     private CodeExecutionResult executeFlinkSql(CodeExecutionContext context, String executionId) throws Exception {
         List<String> command = buildFlinkSqlCommand(context);
 
-        // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd）
-        Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs());
+        // 根据引用的数据源构造环境变量（如 test_datasource.url/.user/.passwd），密码自动解密为明文
+        Map<String, String> datasourceEnv = DatasourceEnvHelper.buildEnv(context.getDatasourceConfigs(), aesUtils);
 
         log.info("Flink SQL提交命令: {}", DatasourceEnvHelper.maskPasswords(
-                String.join(" ", command), context.getDatasourceConfigs()));
+                String.join(" ", command), context.getDatasourceConfigs(), aesUtils));
         log.info("   - 执行ID: {}", executionId);
         log.info("   - 数据源环境变量: {}", DatasourceEnvHelper.buildEnvDescription(datasourceEnv));
 
@@ -350,7 +354,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
             if (dsConfig.getPassword() != null) {
                 command.add("--conf");
-                command.add(confPrefix + ".password=" + dsConfig.getPassword());
+                command.add(confPrefix + ".password=" + dsConfig.getPlainPassword(aesUtils));
             }
 
             if (dsConfig.getDatabaseName() != null && !dsConfig.getDatabaseName().isEmpty()) {
