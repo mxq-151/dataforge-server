@@ -2,6 +2,7 @@ package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
+import com.bigdata.modules.development.dto.DevJarDependencyDTO;
 import com.bigdata.modules.development.entity.DevScriptExecution;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.enums.DatasourceType;
@@ -269,7 +270,7 @@ public class CodeExecutionService {
         return configs;
     }
 
-    private void loadJarDependencies(CodeExecutionContext context, List<String> jarCatalogs) {
+    private void loadJarDependencies(CodeExecutionContext context, List<DevJarDependencyDTO> jarCatalogs) {
         if (jarCatalogs != null && !jarCatalogs.isEmpty()) {
             // 解析为 basePath/{jarPath} 的完整路径，供 Spark/Flink 的 --jars 使用
             List<String> fullPaths = devJarDependencyService.resolveJarFullPaths(jarCatalogs);
