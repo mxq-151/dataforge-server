@@ -104,7 +104,6 @@ build_jar_only() {
   # 搭建独立的精简构建上下文(仅 jar + Dockerfile),避免 dataforge-server/.dockerignore
   # 中 `**/target/` 排除 jar,也不把 target 其余文件送入上下文。
   local staging; staging="$(mktemp -d)"
-  trap 'rm -rf "$staging"' EXIT
   cp "$HOST_JAR" "$staging/dataforge-server.jar"
   cat > "$staging/Dockerfile" <<'DOCKEREOF'
 ARG BASE_IMAGE
@@ -118,6 +117,7 @@ DOCKEREOF
     --build-arg "BASE_IMAGE=$BASE_IMAGE" \
     -t "$FULL_TAG" -f "$staging/Dockerfile" "$staging"
 
+  rm -rf "$staging"
   echo "==> 3/3 完成: $FULL_TAG(已仅更新 dataforge-server jar)"
 }
 

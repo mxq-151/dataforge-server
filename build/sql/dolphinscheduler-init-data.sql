@@ -19,7 +19,10 @@ INSERT INTO public.t_ds_tenant (id,tenant_code,description,queue_id,create_time,
 -- 环境 (t_ds_environment) 及关联 (t_ds_environment_worker_group_relation)
 INSERT INTO public.t_ds_environment (id,code,name,config,description,operator,create_time,update_time) VALUES
 (1,183115959322880,'spark_env','export JAVA_HOME=/opt/java/openjdk/
-export SPARK_HOME=/opt/spark/','spark',1,'2026-09-01 09:22:58.994','2026-09-01 09:22:58.994');
+export SPARK_HOME=/opt/spark/
+export TEST_DATASOURCE_URL="jdbc:postgresql://localhost:5432/test_db"
+export TEST_DATASOURCE_USER="test_tenant"
+export TEST_DATASOURCE_PASSWORD="123456"','spark',1,'2026-09-01 09:22:58.994','2026-09-01 09:22:58.994');
 
 INSERT INTO public.t_ds_environment_worker_group_relation (id,environment_code,worker_group,operator,create_time,update_time) VALUES
 (1,183115959322880,'default',1,'2026-09-01 09:22:58.995','2026-09-01 09:22:58.995');
