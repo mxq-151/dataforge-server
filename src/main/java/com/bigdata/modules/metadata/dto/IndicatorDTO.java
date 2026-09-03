@@ -22,18 +22,21 @@ public class IndicatorDTO {
     private String name;
 
     @NotBlank(message = "指标编码不能为空")
-    @Size(max = 100, message = "指标编码不能超过100字符")
+    @Size(max = 1024, message = "指标编码不能超过1024字符")
     private String code;
 
     private String businessDefinition;
+
+    @Size(max = 1024, message = "计算表达式不能超过1024字符")
     private String calcExpr;
+
     private String defaultFilter;
     private String alertConfig;
 
-    @Size(max = 100, message = "业务负责人不能超过100字符")
+    @Size(max = 1024, message = "业务负责人不能超过1024字符")
     private String businessOwner;
 
-    @Size(max = 100, message = "技术负责人不能超过100字符")
+    @Size(max = 1024, message = "技术负责人不能超过1024字符")
     private String techOwner;
 
     private Integer refreshInterval;

@@ -3,7 +3,7 @@
 # 用途: 以命名卷持久化 PostgreSQL 数据与 /opt/dataforge 数据。
 # 用法(与基础 docker-compose.yml 叠加, 两者均位于 startup/compose/):
 #   docker compose -f docker-compose.yml -f docker-compose.persist.yml up -d
-#   或使用封装脚本: PERSIST=1 ./startup/macos/compose.sh up -d (Windows: startup\windows\compose.bat)
+#   或使用封装脚本: ./startup/macos/start-persist.sh (Windows: startup\windows\start-persist.bat)
 #
 # 基础文件(docker-compose.yml)默认无卷挂载, 数据写在容器内;
 # 叠加本文件后挂载命名卷, 容器删除/重建数据保留。

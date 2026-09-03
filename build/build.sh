@@ -187,6 +187,6 @@ else
 fi
 
 echo
-echo "下一步: ./startup/macos/compose.sh up -d (默认无卷; PERSIST=1 持久化; ./startup/macos/compose.sh reset 清旧卷数据)"
+echo "下一步: ./startup/macos/start.sh (默认无卷) 或 ./startup/macos/start-persist.sh (持久化); ./startup/macos/stop.sh 停止; ./startup/macos/clear-data.sh 清旧卷数据"
 echo "日志:   docker logs -f dataforge-allinone"
 echo "热替换(不改镜像): $SCRIPT_DIR/hot-update-dataforge-server.sh"
