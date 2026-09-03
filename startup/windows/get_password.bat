@@ -1,12 +1,12 @@
 @echo off
 rem ============================================================
-rem 获取当前运行脚本的用户，并根据用户名输出对应的密码
-rem 用途：根据当前登录用户，返回与之匹配的预设密码
-rem 对应 startup/macos/get_password.sh
+rem Get the password matching the current Windows user
+rem Purpose: return the preset password for the logged-in user
+rem Counterpart: startup/macos/get_password.sh
 rem ============================================================
 setlocal
 
-rem 配置区：在此处维护「用户名:密码」的映射(空格分隔)
+rem Config area: maintain the "username:password" map here (space-separated)
 set "USER_PASSWORDS=root:password123 admin:abc456"
 
 set "CURRENT_USER=%USERNAME%"
@@ -23,5 +23,5 @@ if defined matched (
   exit /b 0
 )
 
-echo 当前用户 '%CURRENT_USER%' 未在映射表中找到对应密码 1>&2
+echo Current user '%CURRENT_USER%' has no matching password in the map 1>&2
 exit /b 1

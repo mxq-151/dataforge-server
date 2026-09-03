@@ -32,7 +32,7 @@ test_api() {
 
         if echo "$response" | grep -q "$expected"; then
             PASS=$((PASS + 1))
-            echo "✅ $name${retry:+ (尝试 $i/$retry)}"
+            echo "[PASS] $name${retry:+ (attempt $i/$retry)}"
             return 0
         fi
 
@@ -42,199 +42,199 @@ test_api() {
     done
 
     FAIL=$((FAIL + 1))
-    echo "❌ $name"
-    echo "   期望包含: $expected"
+    echo "[FAIL] $name"
+    echo "    expected to contain: $expected"
     if [ -z "$response" ] || [ "$response" = "" ]; then
-        echo "   实际响应: (空/超时)"
+        echo "    actual response: (empty/timeout)"
     else
-        echo "   实际响应: ${response:0:200}..."
+        echo "    actual response: ${response:0:200}..."
     fi
-    ERRORS="$ERRORS\n❌ $name"
+    ERRORS="$ERRORS\n[FAIL] $name"
     return 1
 }
 
 echo "=========================================="
-echo "🚀 大数据平台完整端到端测试 v2.0"
+echo "DataForge Full End-to-End Test v2.0"
 echo "=========================================="
-echo "📅 测试时间: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "📋 测试策略: 基本功能 + 集成测试(带重试)"
+echo "Test time: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Strategy: basic functionality + integration tests (with retry)"
 echo ""
 
-echo "═════════════════════════════════════════"
-echo "【模块一：数据源配置】(DatasourceConfig)"
-echo "═════════════════════════════════════════"
+echo "========================================="
+echo "[Module 1: Datasource Config] (DatasourceConfig)"
+echo "========================================="
 
-echo "--- 1.1 数据源类型枚举 ---"
-test_api "获取支持的数据源类型列表" "GET" "/devops/datasource/types" "" '"code":200'
-
-echo ""
-echo "--- 1.2 数据源基础CRUD ---"
-test_api "获取空数据源列表" "GET" "/devops/datasource/list?current=1&size=10" "" '"total":0'
-test_api "获取所有可用数据源(空)" "GET" "/devops/datasource/all" "" '"code":200'
+echo "--- 1.1 Datasource type enums ---"
+test_api "List supported datasource types" "GET" "/devops/datasource/types" "" '"code":200'
 
 echo ""
-echo "--- 1.3 创建Kyuubi数据源 ---"
+echo "--- 1.2 Datasource basic CRUD ---"
+test_api "Get empty datasource list" "GET" "/devops/datasource/list?current=1&size=10" "" '"total":0'
+test_api "Get all available datasources (empty)" "GET" "/devops/datasource/all" "" '"code":200'
+
+echo ""
+echo "--- 1.3 Create Kyuubi datasource ---"
 DS_CREATE_RESP=$(curl -s --max-time 15 -X POST "$BASE_URL/devops/datasource" \
   -H "Content-Type: application/json; charset=UTF-8" \
-  -d '{"datasourceName":"E2E-Kyuubi-Test","datasourceType":"kyuubi","url":"jdbc:hive2://192.168.1.8:10009/","username":"mxq","password":"","description":"端到端自动化测试"}')
-test_api "创建Kyuubi数据源(含描述)" "POST" "/devops/datasource" '{"datasourceName":"E2E-Kyuubi-Test","datasourceType":"kyuubi","url":"jdbc:hive2://192.168.1.8:10009/","username":"mxq","password":"","description":"端到端自动化测试"}' '"code":200' "15"
+  -d '{"datasourceName":"E2E-Kyuubi-Test","datasourceType":"kyuubi","url":"jdbc:hive2://192.168.1.8:10009/","username":"mxq","password":"","description":"end-to-end automated test"}')
+test_api "Create Kyuubi datasource (with description)" "POST" "/devops/datasource" '{"datasourceName":"E2E-Kyuubi-Test","datasourceType":"kyuubi","url":"jdbc:hive2://192.168.1.8:10009/","username":"mxq","password":"","description":"end-to-end automated test"}' '"code":200' "15"
 
 DS_ID=$(curl -s "$BASE_URL/devops/datasource/list?current=1&size=1" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-echo "   📝 数据源ID: $DS_ID"
+echo "   Datasource ID: $DS_ID"
 
 if [ -n "$DS_ID" ] && [ "$DS_ID" != "" ]; then
     echo ""
-    echo "--- 1.4 数据源详情查询 ---"
-    test_api "获取数据源详情" "GET" "/devops/datasource/$DS_ID" "" '"code":200'
-    test_api "验证数据源名称" "GET" "/devops/datasource/$DS_ID" "" 'E2E-Kyuubi-Test'
-    test_api "验证数据源类型" "GET" "/devops/datasource/$DS_ID" "" 'kyuubi'
-    test_api "验证URL地址" "GET" "/devops/datasource/$DS_ID" "" '192.168.1.8:10009'
+    echo "--- 1.4 Datasource detail query ---"
+    test_api "Get datasource detail" "GET" "/devops/datasource/$DS_ID" "" '"code":200'
+    test_api "Verify datasource name" "GET" "/devops/datasource/$DS_ID" "" 'E2E-Kyuubi-Test'
+    test_api "Verify datasource type" "GET" "/devops/datasource/$DS_ID" "" 'kyuubi'
+    test_api "Verify URL address" "GET" "/devops/datasource/$DS_ID" "" '192.168.1.8:10009'
 
     echo ""
-    echo "--- 1.5 连接测试(配置方式) ---"
+    echo "--- 1.5 Connection test (config based) ---"
     TEST_CONN_DATA='{"datasourceName":"E2E-Conn-Test","datasourceType":"kyuubi","url":"jdbc:hive2://192.168.1.8:10009/","username":"mxq","password":""}'
-    test_api "测试Kyuubi连接(20s超时)" "POST" "/devops/datasource/test" "$TEST_CONN_DATA" '"code":200' "25" "2"
+    test_api "Test Kyuubi connection (20s timeout)" "POST" "/devops/datasource/test" "$TEST_CONN_DATA" '"code":200' "25" "2"
 
     echo ""
-    echo "--- 1.6 更新数据源 ---"
-    UPDATE_DS_DATA="{\"id\":$DS_ID,\"datasourceName\":\"E2E-Kyuubi-Prod\",\"datasourceType\":\"kyuubi\",\"url\":\"jdbc:hive2://192.168.1.8:10009/\",\"username\":\"mxq\",\"password\":\"\",\"description\":\"已更新的生产环境\"}"
-    test_api "更新数据源名称和描述" "PUT" "/devops/datasource" "$UPDATE_DS_DATA" '"code":200'
+    echo "--- 1.6 Update datasource ---"
+    UPDATE_DS_DATA="{\"id\":$DS_ID,\"datasourceName\":\"E2E-Kyuubi-Prod\",\"datasourceType\":\"kyuubi\",\"url\":\"jdbc:hive2://192.168.1.8:10009/\",\"username\":\"mxq\",\"password\":\"\",\"description\":\"updated production environment\"}"
+    test_api "Update datasource name and description" "PUT" "/devops/datasource" "$UPDATE_DS_DATA" '"code":200'
 
     echo ""
-    echo "--- 1.7 验证更新结果 ---"
-    test_api "验证更新后名称" "GET" "/devops/datasource/$DS_ID" "" 'E2E-Kyuubi-Prod'
-    test_api "验证更新后描述" "GET" "/devops/datasource/$DS_ID" "" '已更新的生产环境'
+    echo "--- 1.7 Verify update result ---"
+    test_api "Verify updated name" "GET" "/devops/datasource/$DS_ID" "" 'E2E-Kyuubi-Prod'
+    test_api "Verify updated description" "GET" "/devops/datasource/$DS_ID" "" 'updated production environment'
 else
-    echo "⚠️  无法获取数据源ID，跳过后续测试"
+    echo "[WARN] Could not get datasource ID, skipping subsequent tests"
 fi
 
 echo ""
-echo "═════════════════════════════════════════"
-echo "【模块二：库表管理】(Metadata)"
-echo "═════════════════════════════════════════"
+echo "========================================="
+echo "[Module 2: Table Management] (Metadata)"
+echo "========================================="
 
 if [ -n "$DS_ID" ] && [ "$DS_ID" != "" ]; then
-    echo "--- 2.1 元数据同步 ---"
-    test_api "触发全量元数据同步(60s)" "POST" "/metadata/sync/$DS_ID" "" '"success":true' "65" "2"
-    test_api "查询最新同步日志" "GET" "/metadata/sync-log/$DS_ID" "" '"code":200'
+    echo "--- 2.1 Metadata sync ---"
+    test_api "Trigger full metadata sync (60s)" "POST" "/metadata/sync/$DS_ID" "" '"success":true' "65" "2"
+    test_api "Get latest sync log" "GET" "/metadata/sync-log/$DS_ID" "" '"code":200'
 
     echo ""
-    echo "--- 2.2 数据库列表 ---"
-    test_api "获取数据库列表" "GET" "/metadata/databases?datasourceId=$DS_ID" '"code":200'
+    echo "--- 2.2 Database list ---"
+    test_api "Get database list" "GET" "/metadata/databases?datasourceId=$DS_ID" '"code":200'
 
     echo ""
-    echo "--- 2.3 表元数据查询 ---"
-    test_api "获取表列表(分页)" "GET" "/metadata/tables?datasourceId=$DS_ID&size=20" '"code":200'
-    test_api "搜索表(keyword=test)" "GET" "/metadata/tables?datasourceId=$DS_ID&keyword=test&size=10" '"code":200'
+    echo "--- 2.3 Table metadata query ---"
+    test_api "Get table list (paged)" "GET" "/metadata/tables?datasourceId=$DS_ID&size=20" '"code":200'
+    test_api "Search tables (keyword=test)" "GET" "/metadata/tables?datasourceId=$DS_ID&keyword=test&size=10" '"code":200'
 
     TABLE_RESP=$(curl -s "$BASE_URL/metadata/tables?datasourceId=$DS_ID&size=1")
     TABLE_ID=$(echo "$TABLE_RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
     TABLE_TOTAL=$(echo "$TABLE_RESP" | grep -o '"total":[0-9]*' | head -1 | cut -d':' -f2)
-    echo "   📊 表总数: ${TABLE_TOTAL:-0}"
+    echo "   Total tables: ${TABLE_TOTAL:-0}"
 
     if [ -n "$TABLE_ID" ] && [ "$TABLE_ID" != "" ] && [ "$TABLE_TOTAL" != "0" ]; then
-        echo "   📝 测试用表ID: $TABLE_ID"
+        echo "   Test table ID: $TABLE_ID"
 
         echo ""
-        echo "--- 2.4 表详情和字段 ---"
-        test_api "获取表详情" "GET" "/metadata/table/$TABLE_ID" "" '"code":200'
-        test_api "获取表的字段信息" "GET" "/metadata/table/$TABLE_ID/columns" '"code":200'
+        echo "--- 2.4 Table detail and columns ---"
+        test_api "Get table detail" "GET" "/metadata/table/$TABLE_ID" "" '"code":200'
+        test_api "Get table columns" "GET" "/metadata/table/$TABLE_ID/columns" '"code":200'
 
         echo ""
-        echo "--- 2.5 DDL执行操作 ---"
+        echo "--- 2.5 DDL execution ---"
         DB_NAME="default"
 
-        DDL_CREATE="{\"datasourceId\":$DS_ID,\"databaseName\":\"$DB_NAME\",\"sql\":\"CREATE TABLE IF NOT EXISTS e2e_auto_test (id INT COMMENT \\\"主键\\\", name STRING COMMENT \\\"名称\\\", created_at TIMESTAMP) COMMENT \\\"自动化测试表\\\"\"}"
-        test_api "DDL-CREATE创建表" "POST" "/metadata/ddl/execute" "$DDL_CREATE" '"success":true' "30" "2"
+        DDL_CREATE="{\"datasourceId\":$DS_ID,\"databaseName\":\"$DB_NAME\",\"sql\":\"CREATE TABLE IF NOT EXISTS e2e_auto_test (id INT COMMENT \\\"primary key\\\", name STRING COMMENT \\\"name\\\", created_at TIMESTAMP) COMMENT \\\"automated test table\\\"\"}"
+        test_api "DDL-CREATE create table" "POST" "/metadata/ddl/execute" "$DDL_CREATE" '"success":true' "30" "2"
 
-        DDL_ADD_COL="{\"datasourceId\":$DS_ID,\"databaseName\":\"$DB_NAME\",\"sql\":\"ALTER TABLE e2e_auto_test ADD COLUMN age INT COMMENT \\\"年龄\\\"\"}"
-        test_api "DDL-ALTER添加列" "POST" "/metadata/ddl/execute" "$DDL_ADD_COL" '"success":true' "30" "2"
+        DDL_ADD_COL="{\"datasourceId\":$DS_ID,\"databaseName\":\"$DB_NAME\",\"sql\":\"ALTER TABLE e2e_auto_test ADD COLUMN age INT COMMENT \\\"age\\\"\"}"
+        test_api "DDL-ALTER add column" "POST" "/metadata/ddl/execute" "$DDL_ADD_COL" '"success":true' "30" "2"
 
-        DDL_MODIFY_COL="{\"datasourceId\":$DS_ID,\"databaseName\":\"$DB_NAME\",\"sql\":\"ALTER TABLE e2e_auto_test CHANGE COLUMN name user_name STRING COMMENT \\\"用户名\\\"\"}"
-        test_api "DDL-ALTER修改列" "POST" "/metadata/ddl/execute" "$DDL_MODIFY_COL" '"success":true' "30" "2"
-
-        echo ""
-        echo "--- 2.6 DDL执行日志查询 ---"
-        test_api "查询DDL执行日志" "GET" "/metadata/ddl/logs?datasourceId=$DS_ID&size=10" '"code":200'
-        test_api "筛选CREATE类型日志" "GET" "/metadata/ddl/logs?datasourceId=$DS_ID&sqlType=CREATE&size=5" '"code":200'
+        DDL_MODIFY_COL="{\"datasourceId\":$DS_ID,\"databaseName\":\"$DB_NAME\",\"sql\":\"ALTER TABLE e2e_auto_test CHANGE COLUMN name user_name STRING COMMENT \\\"user name\\\"\"}"
+        test_api "DDL-ALTER modify column" "POST" "/metadata/ddl/execute" "$DDL_MODIFY_COL" '"success":true' "30" "2"
 
         echo ""
-        echo "--- 2.7 清理测试表 ---"
+        echo "--- 2.6 DDL execution log query ---"
+        test_api "Get DDL execution logs" "GET" "/metadata/ddl/logs?datasourceId=$DS_ID&size=10" '"code":200'
+        test_api "Filter logs by type CREATE" "GET" "/metadata/ddl/logs?datasourceId=$DS_ID&sqlType=CREATE&size=5" '"code":200'
+
+        echo ""
+        echo "--- 2.7 Clean up test table ---"
         DDL_DROP="{\"datasourceId\":$DS_ID,\"databaseName\":\"$DB_NAME\",\"sql\":\"DROP TABLE IF EXISTS e2e_auto_test\"}"
-        test_api "DDL-DROP删除表" "POST" "/metadata/ddl/execute" "$DDL_DROP" '"success":true' "30" "2"
+        test_api "DDL-DROP drop table" "POST" "/metadata/ddl/execute" "$DDL_DROP" '"success":true' "30" "2"
     else
-        echo "⚠️  无可用表数据(总数=${TABLE_TOTAL:-0})，跳过表相关测试"
+        echo "[WARN] No table metadata available (total=${TABLE_TOTAL:-0}), skipping table-related tests"
         SKIP=$((SKIP + 9))
-        WARNINGS="$WARNINGS\n⚠️  库表管理模块：无元数据，跳过9项测试"
+        WARNINGS="$WARNINGS\n[WARN] Table management module: no metadata, skipped 9 tests"
     fi
 else
-    echo "⚠️  无有效数据源，跳过库表管理测试"
+    echo "[WARN] No valid datasource, skipping table management tests"
     SKIP=$((SKIP + 12))
-    WARNINGS="$WARNINGS\n⚠️  库表管理模块：数据源无效，跳过12项测试"
+    WARNINGS="$WARNINGS\n[WARN] Table management module: invalid datasource, skipped 12 tests"
 fi
 
 echo ""
-echo "═════════════════════════════════════════"
-echo "【模块三：库表权限管理】(TablePermission)"
-echo "═════════════════════════════════════════"
+echo "========================================="
+echo "[Module 3: Table Permission Management] (TablePermission)"
+echo "========================================="
 
 if [ -n "$TABLE_ID" ] && [ "$TABLE_ID" != "" ] && [ "${TABLE_TOTAL:-0}" != "0" ]; then
-    echo "--- 3.1 权限CRUD ---"
-    test_api "获取初始权限列表" "GET" "/system/permission/table/list" "" '"code":200'
+    echo "--- 3.1 Permission CRUD ---"
+    test_api "Get initial permission list" "GET" "/system/permission/table/list" "" '"code":200'
 
-    PERM_CREATE_DATA="{\"tableMetadataId\":$TABLE_ID,\"permissionName\":\"E2E-Select-Only\",\"canSelect\":1,\"canInsert\":0,\"canUpdate\":0,\"canDelete\":0,\"description\":\"只读权限-自动化测试\"}"
-    test_api "创建表权限(只读)" "POST" "/system/permission/table" "$PERM_CREATE_DATA" '"code":200'
+    PERM_CREATE_DATA="{\"tableMetadataId\":$TABLE_ID,\"permissionName\":\"E2E-Select-Only\",\"canSelect\":1,\"canInsert\":0,\"canUpdate\":0,\"canDelete\":0,\"description\":\"read-only permission - automated test\"}"
+    test_api "Create table permission (read-only)" "POST" "/system/permission/table" "$PERM_CREATE_DATA" '"code":200'
 
     PERM_RESP=$(curl -s "$BASE_URL/system/permission/table/list")
     PERM_ID=$(echo "$PERM_RESP" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-    echo "   🔐 权限ID: ${PERM_ID:-N/A}"
+    echo "   Permission ID: ${PERM_ID:-N/A}"
 
     if [ -n "$PERM_ID" ] && [ "$PERM_ID" != "" ]; then
         echo ""
-        PERM_UPDATE_DATA="{\"id\":$PERM_ID,\"tableMetadataId\":$TABLE_ID,\"permissionName\":\"E2E-Full-Access\",\"canSelect\":1,\"canInsert\":1,\"canUpdate\":1,\"canDelete\":1,\"description\":\"完全访问权限\"}"
-        test_api "更新为完全访问权限" "PUT" "/system/permission/table" "$PERM_UPDATE_DATA" '"code":200'
+        PERM_UPDATE_DATA="{\"id\":$PERM_ID,\"tableMetadataId\":$TABLE_ID,\"permissionName\":\"E2E-Full-Access\",\"canSelect\":1,\"canInsert\":1,\"canUpdate\":1,\"canDelete\":1,\"description\":\"full access\"}"
+        test_api "Update to full access permission" "PUT" "/system/permission/table" "$PERM_UPDATE_DATA" '"code":200'
 
         echo ""
-        test_api "删除表权限" "DELETE" "/system/permission/table/$PERM_ID" "" '"code":200'
+        test_api "Delete table permission" "DELETE" "/system/permission/table/$PERM_ID" "" '"code":200'
 
         echo ""
-        echo "--- 3.2 验证清理结果 ---"
-        test_api "验证权限已清除" "GET" "/system/permission/table/list" "" '"total":0'
+        echo "--- 3.2 Verify cleanup result ---"
+        test_api "Verify permission cleared" "GET" "/system/permission/table/list" "" '"total":0'
     else
-        echo "⚠️  权限创建失败或无法获取ID"
+        echo "[WARN] Permission creation failed or ID could not be obtained"
         SKIP=$((SKIP + 3))
     fi
 else
-    echo "⚠️  无可用表，跳过权限测试"
+    echo "[WARN] No table available, skipping permission tests"
     SKIP=$((SKIP + 5))
-    WARNINGS="$WARNINGS\n⚠️  库表权限模块：无可用表，跳过5项测试"
+    WARNINGS="$WARNINGS\n[WARN] Table permission module: no table available, skipped 5 tests"
 fi
 
 echo ""
-echo "═════════════════════════════════════════"
-echo "【模块四：清理与验证】"
-echo "═════════════════════════════════════════"
+echo "========================================="
+echo "[Module 4: Cleanup and Verification]"
+echo "========================================="
 
 if [ -n "$DS_ID" ] && [ "$DS_ID" != "" ]; then
-    echo "--- 4.1 清理测试数据源 ---"
-    test_api "删除数据源" "DELETE" "/devops/datasource/$DS_ID" "" '"code":200' "15" "2"
+    echo "--- 4.1 Clean up test datasource ---"
+    test_api "Delete datasource" "DELETE" "/devops/datasource/$DS_ID" "" '"code":200' "15" "2"
 
     echo ""
-    echo "--- 4.2 最终验证 ---"
+    echo "--- 4.2 Final verification ---"
     sleep 1
-    test_api "验证数据源已删除" "GET" "/devops/datasource/list?current=1&size=10" "" '"total":0'
+    test_api "Verify datasource deleted" "GET" "/devops/datasource/list?current=1&size=10" "" '"total":0'
 else
-    echo "⚠️  无需清理"
+    echo "[WARN] Nothing to clean up"
 fi
 
 echo ""
 echo "=========================================="
-echo "📊 端到端测试报告"
+echo "End-to-End Test Report"
 echo "=========================================="
-echo "✅ 通过: $PASS"
-echo "❌ 失败: $FAIL"
-echo "⏭️  跳过: $SKIP"
-echo "📋 总计: $TOTAL"
+echo "[PASS] Passed: $PASS"
+echo "[FAIL] Failed: $FAIL"
+echo "[SKIP] Skipped: $SKIP"
+echo "Total: $TOTAL"
 echo ""
 
 if [ $TOTAL -gt 0 ]; then
@@ -242,12 +242,12 @@ if [ $TOTAL -gt 0 ]; then
 else
     RATE=0
 fi
-echo "📈 通过率: ${RATE}%"
+echo "Pass rate: ${RATE}%"
 
 if [ $FAIL -gt 0 ]; then
     echo ""
     echo "=========================================="
-    echo "⚠️  失败用例详情"
+    echo "Failed test details"
     echo "=========================================="
     echo -e "$ERRORS"
 fi
@@ -255,7 +255,7 @@ fi
 if [ -n "$WARNINGS" ]; then
     echo ""
     echo "=========================================="
-    echo "💡 跳过原因说明"
+    echo "Skip reasons"
     echo "=========================================="
     echo -e "$WARNINGS"
 fi
@@ -263,14 +263,14 @@ fi
 echo ""
 echo "=========================================="
 if [ $FAIL -eq 0 ]; then
-    echo "🎉 测试完成！所有执行的测试均通过！"
+    echo "Test finished! All executed tests passed!"
     if [ $SKIP -gt 0 ]; then
-        echo "ℹ️  有 $SKIP 项测试因依赖条件未满足而跳过"
+        echo "Info: $SKIP test(s) skipped because their preconditions were not met"
     fi
     echo "=========================================="
     exit 0
 else
-    echo "⚠️  测试完成！有 $FAIL 项测试需要关注！"
+    echo "Test finished! $FAIL test(s) need attention!"
     echo "=========================================="
     exit 1
 fi

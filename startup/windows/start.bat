@@ -1,11 +1,12 @@
 @echo off
 rem ============================================================
-rem 启动 dataforge 容器(不带数据卷)
-rem 数据写入容器内, 容器删除后数据随之丢失; 如需持久化请用 start-persist.bat
+rem Start dataforge containers (without named volumes)
+rem Data is written inside the container and is lost when the
+rem container is removed; for persistence use start-persist.bat
 rem ============================================================
 setlocal
 set "COMPOSE_DIR=%~dp0..\compose"
-echo ==^> 无卷模式: 数据写入容器内 (如需持久化请运行 startup\windows\start-persist.bat)
+echo ==^> No-volume mode: data is written inside the container (run startup\windows\start-persist.bat for persistence)
 docker compose -f "%COMPOSE_DIR%\docker-compose.yml" up -d
-echo ==^> 启动完成
+echo ==^> Started
 endlocal

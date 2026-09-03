@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # ============================================================
-# 启动 dataforge 容器(带数据卷)
+# Start dataforge containers (with named volumes)
 #
-# 挂载命名卷 df-pgdata(PostgreSQL) / df-data(/opt/dataforge),
-# 容器删除/重建后数据依旧保留。
+# Mounts named volumes df-pgdata (PostgreSQL) / df-data (/opt/dataforge);
+# data survives container removal/recreation.
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"          # 本脚本所在目录 startup/macos/
-COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/compose"  # 编排文件目录 startup/compose/
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"          # directory of this script: startup/macos/
+COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/compose"  # compose files directory: startup/compose/
 
-echo "==> 持久化模式: 挂载命名卷 df-pgdata / df-data"
+echo "==> Persist mode: mounting named volumes df-pgdata / df-data"
 docker compose \
   -f "$COMPOSE_DIR/docker-compose.yml" \
   -f "$COMPOSE_DIR/docker-compose.persist.yml" \
   up -d
-echo "==> 启动完成(带数据卷)"
+echo "==> Started (with named volumes)"

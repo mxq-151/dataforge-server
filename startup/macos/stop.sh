@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # ============================================================
-# 停止并移除 dataforge 容器(不删除数据卷/容器数据)
+# Stop and remove dataforge containers (does NOT delete
+# volumes/container data)
 #
-# 数据保留; 如需彻底清除命名卷数据, 请改用
+# Data is kept; to fully clear named-volume data use
 # ./startup/macos/clear-data.sh
 # ============================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"          # 本脚本所在目录 startup/macos/
-COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/compose"  # 编排文件目录 startup/compose/
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"          # directory of this script: startup/macos/
+COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/compose"  # compose files directory: startup/compose/
 
-echo "==> 停止容器"
+echo "==> Stopping containers"
 docker compose -f "$COMPOSE_DIR/docker-compose.yml" down --remove-orphans
-echo "==> 容器已停止 (数据保留; 如需彻底清除数据卷请运行 ./startup/macos/clear-data.sh)"
+echo "==> Containers stopped (data kept; run ./startup/macos/clear-data.sh to fully clear named volumes)"
