@@ -41,9 +41,9 @@ INSERT INTO sys_menu_permission (id, parent_id, menu_name, menu_code, path, icon
 (100,0,'指标管理','indicator_management','/indicator_management','',3,1,1,'2026-07-13 15:17:00','2026-07-13 15:47:41',0)
 ON CONFLICT (menu_code) DO NOTHING;
 
--- 角色-菜单授权（数据开发工程师 -> 开发助手/数据探索/知识库/指标管理）
+-- 角色-菜单授权（数据开发工程师 -> 开发助手/数据探索/知识库/指标管理/任务调度）
 INSERT INTO sys_role_menu_permission (id, role_id, menu_permission_id, create_time) VALUES
-(12,3,1,'2026-07-13 15:17:00'),(13,3,2,'2026-07-13 15:17:00'),(14,3,3,'2026-07-13 15:17:00'),(15,3,100,'2026-07-13 15:17:00')
+(12,3,1,'2026-07-13 15:17:00'),(13,3,2,'2026-07-13 15:17:00'),(14,3,3,'2026-07-13 15:17:00'),(15,3,100,'2026-07-13 15:17:00'),(16,3,5,'2026-07-13 15:17:00')
 ON CONFLICT (role_id, menu_permission_id) DO NOTHING;
 
 -- 测试项目
