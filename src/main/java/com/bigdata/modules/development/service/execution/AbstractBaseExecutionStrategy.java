@@ -419,12 +419,12 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     // ==================== 行级过滤 ====================
 
     /**
-     * 根据行级过滤SQL对查询结果进行行过滤
+     * 根据行级过滤SQL对查询结果进行行过滤（原地修改 rows 列表，删除不满足条件的行）。
      *
-     * @param rows         查询结果行数据
+     * @param rows         查询结果行数据（原地修改）
      * @param columns      列名列表
      * @param rowFilterSql 过滤条件SQL（支持WHERE前缀或裸表达式）
-     * @return 过滤后的行数据
+     * @return 过滤后的行数据（与入参为同一引用）
      */
     protected List<List<String>> applyRowFilter(List<List<String>> rows, List<String> columns, String rowFilterSql) {
         if (rows == null || rows.isEmpty() || rowFilterSql == null || rowFilterSql.isBlank()) {
@@ -441,14 +441,21 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
                 colIndexMap.put(columns.get(i).toLowerCase(), i);
             }
             String finalFilterExpr = filterExpr;
-            return rows.stream().filter(row -> {
+            Iterator<List<String>> it = rows.iterator();
+            while (it.hasNext()) {
+                List<String> row = it.next();
+                boolean keep;
                 try {
-                    return evaluateRowFilterExpression(row, columns, colIndexMap, finalFilterExpr);
+                    keep = evaluateRowFilterExpression(row, columns, colIndexMap, finalFilterExpr);
                 } catch (Exception e) {
                     getLog().debug("行过滤表达式求值失败，保留行: {}", e.getMessage());
-                    return true;
+                    keep = true;
                 }
-            }).collect(java.util.stream.Collectors.toList());
+                if (!keep) {
+                    it.remove();
+                }
+            }
+            return rows;
         } catch (Exception e) {
             getLog().warn("行级过滤失败，返回原始结果: {}", e.getMessage());
             return rows;
@@ -797,20 +804,68 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
         if (permInfo != null && permInfo.tableRef != null) {
             String dbName = permInfo.tableRef.databaseName != null ?
                     permInfo.tableRef.databaseName : defaultDatabase;
+            String tableName = permInfo.tableRef.tableName;
+            // 行级权限（指定行）：按表取过滤条件
+            String mergedRowFilterSql = dataAccessPermissionService.getMergedRowFilterSql(
+                    datasourceName, dbName, tableName);
+            if (mergedRowFilterSql != null && !mergedRowFilterSql.isBlank()) {
+                int beforeSize = rows.size();
+                rows = applyRowFilter(rows, columns, mergedRowFilterSql);
+                getLog().info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rows.size(), mergedRowFilterSql);
+            }
+            // 数据脱敏（列级掩码）
             SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
-                    datasourceName, dbName, permInfo.tableRef.tableName);
-            if (mergedPerm != null) {
-                if (mergedPerm.getRowFilterSql() != null && !mergedPerm.getRowFilterSql().isBlank()) {
-                    int beforeSize = rows.size();
-                    rows = applyRowFilter(rows, columns, mergedPerm.getRowFilterSql());
-                    getLog().info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rows.size(),
-                            mergedPerm.getRowFilterSql());
-                }
-                if (mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
-                    applyDataMasking(rows, columns, mergedPerm.getDataMaskingRule());
-                    getLog().info("已应用数据脱敏规则, 表: {}.{}", dbName, permInfo.tableRef.tableName);
+                    datasourceName, dbName, tableName);
+            if (mergedPerm != null && mergedPerm.getDataMaskingRule() != null && !mergedPerm.getDataMaskingRule().isBlank()) {
+                applyDataMasking(rows, columns, mergedPerm.getDataMaskingRule());
+                getLog().info("已应用数据脱敏规则, 表: {}.{}", dbName, tableName);
+            }
+            // 列级权限（指定列）：隐藏未授权列
+            applyColumnPermission(rows, columns, datasourceName, dbName, tableName);
+        }
+    }
+
+    /**
+     * 根据列级权限白名单对查询结果进行列裁剪（指定列）。
+     * <p>
+     * 调用 {@link DataAccessPermissionService#getAllowedColumns} 获取当前用户对该表允许可见的列，
+     * 返回 {@code null}(所有列可见)时不做任何处理，否则仅保留白名单内的列及其数据。
+     * </p>
+     *
+     * @param rows    查询结果行数据（原地修改）
+     * @param columns 列名列表（原地修改）
+     */
+    protected void applyColumnPermission(List<List<String>> rows, List<String> columns,
+                                         String datasourceName, String databaseName, String tableName) {
+        java.util.Set<String> allowed = dataAccessPermissionService.getAllowedColumns(
+                datasourceName, databaseName, tableName);
+        if (allowed == null || allowed.isEmpty()) {
+            return;
+        }
+        Set<String> allowedLower = allowed.stream()
+                .map(String::toLowerCase)
+                .collect(java.util.stream.Collectors.toSet());
+        List<Integer> keepIndexes = new ArrayList<>();
+        for (int i = 0; i < columns.size(); i++) {
+            if (columns.get(i) != null && allowedLower.contains(columns.get(i).toLowerCase())) {
+                keepIndexes.add(i);
+            }
+        }
+        if (keepIndexes.size() == columns.size()) {
+            return;
+        }
+        // 从后往前删除未授权列，避免索引错位
+        Set<Integer> keepSet = new HashSet<>(keepIndexes);
+        for (int i = columns.size() - 1; i >= 0; i--) {
+            if (!keepSet.contains(i)) {
+                columns.remove(i);
+                for (List<String> row : rows) {
+                    if (i < row.size()) {
+                        row.remove(i);
+                    }
                 }
             }
         }
+        getLog().info("列级权限过滤: 表 {}.{} 仅保留授权列 {} ", databaseName, tableName, columns);
     }
 }

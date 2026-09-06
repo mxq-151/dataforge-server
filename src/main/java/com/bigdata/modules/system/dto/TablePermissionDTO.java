@@ -3,6 +3,7 @@ package com.bigdata.modules.system.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
+import java.util.Map;
 
 public class TablePermissionDTO {
 
@@ -23,10 +24,19 @@ public class TablePermissionDTO {
     private Integer canUpdate;
     private Integer canDelete;
     private Integer canExport;
-    private String rowFilterSql;
+    /**
+     * 指定行（行级过滤）：表名 -> 行过滤SQL（支持WHERE前缀或裸表达式）。
+     * 未在此出现的表表示不做行级过滤。
+     */
+    private Map<String, String> rowFilterSql;
     private String dataMaskingRule;
     private String description;
     private List<Long> roleIds;
+    /**
+     * 指定列白名单：表名 -> 允许可见的列名列表。
+     * 未在此出现的表表示所有列都可见；表中未列出的列不可见。
+     */
+    private Map<String, List<String>> columnPermissions;
 
     public Long getId() {
         return id;
@@ -116,11 +126,11 @@ public class TablePermissionDTO {
         this.canExport = canExport;
     }
 
-    public String getRowFilterSql() {
+    public Map<String, String> getRowFilterSql() {
         return rowFilterSql;
     }
 
-    public void setRowFilterSql(String rowFilterSql) {
+    public void setRowFilterSql(Map<String, String> rowFilterSql) {
         this.rowFilterSql = rowFilterSql;
     }
 
@@ -146,5 +156,13 @@ public class TablePermissionDTO {
 
     public void setRoleIds(List<Long> roleIds) {
         this.roleIds = roleIds;
+    }
+
+    public Map<String, List<String>> getColumnPermissions() {
+        return columnPermissions;
+    }
+
+    public void setColumnPermissions(Map<String, List<String>> columnPermissions) {
+        this.columnPermissions = columnPermissions;
     }
 }

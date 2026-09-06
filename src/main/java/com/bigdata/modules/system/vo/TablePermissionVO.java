@@ -3,6 +3,7 @@ package com.bigdata.modules.system.vo;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 public class TablePermissionVO implements Serializable {
 
@@ -20,13 +21,21 @@ public class TablePermissionVO implements Serializable {
     private Integer canUpdate;
     private Integer canDelete;
     private Integer canExport;
-    private String rowFilterSql;
+    /**
+     * 指定行（行级过滤）：表名 -> 行过滤SQL。未出现的表表示不按此权限做行过滤。
+     */
+    private Map<String, String> rowFilterSql;
     private String dataMaskingRule;
     private String description;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
     private List<Long> roleIds;
     private List<String> roleNames;
+    /**
+     * 指定列白名单：表名 -> 允许可见的列名列表。
+     * 未在此出现的表表示所有列都可见。
+     */
+    private Map<String, List<String>> columnPermissions;
 
     public Long getId() {
         return id;
@@ -124,11 +133,11 @@ public class TablePermissionVO implements Serializable {
         this.canExport = canExport;
     }
 
-    public String getRowFilterSql() {
+    public Map<String, String> getRowFilterSql() {
         return rowFilterSql;
     }
 
-    public void setRowFilterSql(String rowFilterSql) {
+    public void setRowFilterSql(Map<String, String> rowFilterSql) {
         this.rowFilterSql = rowFilterSql;
     }
 
@@ -178,5 +187,13 @@ public class TablePermissionVO implements Serializable {
 
     public void setRoleNames(List<String> roleNames) {
         this.roleNames = roleNames;
+    }
+
+    public Map<String, List<String>> getColumnPermissions() {
+        return columnPermissions;
+    }
+
+    public void setColumnPermissions(Map<String, List<String>> columnPermissions) {
+        this.columnPermissions = columnPermissions;
     }
 }

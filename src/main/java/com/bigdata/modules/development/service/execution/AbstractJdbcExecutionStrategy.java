@@ -108,10 +108,10 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
                     // 行级过滤 + 数据脱敏（使用基类提供的方法）
                     applyRowFilterAndMasking(rows, columns, sql, context);
 
-                    getLog().info("📊 查询结果详情: executionId={}, 列数={}, 行数={}",
-                            executionId, colCount, rowCount);
-                    executionLogListener.publishLog(executionId, "[结果] 查询返回 " + rowCount + " 行, " + colCount + " 列 (" +
-                            String.join(", ", columns) + ")");
+                    getLog().info("📊 查询结果详情: executionId={}, 列数={}, 行数={}(过滤后), 原始SQL读取={}",
+                            executionId, columns == null ? 0 : columns.size(), rows == null ? 0 : rows.size(), rowCount);
+                    executionLogListener.publishLog(executionId, "[结果] 查询返回 " + (rows == null ? 0 : rows.size()) + " 行, " +
+                            (columns == null ? 0 : columns.size()) + " 列 (" + String.join(", ", columns) + ")");
                 } else {
                     int affected = stmt.getUpdateCount();
                     affectedRows += affected;

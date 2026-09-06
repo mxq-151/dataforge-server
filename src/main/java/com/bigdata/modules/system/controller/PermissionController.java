@@ -88,11 +88,11 @@ public class PermissionController {
         permission.setCanUpdate(dto.getCanUpdate() != null ? dto.getCanUpdate() : 0);
         permission.setCanDelete(dto.getCanDelete() != null ? dto.getCanDelete() : 0);
         permission.setCanExport(dto.getCanExport() != null ? dto.getCanExport() : 0);
-        permission.setRowFilterSql(dto.getRowFilterSql());
         permission.setDataMaskingRule(dto.getDataMaskingRule());
         permission.setDescription(dto.getDescription());
 
-        TablePermissionVO vo = permissionService.saveTablePermission(permission, dto.getRoleIds());
+        TablePermissionVO vo = permissionService.saveTablePermission(permission, dto.getRoleIds(),
+                dto.getColumnPermissions(), dto.getRowFilterSql());
         return Result.success(vo);
     }
 
@@ -112,11 +112,11 @@ public class PermissionController {
         permission.setCanUpdate(dto.getCanUpdate() != null ? dto.getCanUpdate() : 0);
         permission.setCanDelete(dto.getCanDelete() != null ? dto.getCanDelete() : 0);
         permission.setCanExport(dto.getCanExport() != null ? dto.getCanExport() : 0);
-        permission.setRowFilterSql(dto.getRowFilterSql());
         permission.setDataMaskingRule(dto.getDataMaskingRule());
         permission.setDescription(dto.getDescription());
 
-        TablePermissionVO vo = permissionService.updateTablePermission(permission, dto.getRoleIds());
+        TablePermissionVO vo = permissionService.updateTablePermission(permission, dto.getRoleIds(),
+                dto.getColumnPermissions(), dto.getRowFilterSql());
         return Result.success(vo);
     }
 

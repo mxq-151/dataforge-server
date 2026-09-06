@@ -144,6 +144,20 @@ public class MetadataController {
                     // 脱敏规则解析失败时返回原始字段列表
                 }
             }
+
+            // 列级权限（指定列）：隐藏未授权列
+            java.util.Set<String> allowedColumns = dataAccessPermissionService.getAllowedColumns(null, databaseName, tableName);
+            if (allowedColumns != null) {
+                java.util.Set<String> allowedLower = new java.util.HashSet<>();
+                for (String col : allowedColumns) {
+                    if (col != null) {
+                        allowedLower.add(col.toLowerCase());
+                    }
+                }
+                voList = voList.stream()
+                        .filter(vo -> vo.getColumnName() != null && allowedLower.contains(vo.getColumnName().toLowerCase()))
+                        .collect(Collectors.toList());
+            }
         }
 
         return Result.success(voList);
@@ -169,6 +183,10 @@ public class MetadataController {
                 tableMetadata.getDatabaseName(),
                 tableMetadata.getTableName()
         );
+        if (permission != null) {
+            permission.setRowFilterSql(dataAccessPermissionService.getMergedRowFilterSql(
+                    datasourceName, tableMetadata.getDatabaseName(), tableMetadata.getTableName()));
+        }
         return Result.success(permission);
     }
 

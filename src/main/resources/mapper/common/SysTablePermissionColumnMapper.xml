@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.system.mapper.SysTablePermissionColumnMapper">
+
+    <select id="selectByPermissionIds" resultType="com.bigdata.modules.system.entity.SysTablePermissionColumn">
+        SELECT table_permission_id AS tablePermissionId, table_name AS tableName, column_name AS columnName
+        FROM sys_table_permission_column
+        WHERE table_permission_id IN
+        <foreach item="permId" collection="permissionIds" open="(" separator="," close=")">
+            #{permId}
+        </foreach>
+    </select>
+
+    <select id="selectByPermissionIdAndTable" resultType="com.bigdata.modules.system.entity.SysTablePermissionColumn">
+        SELECT table_permission_id AS tablePermissionId, table_name AS tableName, column_name AS columnName
+        FROM sys_table_permission_column
+        WHERE table_permission_id = #{permissionId}
+          AND table_name = #{tableName}
+    </select>
+
+    <delete id="deleteByPermissionId">
+        DELETE FROM sys_table_permission_column WHERE table_permission_id = #{permissionId}
+    </delete>
+
+    <insert id="batchInsert">
+        INSERT INTO sys_table_permission_column(table_permission_id, table_name, column_name, create_time) VALUES
+        <foreach item="item" collection="list" separator=",">
+            (#{item.tablePermissionId}, #{item.tableName}, #{item.columnName}, #{item.createTime})
+        </foreach>
+    </insert>
+
+</mapper>

@@ -102,6 +102,7 @@ DOCKEREOF
   echo "==> 2/3 基于 $BASE_IMAGE 覆盖新 jar 构建 $FULL_TAG"
   docker buildx build --platform "$PLATFORMS" \
     $(load_push) \
+    --provenance=false --sbom=false \
     --build-arg "BASE_IMAGE=$BASE_IMAGE" \
     -t "$FULL_TAG" -f "$staging/Dockerfile" "$staging"
 
@@ -139,7 +140,8 @@ build_full() {
   # docker-container 构建器容器内通过 host.docker.internal 访问宿主代理
   HOST_PROXY="http://host.docker.internal:7890"
   # Dockerfile: build/Dockerfile; 构建上下文 = 项目根 $SERVER_DIR(需 src / pom 供 app-builder 阶段)
-  local args=(-t "$FULL_TAG" --platform "$PLATFORMS" $(load_push) -f "$BUILD_DIR/Dockerfile")
+  local args=(-t "$FULL_TAG" --platform "$PLATFORMS" $(load_push) \
+    --provenance=false --sbom=false -f "$BUILD_DIR/Dockerfile")
 
   if [ -n "$PROXY" ]; then
     echo "==> 宿代理: $PROXY -> buildkit 内地址: $HOST_PROXY(请确认代理已开启)"

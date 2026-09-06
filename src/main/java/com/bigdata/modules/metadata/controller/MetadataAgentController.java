@@ -188,6 +188,22 @@ public class MetadataAgentController {
             return;
         }
 
+        // 列级权限（指定列）：隐藏未授权列
+        java.util.Set<String> allowedColumns = dataAccessPermissionService.getAllowedColumns(null, databaseName, tableName);
+        if (allowedColumns != null) {
+            java.util.Set<String> allowedLower = new java.util.HashSet<>();
+            for (String col : allowedColumns) {
+                if (col != null) {
+                    allowedLower.add(col.toLowerCase());
+                }
+            }
+            columnVOs.removeIf(vo -> vo.getColumnName() == null
+                    || !allowedLower.contains(vo.getColumnName().toLowerCase()));
+            if (columnVOs.isEmpty()) {
+                return;
+            }
+        }
+
         SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
                 null, databaseName, tableName);
 

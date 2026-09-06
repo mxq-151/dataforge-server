@@ -54,6 +54,12 @@ public class DataAccessPermissionService {
     @Autowired
     private SysTablePermissionMapper sysTablePermissionMapper;
 
+    @Autowired
+    private SysTablePermissionColumnMapper tablePermissionColumnMapper;
+
+    @Autowired
+    private SysTablePermissionRowMapper tablePermissionRowMapper;
+
     public boolean isAdmin() {
         List<String> roles = SecurityUtils.getCurrentUserRoles();
         return roles != null && roles.stream().anyMatch(r -> ADMIN_ROLE_CODE.equalsIgnoreCase(r));
@@ -394,7 +400,6 @@ public class DataAccessPermissionService {
                 merged.setCanUpdate(perm.getCanUpdate());
                 merged.setCanDelete(perm.getCanDelete());
                 merged.setCanExport(perm.getCanExport());
-                merged.setRowFilterSql(perm.getRowFilterSql());
                 merged.setDataMaskingRule(perm.getDataMaskingRule());
             } else {
                 merged.setCanSelect(mergePermissionValue(merged.getCanSelect(), perm.getCanSelect()));
@@ -402,9 +407,6 @@ public class DataAccessPermissionService {
                 merged.setCanUpdate(mergePermissionValue(merged.getCanUpdate(), perm.getCanUpdate()));
                 merged.setCanDelete(mergePermissionValue(merged.getCanDelete(), perm.getCanDelete()));
                 merged.setCanExport(mergePermissionValue(merged.getCanExport(), perm.getCanExport()));
-                if (perm.getRowFilterSql() != null && !perm.getRowFilterSql().isEmpty()) {
-                    merged.setRowFilterSql(perm.getRowFilterSql());
-                }
                 if (perm.getDataMaskingRule() != null && !perm.getDataMaskingRule().isEmpty()) {
                     merged.setDataMaskingRule(perm.getDataMaskingRule());
                 }
@@ -418,6 +420,112 @@ public class DataAccessPermissionService {
         if (existing == null) existing = 0;
         if (incoming == null) incoming = 0;
         return Math.max(existing, incoming);
+    }
+
+    /**
+     * 获取当前用户对指定数据表的行级过滤条件（指定行）。
+     * <p>
+     * 返回 {@code null} 表示不做行级过滤（所有行可见）。
+     * 合并规则：任一命中权限对该表未配置行过滤时，视为不做行过滤（取宽松）；
+     * 否则将所有命中权限对该表的行过滤条件用 AND 组合后返回。
+     * </p>
+     */
+    public String getMergedRowFilterSql(String datasourceName, String databaseName, String tableName) {
+        if (isAdmin()) {
+            return null;
+        }
+
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            return null;
+        }
+
+        List<Long> roleIds = getUserRoleIds(userId);
+        if (roleIds.isEmpty()) {
+            return null;
+        }
+
+        List<Long> tablePermissionIds = getTablePermissionIdsByRoleIds(roleIds);
+        if (tablePermissionIds.isEmpty()) {
+            return null;
+        }
+
+        List<SysTablePermission> permissions = sysTablePermissionMapper.selectBatchIds(tablePermissionIds);
+        List<String> filters = new ArrayList<>();
+        for (SysTablePermission perm : permissions) {
+            if (!matchesTablePermission(perm, datasourceName, databaseName, tableName)) {
+                continue;
+            }
+            List<SysTablePermissionRow> rowBindings =
+                    tablePermissionRowMapper.selectByPermissionIdAndTable(perm.getId(), tableName);
+            if (rowBindings == null || rowBindings.isEmpty()) {
+                // 该条权限未对该表做行过滤，表示该表所有行可见，整体放宽为不过滤
+                return null;
+            }
+            for (SysTablePermissionRow r : rowBindings) {
+                if (r.getRowFilterSql() != null && !r.getRowFilterSql().isBlank()) {
+                    filters.add(r.getRowFilterSql().trim());
+                }
+            }
+        }
+        if (filters.isEmpty()) {
+            return null;
+        }
+        if (filters.size() == 1) {
+            return filters.get(0);
+        }
+        return filters.stream()
+                .map(f -> "(" + f + ")")
+                .collect(java.util.stream.Collectors.joining(" AND "));
+    }
+
+    /**
+     * 获取当前用户对指定数据表允许可见的列集合（指定列白名单）。
+     * <p>
+     * 返回 {@code null} 表示列不受限（所有列可见）；返回非空集合表示仅集合内的列可见。
+     * 合并规则：任一命中的权限未对表做列限制（该权限下该表无列记录）时，视为所有列可见（取并集放宽），
+     * 否则对所有命中权限的列白名单取并集。
+     * </p>
+     */
+    public Set<String> getAllowedColumns(String datasourceName, String databaseName, String tableName) {
+        if (isAdmin()) {
+            return null;
+        }
+
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            return Collections.emptySet();
+        }
+
+        List<Long> roleIds = getUserRoleIds(userId);
+        if (roleIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        List<Long> tablePermissionIds = getTablePermissionIdsByRoleIds(roleIds);
+        if (tablePermissionIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+
+        List<SysTablePermission> permissions = sysTablePermissionMapper.selectBatchIds(tablePermissionIds);
+        Set<String> merged = new HashSet<>();
+        for (SysTablePermission perm : permissions) {
+            if (!matchesTablePermission(perm, datasourceName, databaseName, tableName)) {
+                continue;
+            }
+            List<SysTablePermissionColumn> columnBindings =
+                    tablePermissionColumnMapper.selectByPermissionIdAndTable(perm.getId(), tableName);
+            if (columnBindings == null || columnBindings.isEmpty()) {
+                // 该条权限未对该表限制列，表示该表所有列可见，整体放宽为不受限
+                return null;
+            }
+            for (SysTablePermissionColumn c : columnBindings) {
+                if (c.getColumnName() != null && !c.getColumnName().isBlank()) {
+                    merged.add(c.getColumnName());
+                }
+            }
+        }
+        return merged;
     }
 
     public void checkProjectPermission(Long projectId, int requiredType) {

@@ -24,6 +24,12 @@ public class PermissionService {
     private SysTablePermissionMapper tablePermissionMapper;
 
     @Autowired
+    private SysTablePermissionColumnMapper tablePermissionColumnMapper;
+
+    @Autowired
+    private SysTablePermissionRowMapper tablePermissionRowMapper;
+
+    @Autowired
     private SysRoleMenuPermissionMapper roleMenuPermissionMapper;
 
     @Autowired
@@ -69,7 +75,10 @@ public class PermissionService {
         return toTablePermissionVOPage(entityPage);
     }
 
-    public TablePermissionVO saveTablePermission(SysTablePermission permission, List<Long> roleIds) {
+    @Transactional
+    public TablePermissionVO saveTablePermission(SysTablePermission permission, List<Long> roleIds,
+                                                 Map<String, List<String>> columnPermissions,
+                                                 Map<String, String> rowFilterSql) {
         if (permission.getCanSelect() == null) permission.setCanSelect(1);
         if (permission.getCanInsert() == null) permission.setCanInsert(0);
         if (permission.getCanUpdate() == null) permission.setCanUpdate(0);
@@ -77,18 +86,35 @@ public class PermissionService {
         if (permission.getCanExport() == null) permission.setCanExport(0);
         tablePermissionMapper.insert(permission);
         saveTablePermissionRoles(permission.getId(), roleIds);
-        return toTablePermissionVO(permission, roleIds);
+        saveTablePermissionColumns(permission.getId(), columnPermissions);
+        saveTablePermissionRows(permission.getId(), rowFilterSql);
+        TablePermissionVO vo = toTablePermissionVO(permission, roleIds);
+        vo.setColumnPermissions(columnPermissions);
+        vo.setRowFilterSql(rowFilterSql);
+        return vo;
     }
 
-    public TablePermissionVO updateTablePermission(SysTablePermission permission, List<Long> roleIds) {
+    @Transactional
+    public TablePermissionVO updateTablePermission(SysTablePermission permission, List<Long> roleIds,
+                                                   Map<String, List<String>> columnPermissions,
+                                                   Map<String, String> rowFilterSql) {
         tablePermissionMapper.updateById(permission);
         roleTablePermissionMapper.deleteByPermissionId(permission.getId());
         saveTablePermissionRoles(permission.getId(), roleIds);
-        return toTablePermissionVO(permission, roleIds);
+        tablePermissionColumnMapper.deleteByPermissionId(permission.getId());
+        saveTablePermissionColumns(permission.getId(), columnPermissions);
+        tablePermissionRowMapper.deleteByPermissionId(permission.getId());
+        saveTablePermissionRows(permission.getId(), rowFilterSql);
+        TablePermissionVO vo = toTablePermissionVO(permission, roleIds);
+        vo.setColumnPermissions(columnPermissions);
+        vo.setRowFilterSql(rowFilterSql);
+        return vo;
     }
 
     public void deleteTablePermission(Long id) {
         roleTablePermissionMapper.deleteByPermissionId(id);
+        tablePermissionColumnMapper.deleteByPermissionId(id);
+        tablePermissionRowMapper.deleteByPermissionId(id);
         tablePermissionMapper.deleteById(id);
     }
 
@@ -187,7 +213,6 @@ public class PermissionService {
         vo.setCanUpdate(entity.getCanUpdate());
         vo.setCanDelete(entity.getCanDelete());
         vo.setCanExport(entity.getCanExport());
-        vo.setRowFilterSql(entity.getRowFilterSql());
         vo.setDataMaskingRule(entity.getDataMaskingRule());
         vo.setDescription(entity.getDescription());
         vo.setCreateTime(entity.getCreateTime());
@@ -226,6 +251,16 @@ public class PermissionService {
                         Collectors.mapping(SysRoleTablePermission::getRoleId, Collectors.toList())
                 ));
 
+        List<SysTablePermissionColumn> allColumnBindings = tablePermissionColumnMapper.selectByPermissionIds(permissionIds);
+        Map<Long, List<SysTablePermissionColumn>> permColumnMap = allColumnBindings.stream()
+                .filter(c -> c.getTablePermissionId() != null)
+                .collect(Collectors.groupingBy(SysTablePermissionColumn::getTablePermissionId));
+
+        List<SysTablePermissionRow> allRowBindings = tablePermissionRowMapper.selectByPermissionIds(permissionIds);
+        Map<Long, List<SysTablePermissionRow>> permRowMap = allRowBindings.stream()
+                .filter(r -> r.getTablePermissionId() != null)
+                .collect(Collectors.groupingBy(SysTablePermissionRow::getTablePermissionId));
+
         Page<TablePermissionVO> voPage = new Page<>(entityPage.getCurrent(), entityPage.getSize(), entityPage.getTotal());
         voPage.setRecords(records.stream().map(entity -> {
             TablePermissionVO vo = new TablePermissionVO();
@@ -239,7 +274,6 @@ public class PermissionService {
             vo.setCanUpdate(entity.getCanUpdate());
             vo.setCanDelete(entity.getCanDelete());
             vo.setCanExport(entity.getCanExport());
-            vo.setRowFilterSql(entity.getRowFilterSql());
             vo.setDataMaskingRule(entity.getDataMaskingRule());
             vo.setDescription(entity.getDescription());
             vo.setCreateTime(entity.getCreateTime());
@@ -250,6 +284,11 @@ public class PermissionService {
             } else {
                 vo.setTableNames(List.of());
             }
+
+            vo.setColumnPermissions(groupColumnPermissions(
+                    permColumnMap.getOrDefault(entity.getId(), List.of())));
+            vo.setRowFilterSql(groupRowFilterSql(
+                    permRowMap.getOrDefault(entity.getId(), List.of())));
 
             List<Long> roleIds = permRoleMap.getOrDefault(entity.getId(), List.of());
             vo.setRoleIds(roleIds);
@@ -287,5 +326,70 @@ public class PermissionService {
             list.add(rp);
         }
         roleTablePermissionMapper.batchInsert(list);
+    }
+
+    private void saveTablePermissionColumns(Long permissionId, Map<String, List<String>> columnPermissions) {
+        if (columnPermissions == null || columnPermissions.isEmpty()) return;
+        LocalDateTime now = LocalDateTime.now();
+        List<SysTablePermissionColumn> list = new ArrayList<>();
+        columnPermissions.forEach((tableName, columns) -> {
+            if (tableName == null || columns == null || columns.isEmpty()) return;
+            for (String column : columns) {
+                if (column == null || column.isBlank()) continue;
+                SysTablePermissionColumn c = new SysTablePermissionColumn();
+                c.setTablePermissionId(permissionId);
+                c.setTableName(tableName.trim());
+                c.setColumnName(column.trim());
+                c.setCreateTime(now);
+                list.add(c);
+            }
+        });
+        if (!list.isEmpty()) {
+            tablePermissionColumnMapper.batchInsert(list);
+        }
+    }
+
+    private Map<String, List<String>> groupColumnPermissions(List<SysTablePermissionColumn> columns) {
+        if (columns == null || columns.isEmpty()) {
+            return null;
+        }
+        Map<String, Set<String>> grouped = new LinkedHashMap<>();
+        for (SysTablePermissionColumn c : columns) {
+            grouped.computeIfAbsent(c.getTableName(), k -> new LinkedHashSet<>()).add(c.getColumnName());
+        }
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        grouped.forEach((table, cols) -> result.put(table, new ArrayList<>(cols)));
+        return result;
+    }
+
+    private void saveTablePermissionRows(Long permissionId, Map<String, String> rowFilterSql) {
+        if (rowFilterSql == null || rowFilterSql.isEmpty()) return;
+        LocalDateTime now = LocalDateTime.now();
+        List<SysTablePermissionRow> list = new ArrayList<>();
+        rowFilterSql.forEach((tableName, filterSql) -> {
+            if (tableName == null || tableName.isBlank() || filterSql == null || filterSql.isBlank()) return;
+            SysTablePermissionRow r = new SysTablePermissionRow();
+            r.setTablePermissionId(permissionId);
+            r.setTableName(tableName.trim());
+            r.setRowFilterSql(filterSql.trim());
+            r.setCreateTime(now);
+            list.add(r);
+        });
+        if (!list.isEmpty()) {
+            tablePermissionRowMapper.batchInsert(list);
+        }
+    }
+
+    private Map<String, String> groupRowFilterSql(List<SysTablePermissionRow> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return null;
+        }
+        Map<String, String> result = new LinkedHashMap<>();
+        for (SysTablePermissionRow r : rows) {
+            if (r.getRowFilterSql() != null && !r.getRowFilterSql().isBlank()) {
+                result.putIfAbsent(r.getTableName(), r.getRowFilterSql());
+            }
+        }
+        return result.isEmpty() ? null : result;
     }
 }

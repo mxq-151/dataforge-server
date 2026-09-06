@@ -426,6 +426,30 @@ CREATE TABLE IF NOT EXISTS sys_table_permission (
 CREATE INDEX IF NOT EXISTS idx_sys_table_permission_scope ON sys_table_permission (permission_scope);
 COMMENT ON TABLE sys_table_permission IS '库表CRUD权限表';
 
+-- 库表权限-列级白名单（指定列）
+CREATE TABLE IF NOT EXISTS sys_table_permission_column (
+  id BIGINT AUTO_INCREMENT,
+  table_permission_id BIGINT NOT NULL,
+  table_name VARCHAR(255) NOT NULL,
+  column_name VARCHAR(255) NOT NULL,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_table_permission_column_perm ON sys_table_permission_column (table_permission_id);
+COMMENT ON TABLE sys_table_permission_column IS '库表权限-指定列白名单';
+
+-- 库表权限-行级过滤（指定行）
+CREATE TABLE IF NOT EXISTS sys_table_permission_row (
+  id BIGINT AUTO_INCREMENT,
+  table_permission_id BIGINT NOT NULL,
+  table_name VARCHAR(255) NOT NULL,
+  row_filter_sql CLOB,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_table_permission_row_perm ON sys_table_permission_row (table_permission_id);
+COMMENT ON TABLE sys_table_permission_row IS '库表权限-行级过滤SQL';
+
 -- 租户表
 CREATE TABLE IF NOT EXISTS sys_tenant (
   id BIGINT AUTO_INCREMENT,
