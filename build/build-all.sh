@@ -13,6 +13,9 @@
 #   REGISTRY=myrepo FULL=1 ./build-all.sh                              # amd64+arm64 全量重建,push
 #   REGISTRY=myrepo PLATFORMS="linux/amd64,linux/arm64" ./build-all.sh  # 自定义平台列表(逗号分隔)
 #   REGISTRY=myrepo SKIP_TESTS=false ./build-all.sh                    # mvn 打包时执行单测
+#   REGISTRY=myrepo HADOOP_VERSION=3.3.6 ./build-all.sh                # 动态编译指定组件版本
+#                                                                      # (HADOOP/HBASE/JUICEFS/PARQUET/
+#                                                                      #  ORC_VERSION,未设则用 pom 默认)
 #
 # 前置(多架构交叉编译须宿主机注册 binfmt):
 #   docker run --privileged --rm tonistiigi/binfmt --install all

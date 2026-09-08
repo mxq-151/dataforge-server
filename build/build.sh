@@ -15,6 +15,10 @@
 #   PLATFORMS="linux/arm64" ./build.sh                                # 指定某单平台
 #   PROXY="" ./build.sh                                               # 全量构建直连模式(网络不受限时)
 #   SKIP_TESTS=false ./build.sh                                       # mvn 打包时执行单测
+#   HADOOP_VERSION=3.3.6 HBASE_VERSION=2.4.17 ./build.sh              # 动态编译指定组件版本
+#                                                                     # (支持 HADOOP/HBASE/JUICEFS/
+#                                                                     #  PARQUET/ORC_VERSION,未设
+#                                                                     #  置的组件用 pom 默认版本)
 #
 # 全平台(多架构, --push 到仓库)构建请用 ./build-all.sh;
 # 本篇只做单平台 --load 到本地。

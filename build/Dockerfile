@@ -22,11 +22,25 @@ ENV http_proxy=${BUILD_HTTP_PROXY} \
     no_proxy=127.0.0.1,localhost \
     NO_PROXY=127.0.0.1,localhost
 WORKDIR /build
+# 大数据组件版本覆盖(可选;留空则使用 pom.xml 中的默认版本)
+ARG HADOOP_VERSION=
+ARG HBASE_VERSION=
+ARG JUICEFS_VERSION=
+ARG PARQUET_VERSION=
+ARG ORC_VERSION=
 # 构建根=本目录(context=dataforge-server);只复制 maven 构建所需,
 # 避免把 dist/(数百MB发行包) 等多余文件带入构建 stage
 COPY pom.xml ./
 COPY src ./src
-RUN mvn -q -DskipTests -f pom.xml package
+RUN set -e; \
+    MVN_VERSION_ARGS=""; \
+    if [ -n "$HADOOP_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dhadoop.version=$HADOOP_VERSION"; fi; \
+    if [ -n "$HBASE_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dhbase.version=$HBASE_VERSION"; fi; \
+    if [ -n "$JUICEFS_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Djuicefs.version=$JUICEFS_VERSION"; fi; \
+    if [ -n "$PARQUET_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dparquet.version=$PARQUET_VERSION"; fi; \
+    if [ -n "$ORC_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dorc.version=$ORC_VERSION"; fi; \
+    echo "mvn package$MVN_VERSION_ARGS"; \
+    mvn -q -DskipTests $MVN_VERSION_ARGS -f pom.xml package
 
 # ---------- Stage 2: Marquez API 0.51.1(源码构建,不依赖官方镜像) ----------
 FROM gradle:8.7-jdk17 AS marquez-builder

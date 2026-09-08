@@ -15,6 +15,11 @@
 #   IMAGE_NAME / IMAGE_TAG / IMAGE_VER  镜像命名
 #   PROXY      全量构建的宿主机代理地址;不设置 / off / none 走直连
 #   SKIP_TESTS  mvn 打包是否跳过单测(默认 true)
+#
+# 大数据组件版本动态覆盖(可选;未设置的组件沿用 pom.xml 默认版本):
+#   HADOOP_VERSION / HBASE_VERSION / JUICEFS_VERSION / PARQUET_VERSION / ORC_VERSION
+#   示例: HADOOP_VERSION=3.3.6 HBASE_VERSION=2.4.17 ./build.sh
+#   (jar 增量模式透传给宿主机 mvn;全量模式透传给 Dockerfile app-builder)
 # ============================================================
 set -euo pipefail
 
@@ -22,6 +27,39 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # 本目录 build/(D
 SERVER_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"                  # 项目根 dataforge-server/(构建上下文: pom / src 在其下)
 BUILD_DIR="$SCRIPT_DIR"
 DIST_DIR="$BUILD_DIR/dist"
+
+# 大数据组件版本覆盖映射: 环境变量名 -> maven 属性名
+VERSION_PROP_MAP=(
+  "HADOOP_VERSION:hadoop.version"
+  "HBASE_VERSION:hbase.version"
+  "JUICEFS_VERSION:juicefs.version"
+  "PARQUET_VERSION:parquet.version"
+  "ORC_VERSION:orc.version"
+)
+
+# 输出 mvn 版本覆盖参数串(如 " -Dhadoop.version=3.3.6 ...";无覆盖时为空)
+version_mvn_args() {
+  local args=""
+  local mapping env_name prop val
+  for mapping in "${VERSION_PROP_MAP[@]}"; do
+    env_name="${mapping%%:*}"; prop="${mapping##*:}"
+    val="${!env_name:-}"
+    [ -n "$val" ] && args="$args -D$prop=$val"
+  done
+  echo "$args"
+  return 0
+}
+
+# 输出已设置版本的环境变量名列表(如 "HADOOP_VERSION ORC_VERSION")
+version_env_names() {
+  local names="" mapping env_name
+  for mapping in "${VERSION_PROP_MAP[@]}"; do
+    env_name="${mapping%%:*}"
+    [ -n "${!env_name:-}" ] && names="$names $env_name"
+  done
+  echo "$names"
+  return 0
+}
 
 IMAGE_NAME="${IMAGE_NAME:-dataforge-allinone}"
 IMAGE_TAG="${IMAGE_TAG:-dataforge-allinone:1.0}"
@@ -82,10 +120,14 @@ build_jar_only() {
   fi
 
   echo "==> 1/3 宿主机 mvn 编译 dataforge-server (skipTests=$SKIP_TESTS)"
+  local version_args; version_args="$(version_mvn_args)"
+  if [ -n "$version_args" ]; then
+    echo "==> 组件版本覆盖:$(version_env_names)"
+  fi
   if [ "$SKIP_TESTS" = "true" ]; then
-    (cd "$SERVER_DIR" && mvn -q -DskipTests package)
+    (cd "$SERVER_DIR" && mvn -q -DskipTests $version_args package)
   else
-    (cd "$SERVER_DIR" && mvn -q package)
+    (cd "$SERVER_DIR" && mvn -q $version_args package)
   fi
   [ -f "$HOST_JAR" ] || { echo "!! 打包产物不存在: $HOST_JAR"; exit 1; }
 
@@ -142,6 +184,12 @@ build_full() {
   # Dockerfile: build/Dockerfile; 构建上下文 = 项目根 $SERVER_DIR(需 src / pom 供 app-builder 阶段)
   local args=(-t "$FULL_TAG" --platform "$PLATFORMS" $(load_push) \
     --provenance=false --sbom=false -f "$BUILD_DIR/Dockerfile")
+
+  # 大数据组件版本覆盖透传给 app-builder(未设置的组件由 Dockerfile 沿用 pom 默认)
+  local env_name
+  for env_name in $(version_env_names); do
+    args+=(--build-arg "$env_name=${!env_name}")
+  done
 
   if [ -n "$PROXY" ]; then
     echo "==> 宿代理: $PROXY -> buildkit 内地址: $HOST_PROXY(请确认代理已开启)"
