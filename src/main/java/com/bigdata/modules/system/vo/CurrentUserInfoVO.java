@@ -15,7 +15,7 @@ public class CurrentUserInfoVO implements Serializable {
     private String avatar;
     private List<SysRoleVO> roles;
     private List<String> menuTags;
-    private List<String> projectCodes;
+    private List<ProjectPermissionInfoVO> projectCodes;
     private Long tenantId;
     private String tenantName;
 
@@ -86,11 +86,11 @@ public class CurrentUserInfoVO implements Serializable {
         this.menuTags = menuTags;
     }
 
-    public List<String> getProjectCodes() {
+    public List<ProjectPermissionInfoVO> getProjectCodes() {
         return projectCodes;
     }
 
-    public void setProjectCodes(List<String> projectCodes) {
+    public void setProjectCodes(List<ProjectPermissionInfoVO> projectCodes) {
         this.projectCodes = projectCodes;
     }
 

@@ -6,6 +6,7 @@ import com.bigdata.common.utils.JwtTokenUtils;
 import com.bigdata.common.utils.PasswordUtils;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.common.vo.Result;
+import com.bigdata.modules.development.entity.DevProject;
 import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.system.dto.LoginDTO;
 import com.bigdata.modules.system.entity.*;
@@ -65,6 +66,9 @@ class AuthControllerIntegrationTest {
 
     @Autowired
     private SysMenuPermissionMapper sysMenuPermissionMapper;
+
+    @Autowired
+    private SysRoleProjectPermissionMapper sysRoleProjectPermissionMapper;
 
     @Autowired
     private JwtTokenUtils jwtTokenUtils;
@@ -145,6 +149,26 @@ class AuthControllerIntegrationTest {
         binding.setRoleId(roleId);
         binding.setMenuPermissionId(menuPermId);
         binding.setCreateTime(LocalDateTime.now());
+    }
+
+    private DevProject createTestProject(String code) {
+        DevProject project = new DevProject();
+        project.setProjectName("Test Project " + code);
+        project.setProjectCode(code);
+        project.setOwnerId(1L);
+        project.setStatus(1);
+        project.setDeleted(0);
+        devProjectMapper.insert(project);
+        return project;
+    }
+
+    private void bindProjectPermission(Long roleId, Long projectId, Integer permissionType) {
+        SysRoleProjectPermission permission = new SysRoleProjectPermission();
+        permission.setRoleId(roleId);
+        permission.setProjectId(projectId);
+        permission.setPermissionType(permissionType);
+        permission.setCreateTime(LocalDateTime.now());
+        sysRoleProjectPermissionMapper.insert(permission);
     }
 
     private void setUpSecurityContext(Long userId, String username, Long tenantId, List<String> roles) {
@@ -449,6 +473,53 @@ class AuthControllerIntegrationTest {
             assertTrue(vo.getRoles().stream().anyMatch(r -> "超级管理员".equals(r.getRoleName())), "应包含'超级管理员'角色");
 
             System.out.println("  Roles: " + vo.getRoles());
+        }
+
+        @Test
+        @DisplayName("✅ 用户信息包含项目权限信息 (projectCodes对象数组)")
+        void testGetUserInfo_ProjectPermissions() {
+            System.out.println("\n=== 场景3.4: 用户信息包含项目权限 ===");
+
+            SysUser testUser = createTestUser("test_info_proj_perm", "123456", 0);
+            SysTenant tenant = createTestTenant("Test Proj Tenant", "TEST_PROJ_TENANT", testUser.getId());
+            bindUserToTenant(testUser.getId(), tenant.getId());
+
+            SysRole role1 = createTestRole("项目角色1", "PROJ_ROLE_1_" + System.currentTimeMillis());
+            SysRole role2 = createTestRole("项目角色2", "PROJ_ROLE_2_" + System.currentTimeMillis());
+            bindRoleToTenant(tenant.getId(), role1.getId());
+            bindRoleToTenant(tenant.getId(), role2.getId());
+
+            DevProject projA = createTestProject("PROJ_A_" + System.currentTimeMillis());
+            DevProject projB = createTestProject("PROJ_B_" + System.currentTimeMillis());
+            // 同一项目 A 通过两个角色拥有不同权限,应取最高权限 EDIT(2)
+            bindProjectPermission(role1.getId(), projA.getId(), 1); // 读取
+            bindProjectPermission(role2.getId(), projA.getId(), 2); // 编辑
+            bindProjectPermission(role1.getId(), projB.getId(), 3); // 删除
+
+            setUpSecurityContext(testUser.getId(), "test_info_proj_perm", tenant.getId(),
+                    Arrays.asList("ROLE_PROJ_ROLE_1", "ROLE_PROJ_ROLE_2"));
+
+            Result<CurrentUserInfoVO> result = authController.getUserInfo();
+
+            assertNotNull(result, "结果不应为null");
+            assertEquals(200, result.getCode(), "获取用户信息应成功");
+            assertNotNull(result.getData().getProjectCodes(), "projectCodes不应为null");
+            assertEquals(2, result.getData().getProjectCodes().size(), "应有2个可访问项目");
+
+            Map<String, Integer> codeToType = new HashMap<>();
+            for (var info : result.getData().getProjectCodes()) {
+                assertNotNull(info.getProjectCode(), "projectCode不应为null");
+                assertNotNull(info.getPermissionType(), "permissionType不应为null");
+                assertNotNull(info.getPermissionTypeName(), "permissionTypeName不应为null");
+                codeToType.put(info.getProjectCode(), info.getPermissionType());
+            }
+
+            assertEquals(Integer.valueOf(2), codeToType.get(projA.getProjectCode()),
+                    "项目A多角色权限应取最高权限EDIT(2)");
+            assertEquals(Integer.valueOf(3), codeToType.get(projB.getProjectCode()),
+                    "项目B权限应为DELETE(3)");
+
+            System.out.println("  ProjectCodes: " + result.getData().getProjectCodes());
         }
 
         @Test

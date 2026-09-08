@@ -23,6 +23,7 @@ import com.bigdata.modules.system.service.SysTenantService;
 import com.bigdata.modules.system.service.SysUserService;
 import com.bigdata.modules.system.vo.CurrentUserInfoVO;
 import com.bigdata.modules.system.vo.LoginVO;
+import com.bigdata.modules.system.vo.ProjectPermissionInfoVO;
 import com.bigdata.modules.system.vo.SysRoleVO;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,8 +32,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -206,14 +209,30 @@ public class AuthController {
                 : Collections.emptyList();
 
         if (!CollectionUtils.isEmpty(projectPermissions)) {
-            List<Long> projectIds = projectPermissions.stream()
-                    .map(SysRoleProjectPermission::getProjectId)
-                    .distinct()
-                    .collect(Collectors.toList());
-            List<DevProject> projects = devProjectMapper.selectBatchIds(projectIds);
-            vo.setProjectCodes(projects.stream()
-                    .map(DevProject::getProjectCode)
-                    .collect(Collectors.toList()));
+            // 同一用户可能通过多个角色拥有同一项目不同权限,取最高权限类型
+            Map<Long, Integer> projectMaxType = new HashMap<>();
+            for (SysRoleProjectPermission perm : projectPermissions) {
+                projectMaxType.merge(perm.getProjectId(), perm.getPermissionType(),
+                        (a, b) -> a >= b ? a : b);
+            }
+
+            List<DevProject> projects = devProjectMapper.selectBatchIds(new ArrayList<>(projectMaxType.keySet()));
+            Map<Long, DevProject> projectById = projects.stream()
+                    .collect(Collectors.toMap(DevProject::getId, p -> p, (p1, p2) -> p1));
+
+            List<ProjectPermissionInfoVO> projectInfoList = new ArrayList<>();
+            projectMaxType.forEach((projectId, permissionType) -> {
+                DevProject project = projectById.get(projectId);
+                if (project == null) {
+                    return;
+                }
+                ProjectPermissionInfoVO info = new ProjectPermissionInfoVO();
+                info.setProjectCode(project.getProjectCode());
+                info.setPermissionType(permissionType);
+                info.setPermissionTypeName(ProjectPermissionInfoVO.permissionTypeName(permissionType));
+                projectInfoList.add(info);
+            });
+            vo.setProjectCodes(projectInfoList);
         } else {
             vo.setProjectCodes(Collections.emptyList());
         }
