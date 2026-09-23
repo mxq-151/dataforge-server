@@ -11,11 +11,15 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -86,6 +90,44 @@ public class GlobalExceptionHandler {
                 e.getName(), e.getValue(),
                 e.getRequiredType() != null ? e.getRequiredType().getSimpleName() : null);
         return Result.error(400, "参数 " + e.getName() + " 取值非法: " + e.getValue());
+    }
+
+    /**
+     * 缺少必填请求参数（如 {@code DELETE /asset/bookmark} 未传 {@code assetId}）。
+     * <p>
+     * 与上面的类型不匹配同理：此前会落到 {@code Exception} 兜底分支返回 500，
+     * 前端据此提示「服务器内部错误,请联系管理员」，把调用方的参数漏传误导为服务故障。
+     * 这里按 400 + 具体参数名返回，前端可据此直接定位问题。
+     * </p>
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleMissingRequestParameterException(MissingServletRequestParameterException e) {
+        logger.warn("缺少必填请求参数: name={}", e.getParameterName());
+        return Result.error(400, "缺少必填参数: " + e.getParameterName());
+    }
+
+    /**
+     * 请求路径不存在 / 静态资源不存在。
+     * <p>
+     * 两者都会被下面的 {@code Exception} 兜底分支捕获并返回 500，把「客户端调错地址」
+     * 误导为「服务端故障」（前端会提示「服务器内部错误,请联系管理员」）。
+     * Spring 自身对这两种异常给出的语义就是 404，这里原样透出。
+     * </p>
+     */
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<Void> handleNotFoundException(Exception e) {
+        logger.warn("请求的资源不存在: {}", e.getMessage());
+        return Result.error(404, "请求的资源不存在");
+    }
+
+    /** 请求方法不支持（如对只读接口发 POST）；同理会落到兜底分支变成 500，此处按 405 返回 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public Result<Void> handleMethodNotSupportedException(HttpRequestMethodNotSupportedException e) {
+        logger.warn("请求方法不支持: method={}, supported={}", e.getMethod(), e.getSupportedHttpMethods());
+        return Result.error(405, "请求方法不支持: " + e.getMethod());
     }
 
     @ExceptionHandler(Exception.class)

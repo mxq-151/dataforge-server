@@ -35,6 +35,9 @@ public class DatasourceConfigController {
     private MetadataSyncService metadataSyncService;
 
     @Autowired
+    private com.bigdata.modules.metadata.service.MetadataSyncAlertService metadataSyncAlertService;
+
+    @Autowired
     private ExecutionStrategyFactory executionStrategyFactory;
 
 
@@ -93,6 +96,11 @@ public class DatasourceConfigController {
         if (success) {
             return Result.success();
         } else {
+            // 风险项 R1：全量同步失败同样升级为可观测告警（审计日志 + 告警级日志），不再只体现在返回值里
+            DatasourceConfig config = datasourceConfigService.getDatasourceById(id);
+            metadataSyncAlertService.alertFullSyncFailed(id,
+                    config != null ? config.getDatasourceType() : null, 0,
+                    "数据源全量元数据同步失败（部分表同步失败或连接失败）");
             return Result.error(500, "元数据同步失败");
         }
     }

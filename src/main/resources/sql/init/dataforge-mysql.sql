@@ -8,6 +8,151 @@ SET NAMES utf8mb4;
 -- 1. 建表（按字母序）
 -- ------------------------------------------------------------------
 
+-- ==================================================================
+-- 资产目录模块（asset_*）：对标 DataWorks 数据资产目录
+--   分类不靠人工维护：表名规范 {分层}_{业务域}_{实体描述}_{刷新周期} 可直接
+--   解析出分层与业务域，解析失败即「未分类」并自动成为治理项；
+--   asset_category 只存人工覆盖与显示名。
+-- ==================================================================
+
+-- 资产分类表(分层/业务域，支持人工覆盖)
+CREATE TABLE IF NOT EXISTS `asset_category` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `category_code` varchar(64) NOT NULL COMMENT '分类编码',
+  `category_name` varchar(100) NOT NULL COMMENT '分类名称',
+  `parent_code` varchar(64) DEFAULT NULL COMMENT '父级分类编码',
+  `category_kind` varchar(16) NOT NULL COMMENT '分类维度(layer=数仓分层 domain=业务域)',
+  `sort_order` int NOT NULL DEFAULT '0' COMMENT '排序号',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_category_code` (`category_code`),
+  KEY `idx_asset_category_kind` (`category_kind`),
+  KEY `idx_asset_category_parent` (`parent_code`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产分类表(分层/业务域，支持人工覆盖)';
+
+-- 资产收藏表
+CREATE TABLE IF NOT EXISTS `asset_bookmark` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `asset_type` varchar(16) NOT NULL COMMENT '资产类型(table/column/indicator)',
+  `asset_id` bigint NOT NULL COMMENT '资产ID',
+  `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_bookmark` (`user_id`,`asset_type`,`asset_id`),
+  KEY `idx_asset_bookmark_user` (`user_id`),
+  KEY `idx_asset_bookmark_table` (`table_metadata_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产收藏表';
+
+-- 资产访问埋点表(仅追加)：高频写入的轻量表，刻意与 operation_audit_log 分离，
+-- 避免浏览行为淹没真正的操作留痕
+CREATE TABLE IF NOT EXISTS `asset_access_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` bigint DEFAULT NULL COMMENT '用户ID',
+  `user_name` varchar(100) DEFAULT NULL COMMENT '用户名',
+  `asset_type` varchar(16) NOT NULL COMMENT '资产类型(table/column/indicator)',
+  `asset_id` bigint NOT NULL COMMENT '资产ID',
+  `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
+  `access_type` varchar(16) NOT NULL COMMENT '访问类型(browse=浏览 read=读取 bookmark=收藏 query=带查询)',
+  `keyword` varchar(200) DEFAULT NULL COMMENT '检索关键词',
+  `access_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '访问时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_asset_access_asset` (`asset_type`,`asset_id`),
+  KEY `idx_asset_access_time` (`access_time`),
+  KEY `idx_asset_access_user` (`user_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产访问埋点表(仅追加，按日汇总)';
+
+
+-- ==================================================================
+-- 资产目录模块（第二批 / 第三批）：标签、使用说明、使用热度
+--   使用热度走独立的轻量表按日汇总(T+1)，不回写 operation_audit_log；
+--   使用说明复用同一张 asset_doc + 版本历史，避免重复建设 markdown 与版本能力。
+-- ==================================================================
+
+-- 资产使用说明表(markdown，版本历史在 asset_doc_history)
+CREATE TABLE IF NOT EXISTS `asset_doc` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `table_metadata_id` bigint NOT NULL COMMENT '表元数据ID',
+  `content` text DEFAULT NULL COMMENT '使用说明(markdown)',
+  `version` int NOT NULL DEFAULT 1 COMMENT '当前版本号',
+  `update_by` varchar(100) DEFAULT NULL COMMENT '最后修改人',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_doc_table` (`table_metadata_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产使用说明表(markdown，版本历史在 asset_doc_history)';
+
+-- 资产使用说明版本历史表
+CREATE TABLE IF NOT EXISTS `asset_doc_history` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `table_metadata_id` bigint NOT NULL COMMENT '表元数据ID',
+  `version` int NOT NULL COMMENT '版本号',
+  `content` text DEFAULT NULL COMMENT '该版本的使用说明(markdown)',
+  `update_by` varchar(100) DEFAULT NULL COMMENT '修改人',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_asset_doc_history_table` (`table_metadata_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产使用说明版本历史表';
+
+-- 资产标签定义表
+CREATE TABLE IF NOT EXISTS `asset_tag` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `tag_code` varchar(64) NOT NULL COMMENT '标签编码',
+  `tag_name` varchar(100) NOT NULL COMMENT '标签名称',
+  `color` varchar(32) DEFAULT NULL COMMENT '标签颜色(前端色值)',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_tag_code` (`tag_code`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产标签定义表';
+
+-- 资产标签关联表(支持表/字段/指标)
+CREATE TABLE IF NOT EXISTS `asset_tag_rel` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `tag_id` bigint NOT NULL COMMENT '标签ID',
+  `asset_type` varchar(16) NOT NULL COMMENT '资产类型(table/column/indicator)',
+  `asset_id` bigint NOT NULL COMMENT '资产ID',
+  `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_tag_rel` (`tag_id`,`asset_type`,`asset_id`),
+  KEY `idx_asset_tag_rel_asset` (`asset_type`,`asset_id`),
+  KEY `idx_asset_tag_rel_table` (`table_metadata_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产标签关联表(支持表/字段/指标)';
+
+-- 资产使用热度日汇总表(T+1，由 asset_access_log 汇总)
+CREATE TABLE IF NOT EXISTS `asset_usage_daily` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `asset_type` varchar(16) NOT NULL DEFAULT 'table' COMMENT '资产类型(table/column/indicator)',
+  `asset_id` bigint NOT NULL COMMENT '资产ID',
+  `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
+  `stat_date` date NOT NULL COMMENT '统计日',
+  `browse_count` int NOT NULL DEFAULT 0 COMMENT '浏览数',
+  `read_count` int NOT NULL DEFAULT 0 COMMENT '读取数',
+  `bookmark_count` int NOT NULL DEFAULT 0 COMMENT '收藏数',
+  `relate_count` int NOT NULL DEFAULT 0 COMMENT '被关联数(引用该资产的规则/指标等)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_usage_daily` (`asset_type`,`asset_id`,`stat_date`),
+  KEY `idx_asset_usage_table` (`table_metadata_id`),
+  KEY `idx_asset_usage_date` (`stat_date`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产使用热度日汇总表(T+1，由 asset_access_log 汇总)';
+
 -- 表字段元数据表
 CREATE TABLE IF NOT EXISTS `column_metadata` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
@@ -23,6 +168,9 @@ CREATE TABLE IF NOT EXISTS `column_metadata` (
   `ordinal_position` int NOT NULL DEFAULT '0' COMMENT '字段顺序',
   `nullable` tinyint NOT NULL DEFAULT '1' COMMENT '是否可空',
   `default_value` varchar(500) DEFAULT NULL COMMENT '默认值',
+  `business_desc` varchar(1000) DEFAULT NULL COMMENT '业务描述(与 column_comment 的技术注释区分，供资产目录展示)',
+  `security_level` varchar(16) DEFAULT NULL COMMENT '字段安全等级',
+  `hot_score` tinyint NOT NULL DEFAULT '0' COMMENT '字段热度星级(0~5，由使用记录日汇总回写)',
   `sync_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '同步时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -31,6 +179,30 @@ CREATE TABLE IF NOT EXISTS `column_metadata` (
   KEY `idx_table_metadata_id` (`table_metadata_id`),
   KEY `idx_column_name` (`column_name`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='表字段元数据表';
+
+-- 数据质量校验结果表
+CREATE TABLE IF NOT EXISTS `data_quality_check_result` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `datasource_id` bigint DEFAULT NULL COMMENT '数据源ID',
+  `datasource_name` varchar(100) NOT NULL COMMENT '数据源名称',
+  `database_name` varchar(100) DEFAULT NULL COMMENT '数据库名',
+  `table_name` varchar(200) NOT NULL COMMENT '表名',
+  `check_item` varchar(200) NOT NULL COMMENT '检查项(如:空值率/唯一性/数据范围/主键缺失)',
+  `check_time` datetime NOT NULL COMMENT '检查时间',
+  `check_record_count` bigint NOT NULL DEFAULT '0' COMMENT '检查记录数',
+  `fail_record_count` bigint NOT NULL DEFAULT '0' COMMENT '未通过记录数',
+  `fail_detail` text COMMENT '未通过明细(JSON)',
+  `rule_type` varchar(64) DEFAULT NULL COMMENT '规则类型(7类之一)，历史数据为空表示未分类',
+  `rule_name` varchar(200) DEFAULT NULL COMMENT '规则名',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_dqc_datasource_id` (`datasource_id`),
+  KEY `idx_dqc_table` (`database_name`,`table_name`),
+  KEY `idx_dqc_check_time` (`check_time`),
+  KEY `idx_dqc_rule_type` (`rule_type`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量校验结果表';
 
 -- 数据源配置表
 CREATE TABLE IF NOT EXISTS `datasource_config` (
@@ -174,6 +346,210 @@ CREATE TABLE IF NOT EXISTS `dev_script_execution` (
   KEY `idx_start_time` (`start_time`),
   KEY `idx_execute_mode` (`execute_mode`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='脚本执行历史表';
+
+-- ==================================================================
+-- 数据质量模块（dq_*）：对标 DataWorks 数据质量
+--   契约早已存在 —— 智能体提示词里已约定 7 类规则类型（主键唯一性/非空/值域/
+--   行数波动/行数环比/上下游对账/口径一致性）与 DQC 质量层，但平台侧原先只有
+--   结果表 data_quality_check_result（「检查项」是自由文本），规则定义、阈值与
+--   运行记录无处存放。本模块补齐「规则 + 运行」两段。
+--   ⚠ 规则类型是契约：新增/改名必须同时改前端 types/quality.ts 与提示词，禁止自造同义词。
+-- ==================================================================
+
+-- 规则模板表：内置模板即 7 类规则类型(template_code 与类型编码同名)；
+-- 自定义模板仍需归属 7 类之一(差异只在 SQL 模板，不在类型)，否则覆盖率统计失去口径
+CREATE TABLE IF NOT EXISTS `dq_rule_template` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `template_code` varchar(64) NOT NULL COMMENT '模板编码(内置模板与规则类型编码同名)',
+  `template_name` varchar(200) NOT NULL COMMENT '模板名称',
+  `rule_type` varchar(64) NOT NULL COMMENT '规则类型(7类之一:PRIMARY_KEY_UNIQUE/NOT_NULL/VALUE_RANGE/ROW_COUNT_FLUCTUATION/ROW_COUNT_MOM/UPSTREAM_DOWNSTREAM_RECON/METRIC_CONSISTENCY)',
+  `template_kind` varchar(16) NOT NULL DEFAULT 'custom' COMMENT '模板类别(builtin=内置 custom=自定义)',
+  `sql_template` text COMMENT '校验SQL模板',
+  `field_types` varchar(255) DEFAULT NULL COMMENT '适用字段类型',
+  `param_schema` text COMMENT '参数结构(JSON)',
+  `remark` varchar(500) DEFAULT NULL COMMENT '说明',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dq_template_code` (`template_code`),
+  KEY `idx_dq_template_rule_type` (`rule_type`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量规则模板表';
+
+-- 监控规则表：模板的具体应用，含校验对象、阈值与处置方式。
+--   dispose_mode=BLOCK 即「阻断下游」，落地方式是让质检任务自身跑失败，
+--   DolphinScheduler 的下游节点便不会触发（不依赖任何「反向置为失败」接口）
+CREATE TABLE IF NOT EXISTS `dq_rule` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `rule_name` varchar(200) NOT NULL COMMENT '规则名',
+  `rule_type` varchar(64) NOT NULL COMMENT '规则类型(7类之一)',
+  `template_id` bigint DEFAULT NULL COMMENT '规则模板ID',
+  `template_code` varchar(64) DEFAULT NULL COMMENT '规则模板编码(冗余，模板被删后仍可追溯)',
+  `datasource_id` bigint DEFAULT NULL COMMENT '数据源ID',
+  `datasource_name` varchar(100) DEFAULT NULL COMMENT '数据源名称',
+  `database_name` varchar(100) DEFAULT NULL COMMENT '数据库名',
+  `table_name` varchar(200) NOT NULL COMMENT '表名',
+  `column_name` varchar(200) DEFAULT NULL COMMENT '字段名',
+  `partition_expr` varchar(255) DEFAULT NULL COMMENT '分区表达式',
+  `ref_datasource_id` bigint DEFAULT NULL COMMENT '参照数据源ID(上下游对账/口径一致性用)',
+  `ref_database_name` varchar(100) DEFAULT NULL COMMENT '参照库名',
+  `ref_table_name` varchar(200) DEFAULT NULL COMMENT '参照表名',
+  `ref_column_name` varchar(200) DEFAULT NULL COMMENT '参照字段名',
+  `compare_mode` varchar(8) NOT NULL DEFAULT 'EQ' COMMENT '比较方式(EQ/NE/GT/GTE/LT/LTE)',
+  `expected_value` varchar(255) DEFAULT NULL COMMENT '期望值',
+  `warn_threshold` varchar(255) DEFAULT NULL COMMENT '橙色(警告)阈值，空表示不设',
+  `error_threshold` varchar(255) DEFAULT NULL COMMENT '红色(异常)阈值，空表示不设',
+  `dispose_mode` varchar(8) NOT NULL DEFAULT 'ALERT' COMMENT '处置方式(BLOCK=阻断下游 ALERT=告警)',
+  `params` text COMMENT '自定义模板占位符取值(JSON 对象)；内置模板按规则类型使用固定参数名',
+  `owner_name` varchar(100) DEFAULT NULL COMMENT '规则负责人',
+  `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_dq_rule_table` (`database_name`,`table_name`),
+  KEY `idx_dq_rule_type` (`rule_type`),
+  KEY `idx_dq_rule_template` (`template_id`),
+  KEY `idx_dq_rule_datasource` (`datasource_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量监控规则表';
+
+-- 运行实例表：一次质检任务执行(或一次调度批次)的汇总
+CREATE TABLE IF NOT EXISTS `dq_run_instance` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_id` bigint DEFAULT NULL COMMENT '质检任务ID',
+  `task_name` varchar(200) DEFAULT NULL COMMENT '任务名(冗余)',
+  `batch_no` varchar(64) NOT NULL COMMENT '批次号',
+  `trigger_type` varchar(16) NOT NULL DEFAULT 'MANUAL' COMMENT '触发方式(SCHEDULE=调度触发 MANUAL=手动触发)',
+  `schedule_instance_id` bigint DEFAULT NULL COMMENT '调度触发时对应的调度实例号，用于跳转调度实例详情',
+  `target_datasource_id` bigint DEFAULT NULL COMMENT '目标数据源ID',
+  `target_database_name` varchar(100) DEFAULT NULL COMMENT '目标库名',
+  `target_table_name` varchar(200) DEFAULT NULL COMMENT '目标表名',
+  `start_time` datetime DEFAULT NULL COMMENT '开始时间',
+  `end_time` datetime DEFAULT NULL COMMENT '结束时间',
+  `status` varchar(16) NOT NULL DEFAULT 'RUNNING' COMMENT '运行状态(RUNNING/SUCCESS/FAILED)',
+  `check_record_count` bigint NOT NULL DEFAULT '0' COMMENT '检查记录数',
+  `fail_record_count` bigint NOT NULL DEFAULT '0' COMMENT '未通过记录数',
+  `pass_count` int NOT NULL DEFAULT '0' COMMENT '通过规则数',
+  `warn_count` int NOT NULL DEFAULT '0' COMMENT '橙色异常规则数',
+  `error_count` int NOT NULL DEFAULT '0' COMMENT '红色异常规则数',
+  `failed_count` int NOT NULL DEFAULT '0' COMMENT 'SQL 未跑通的规则数',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_dq_run_task` (`task_id`),
+  KEY `idx_dq_run_batch` (`batch_no`),
+  KEY `idx_dq_run_table` (`target_database_name`,`target_table_name`),
+  KEY `idx_dq_run_status` (`status`),
+  KEY `idx_dq_run_start_time` (`start_time`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量运行实例表';
+
+-- 规则级校验结果表：对应提示词「校验输出须可定位：规则名/校验对象/阈值/实际值/是否通过」
+CREATE TABLE IF NOT EXISTS `dq_rule_result` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `run_id` bigint NOT NULL COMMENT '运行实例ID',
+  `rule_id` bigint DEFAULT NULL COMMENT '规则ID',
+  `rule_name` varchar(200) NOT NULL COMMENT '规则名(结果自包含，规则被删后仍可追溯)',
+  `rule_type` varchar(64) NOT NULL COMMENT '规则类型(7类之一)',
+  `check_object` varchar(500) DEFAULT NULL COMMENT '校验对象(表.字段 或 上下游两表)',
+  `threshold` varchar(255) DEFAULT NULL COMMENT '阈值',
+  `actual_value` varchar(500) DEFAULT NULL COMMENT '实际值',
+  `metric_value` varchar(64) DEFAULT NULL COMMENT '原始度量值(行数类=当期行数 跨表比对=主表值,对照值)；仅存百分比无法回推历史基线',
+  `status` varchar(16) NOT NULL DEFAULT 'PASS' COMMENT '校验状态(PASS=通过 WARN=橙色异常 ERROR=红色异常 FAILED=校验失败)',
+  `severity` varchar(16) DEFAULT NULL COMMENT '严重级别',
+  `exec_sql` text COMMENT '实际执行的校验SQL',
+  `error_msg` varchar(1000) DEFAULT NULL COMMENT '错误信息',
+  `cost_ms` bigint DEFAULT NULL COMMENT '耗时(毫秒)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_dq_result_run` (`run_id`),
+  KEY `idx_dq_result_rule` (`rule_id`),
+  KEY `idx_dq_result_status` (`status`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量规则级校验结果表';
+
+
+-- ==================================================================
+-- 数据质量模块（第二批 / 第三批）：质检任务、任务与规则关联、告警订阅与发送记录
+--   阻断下游不做「平台反向置调度节点失败」：质检任务作为 DAG 节点，
+--   校验不通过即非零退出，下游自然不执行。告警第一期只落发送记录。
+-- ==================================================================
+
+-- 数据质量告警发送记录表
+CREATE TABLE IF NOT EXISTS `dq_alert_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `run_id` bigint DEFAULT NULL COMMENT '运行实例ID',
+  `task_id` bigint DEFAULT NULL COMMENT '质检任务ID',
+  `rule_id` bigint DEFAULT NULL COMMENT '规则ID',
+  `rule_name` varchar(200) DEFAULT NULL COMMENT '规则名(结果自包含，规则被删后仍可追溯)',
+  `channel` varchar(32) NOT NULL COMMENT '告警渠道(site=站内 webhook=回调 email=邮件)',
+  `receiver` varchar(200) DEFAULT NULL COMMENT '接收人',
+  `status` varchar(16) NOT NULL DEFAULT 'SUCCESS' COMMENT '发送状态(SUCCESS/FAILED)',
+  `fail_reason` varchar(500) DEFAULT NULL COMMENT '失败原因',
+  `send_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_dq_alert_log_run` (`run_id`),
+  KEY `idx_dq_alert_log_task` (`task_id`),
+  KEY `idx_dq_alert_log_time` (`send_time`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量告警发送记录表';
+
+-- 数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)
+CREATE TABLE IF NOT EXISTS `dq_alert_subscription` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_id` bigint NOT NULL COMMENT '质检任务ID',
+  `notify_on` varchar(64) NOT NULL DEFAULT 'ERROR,FAILED' COMMENT '触发告警的结果状态集合(逗号分隔)',
+  `channels` varchar(255) DEFAULT NULL COMMENT '渠道集合(逗号分隔)',
+  `receivers` varchar(500) DEFAULT NULL COMMENT '接收人集合(逗号分隔)',
+  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_dq_alert_sub_task` (`task_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)';
+
+-- 数据质量质检任务表(规则集的执行计划)
+CREATE TABLE IF NOT EXISTS `dq_task` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_name` varchar(200) NOT NULL COMMENT '任务名称',
+  `owner_name` varchar(100) DEFAULT NULL COMMENT '任务负责人',
+  `description` varchar(500) DEFAULT NULL COMMENT '任务说明',
+  `datasource_id` bigint DEFAULT NULL COMMENT '数据源ID',
+  `datasource_name` varchar(100) DEFAULT NULL COMMENT '数据源名称',
+  `database_name` varchar(100) DEFAULT NULL COMMENT '库名',
+  `table_name` varchar(200) DEFAULT NULL COMMENT '表名',
+  `trigger_type` varchar(16) NOT NULL DEFAULT 'MANUAL' COMMENT '触发方式(SCHEDULE=调度触发 MANUAL=手动触发)',
+  `project_code` varchar(200) DEFAULT NULL COMMENT '调度项目编码',
+  `workflow_code` bigint DEFAULT NULL COMMENT '调度工作流编码',
+  `workflow_name` varchar(200) DEFAULT NULL COMMENT '调度工作流名称',
+  `node_name` varchar(200) DEFAULT NULL COMMENT '调度节点名',
+  `dispose_policy` varchar(8) NOT NULL DEFAULT 'ALERT' COMMENT '任务级处置策略(BLOCK=阻断下游 ALERT=告警)',
+  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  KEY `idx_dq_task_table` (`database_name`,`table_name`),
+  KEY `idx_dq_task_trigger` (`trigger_type`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量质检任务表(规则集的执行计划)';
+
+-- 数据质量质检任务与规则的关联表
+CREATE TABLE IF NOT EXISTS `dq_task_rule_rel` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_id` bigint NOT NULL COMMENT '质检任务ID',
+  `rule_id` bigint NOT NULL COMMENT '监控规则ID',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_dq_task_rule` (`task_id`,`rule_id`),
+  KEY `idx_dq_task_rule_rule` (`rule_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量质检任务与规则的关联表';
 
 -- 指标定义主表
 CREATE TABLE IF NOT EXISTS `indicators` (
@@ -518,6 +894,16 @@ CREATE TABLE IF NOT EXISTS `table_metadata` (
   `sync_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '元数据同步时间',
   `table_fingerprint` varchar(64) DEFAULT NULL COMMENT '表结构指纹',
   `columns_fingerprint` varchar(64) DEFAULT NULL COMMENT '字段结构指纹',
+  `business_owner` varchar(255) DEFAULT NULL COMMENT '业务负责人(语义对齐 indicators.business_owner；本表按负责人筛选，需可建索引，故宽度取 255)',
+  `tech_owner` varchar(255) DEFAULT NULL COMMENT '技术负责人(同上)',
+  `topic` varchar(200) DEFAULT NULL COMMENT '所属主题域(对齐 indicators.topic)',
+  `visibility` enum('public','internal','restricted') DEFAULT 'internal' COMMENT '可见性(对齐 indicators.visibility)',
+  `category_code` varchar(64) DEFAULT NULL COMMENT '人工覆盖的分类编码；为空表示采用表名规范解析结果',
+  `asset_level` varchar(16) DEFAULT NULL COMMENT '资产等级(L1~L5)',
+  `browse_cnt_30d` int NOT NULL DEFAULT '0' COMMENT '近30日浏览数(由 asset_access_log 日汇总回写)',
+  `read_cnt_30d` int NOT NULL DEFAULT '0' COMMENT '近30日读取数(由 asset_access_log 日汇总回写)',
+  `bookmark_cnt` int NOT NULL DEFAULT '0' COMMENT '收藏数(由 asset_bookmark 回写)',
+  `last_access_time` datetime DEFAULT NULL COMMENT '最近访问时间(埋点回写，用于热度排序)',
   `create_by` bigint DEFAULT NULL COMMENT '创建人',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -525,7 +911,9 @@ CREATE TABLE IF NOT EXISTS `table_metadata` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_table_storage` (`storage_engine`,`database_name`,`table_name`),
   KEY `idx_database_name` (`database_name`),
-  KEY `idx_table_name` (`table_name`)
+  KEY `idx_table_name` (`table_name`),
+  KEY `idx_table_metadata_owner` (`business_owner`),
+  KEY `idx_table_metadata_category` (`category_code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='库表元数据表';
 
 -- ------------------------------------------------------------------
@@ -539,3 +927,39 @@ INSERT INTO `sys_user` (`id`,`username`,`password`,`real_name`,`email`,`phone`,`
 
 INSERT INTO `sys_role` (`id`,`role_name`,`role_code`,`role_type`,`description`,`status`,`create_time`,`update_time`,`deleted`) VALUES
 (1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03',0);
+
+-- ------------------------------------------------------------------
+-- 平台级参考数据（非测试数据，任何部署都需要，故放在本脚本而非 testdata）
+--   1) 数据质量 7 类内置规则模板：与智能体提示词、前端 types/quality.ts 同源，
+--      template_code 即规则类型编码；三处必须同时演进，禁止自造同义词。
+--   2) 资产目录数仓分层：与提示词「分层规范」一致（ODS/DWD/DWS/ADS/DIM/DQC/TMP）。
+--      业务域不预置，由表名规范 {分层}_{业务域}_{实体描述}_{刷新周期} 解析产生，
+--      解析失败的资产自动进入「未分类」并成为治理项。
+-- ------------------------------------------------------------------
+
+INSERT INTO `dq_rule_template` (`template_code`,`template_name`,`rule_type`,`template_kind`,`remark`,`enabled`) VALUES
+('PRIMARY_KEY_UNIQUE', '主键唯一性', 'PRIMARY_KEY_UNIQUE', 'builtin', '主键/唯一键重复检测', 1),
+('NOT_NULL', '非空', 'NOT_NULL', 'builtin', '关键字段空值与空串检测', 1),
+('VALUE_RANGE', '值域', 'VALUE_RANGE', 'builtin', '枚举字典取值与数值区间合法性', 1),
+('ROW_COUNT_FLUCTUATION', '行数波动', 'ROW_COUNT_FLUCTUATION', 'builtin', '当日行数相对历史基线的涨跌幅', 1),
+('ROW_COUNT_MOM', '行数环比', 'ROW_COUNT_MOM', 'builtin', '当期行数与上期行数的对比', 1),
+('UPSTREAM_DOWNSTREAM_RECON', '上下游对账', 'UPSTREAM_DOWNSTREAM_RECON', 'builtin', '上下游同口径记录数/金额一致性', 1),
+('METRIC_CONSISTENCY', '口径一致性', 'METRIC_CONSISTENCY', 'builtin', '同一指标在不同表、不同层之间的计算结果一致性', 1);
+
+INSERT INTO `asset_category` (`category_code`,`category_name`,`parent_code`,`category_kind`,`sort_order`) VALUES
+('ods', 'ODS 贴源层', NULL, 'layer', 1),
+('dwd', 'DWD 明细层', NULL, 'layer', 2),
+('dws', 'DWS 汇总层', NULL, 'layer', 3),
+('ads', 'ADS 应用层', NULL, 'layer', 4),
+('dim', 'DIM 维度层', NULL, 'layer', 5),
+('dqc', 'DQC 质量层', NULL, 'layer', 6),
+('tmp', 'TMP 临时层', NULL, 'layer', 7);
+
+-- 默认资产标签（平台级参考数据；标签本身仍由人工施加到具体资产上）
+INSERT INTO `asset_tag`
+  (`tag_code`,`tag_name`,`color`,`remark`,`enabled`)
+VALUES
+  ('CORE','核心资产','#c62828','对业务有直接支撑作用的核心表',1),
+  ('HOT','高频使用','#1565c0','近30日读取热度高',1),
+  ('PENDING_GOVERN','待治理','#f9a825','命名不合规、未标注或无负责人等',1),
+  ('SENSITIVE','敏感数据','#6a1b9a','含个人信息或需脱敏的字段',1);

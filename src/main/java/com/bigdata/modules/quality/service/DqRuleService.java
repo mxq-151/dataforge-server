@@ -1,0 +1,485 @@
+package com.bigdata.modules.quality.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.bigdata.common.exception.BusinessException;
+import com.bigdata.modules.quality.dto.QualityBatchByTemplateDTO;
+import com.bigdata.modules.quality.dto.QualityBatchTargetDTO;
+import com.bigdata.modules.quality.dto.QualityRuleSaveDTO;
+import com.bigdata.modules.quality.dto.QualityTestRunDTO;
+import com.bigdata.modules.quality.entity.DqRule;
+import com.bigdata.modules.quality.entity.DqRuleTemplate;
+import com.bigdata.modules.quality.entity.DqTaskRuleRel;
+import com.bigdata.modules.quality.enums.QualityCompareMode;
+import com.bigdata.modules.quality.enums.QualityDisposeMode;
+import com.bigdata.modules.quality.enums.QualityRuleType;
+import com.bigdata.modules.quality.enums.QualityTemplateKind;
+import com.bigdata.modules.quality.mapper.DqRuleMapper;
+import com.bigdata.modules.quality.mapper.DqRuleTemplateMapper;
+import com.bigdata.modules.quality.mapper.DqTaskRuleRelMapper;
+import com.bigdata.modules.quality.vo.QualityRuleResultVO;
+import com.bigdata.modules.quality.vo.QualityRuleVO;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 监控规则 Service —— 规则的增删改查、试跑、按模板批量创建。
+ *
+ * <p>「试跑」与「正式执行」共用 {@link DqExecutionService}：试跑<b>不落</b>
+ * 运行实例与规则结果（契约要求「不落运行实例，只回结果」），因此试跑不会污染
+ * 大盘通过率，也不会进入历史基线 —— 这一点很关键：否则调阈值时反复试跑会把
+ * 行数基线拉偏。</p>
+ */
+@Service
+public class DqRuleService {
+
+    @Autowired
+    private DqRuleMapper dqRuleMapper;
+
+    @Autowired
+    private DqRuleTemplateMapper dqRuleTemplateMapper;
+
+    @Autowired
+    private DqTaskRuleRelMapper dqTaskRuleRelMapper;
+
+    @Autowired
+    private DqExecutionService dqExecutionService;
+
+    // ==================================================================
+    // 查询
+    // ==================================================================
+
+    public Page<QualityRuleVO> page(int current, int size, Long datasourceId, String databaseName,
+                                    String tableName, String columnName, String ruleType, Boolean enabled) {
+        LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(DqRule::getDeleted, 0);
+        if (datasourceId != null) {
+            wrapper.eq(DqRule::getDatasourceId, datasourceId);
+        }
+        if (databaseName != null && !databaseName.isBlank()) {
+            wrapper.eq(DqRule::getDatabaseName, databaseName.trim());
+        }
+        if (tableName != null && !tableName.isBlank()) {
+            wrapper.eq(DqRule::getTableName, tableName.trim());
+        }
+        if (columnName != null && !columnName.isBlank()) {
+            wrapper.eq(DqRule::getColumnName, columnName.trim());
+        }
+        if (ruleType != null && !ruleType.isBlank()) {
+            wrapper.eq(DqRule::getRuleType, ruleType.trim());
+        }
+        if (enabled != null) {
+            wrapper.eq(DqRule::getEnabled, enabled ? 1 : 0);
+        }
+        wrapper.orderByDesc(DqRule::getId);
+
+        Page<DqRule> result = dqRuleMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<QualityRuleVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
+        voPage.setRecords(result.getRecords().stream().map(DqRuleService::toVO).collect(Collectors.toList()));
+        return voPage;
+    }
+
+    public DqRule getById(Long id) {
+        if (id == null) {
+            throw new BusinessException("规则 ID 不能为空");
+        }
+        DqRule rule = dqRuleMapper.selectById(id);
+        if (rule == null || Integer.valueOf(1).equals(rule.getDeleted())) {
+            throw new BusinessException("监控规则不存在: " + id);
+        }
+        return rule;
+    }
+
+    /** 按 id 批量取规则（任务执行用），保持传入顺序 */
+    public List<DqRule> listByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        List<DqRule> rules = dqRuleMapper.selectBatchIds(ids.stream().distinct().collect(Collectors.toList()));
+        Map<Long, DqRule> byId = rules.stream()
+                .filter(r -> !Integer.valueOf(1).equals(r.getDeleted()))
+                .collect(Collectors.toMap(DqRule::getId, r -> r, (a, b) -> a));
+        List<DqRule> ordered = new ArrayList<>();
+        for (Long id : ids) {
+            DqRule rule = byId.get(id);
+            if (rule != null) {
+                ordered.add(rule);
+            }
+        }
+        return ordered;
+    }
+
+    /** 任务挂载的规则（对应 /quality/task/{id}/rules） */
+    public List<QualityRuleVO> listByTask(Long taskId) {
+        List<DqTaskRuleRel> rels = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
+                .eq(DqTaskRuleRel::getTaskId, taskId)
+                .eq(DqTaskRuleRel::getDeleted, 0)
+                .orderByAsc(DqTaskRuleRel::getId));
+        List<Long> ruleIds = rels.stream().map(DqTaskRuleRel::getRuleId).collect(Collectors.toList());
+        return listByIds(ruleIds).stream().map(DqRuleService::toVO).collect(Collectors.toList());
+    }
+
+    // ==================================================================
+    // 写操作
+    // ==================================================================
+
+    public Long create(QualityRuleSaveDTO dto) {
+        DqRule rule = new DqRule();
+        applyDto(rule, dto, true);
+        rule.setDeleted(0);
+        validateRenderable(rule);
+        dqRuleMapper.insert(rule);
+        return rule.getId();
+    }
+
+    public void update(QualityRuleSaveDTO dto) {
+        if (dto.getId() == null) {
+            throw new BusinessException("规则 ID 不能为空");
+        }
+        DqRule existing = getById(dto.getId());
+        applyDto(existing, dto, false);
+        validateRenderable(existing);
+        dqRuleMapper.updateById(existing);
+    }
+
+    @Transactional
+    public void delete(Long id) {
+        DqRule existing = getById(id);
+        long bound = dqTaskRuleRelMapper.selectCount(new LambdaQueryWrapper<DqTaskRuleRel>()
+                .eq(DqTaskRuleRel::getRuleId, id)
+                .eq(DqTaskRuleRel::getDeleted, 0));
+        if (bound > 0) {
+            throw new BusinessException("该规则已被 " + bound + " 个质检任务引用，"
+                    + "请先从任务中移除再删除");
+        }
+        existing.setDeleted(1);
+        dqRuleMapper.updateById(existing);
+    }
+
+    /**
+     * 按模板批量建规则（对齐 DataWorks「按模板批量配置」）。
+     *
+     * <p>已存在「同表 + 同字段 + 同规则类型」的规则会被跳过而不是报错 ——
+     * 批量配置的典型用法是在既有表集合上补齐规则，遇到已配的表应当继续往下走。</p>
+     *
+     * @return {@code {created, skipped}}
+     */
+    @Transactional
+    public Map<String, Integer> batchCreateByTemplate(QualityBatchByTemplateDTO dto) {
+        if (dto.getTemplateId() == null) {
+            throw new BusinessException("模板 ID 不能为空");
+        }
+        if (dto.getTargets() == null || dto.getTargets().isEmpty()) {
+            throw new BusinessException("请至少选择一个目标表");
+        }
+        DqRuleTemplate template = dqRuleTemplateMapper.selectById(dto.getTemplateId());
+        if (template == null || Integer.valueOf(1).equals(template.getDeleted())) {
+            throw new BusinessException("规则模板不存在: " + dto.getTemplateId());
+        }
+        QualityRuleType ruleType = QualityRuleType.fromCode(template.getRuleType());
+        if (ruleType == null) {
+            throw new BusinessException("模板归属的规则类型非法: " + template.getRuleType());
+        }
+        QualityRuleSaveDTO defaults = dto.getDefaults() == null ? new QualityRuleSaveDTO() : dto.getDefaults();
+
+        int created = 0;
+        int skipped = 0;
+        for (QualityBatchTargetDTO target : dto.getTargets()) {
+            if (target == null || target.getTableName() == null || target.getTableName().isBlank()) {
+                skipped++;
+                continue;
+            }
+            String columnName = ruleType.isColumnScope() ? target.getColumnName() : null;
+            if (ruleType.isColumnScope() && (columnName == null || columnName.isBlank())) {
+                // 字段级规则缺字段无法渲染 SQL，直接跳过而不是造一条永远失败的空规则
+                skipped++;
+                continue;
+            }
+            if (exists(target, columnName, ruleType.getCode())) {
+                skipped++;
+                continue;
+            }
+
+            DqRule rule = new DqRule();
+            rule.setRuleType(ruleType.getCode());
+            rule.setTemplateId(template.getId());
+            rule.setTemplateCode(template.getTemplateCode());
+            rule.setDatasourceId(target.getDatasourceId() != null
+                    ? target.getDatasourceId() : defaults.getDatasourceId());
+            rule.setDatasourceName(defaults.getDatasourceName());
+            rule.setDatabaseName(target.getDatabaseName() != null
+                    ? target.getDatabaseName() : defaults.getDatabaseName());
+            rule.setTableName(target.getTableName());
+            rule.setColumnName(columnName);
+            rule.setRuleName(buildBatchRuleName(defaults.getRuleName(), template.getTemplateName(), target));
+            rule.setPartitionExpr(defaults.getPartitionExpr());
+            rule.setRefDatasourceId(defaults.getRefDatasourceId());
+            rule.setRefDatabaseName(defaults.getRefDatabaseName());
+            rule.setRefTableName(defaults.getRefTableName());
+            rule.setRefColumnName(defaults.getRefColumnName());
+            rule.setCompareMode(normalizeCompareMode(defaults.getCompareMode()));
+            rule.setExpectedValue(defaults.getExpectedValue() != null
+                    ? defaults.getExpectedValue() : defaultExpectedValue(ruleType));
+            rule.setWarnThreshold(defaults.getWarnThreshold());
+            rule.setErrorThreshold(defaults.getErrorThreshold());
+            rule.setDisposeMode(normalizeDisposeMode(defaults.getDisposeMode()));
+            rule.setOwnerName(defaults.getOwnerName());
+            rule.setEnabled(Boolean.FALSE.equals(defaults.getEnabled()) ? 0 : 1);
+            rule.setDeleted(0);
+
+            validateRenderable(rule);
+            dqRuleMapper.insert(rule);
+            created++;
+        }
+        Map<String, Integer> summary = new LinkedHashMap<>();
+        summary.put("created", created);
+        summary.put("skipped", skipped);
+        return summary;
+    }
+
+    // ==================================================================
+    // 试跑
+    // ==================================================================
+
+    /**
+     * 规则试跑：编译 + 真实下发，但<b>不落</b>任何结果。
+     *
+     * <p>可以传 ruleId（跑已保存的规则），也可以只传 rule（跑尚未保存的草稿）——
+     * 后者是保存前验证阈值是否合理的核心路径。</p>
+     */
+    public QualityRuleResultVO testRun(QualityTestRunDTO dto) {
+        if (dto == null) {
+            throw new BusinessException("试跑参数不能为空");
+        }
+        LocalDate batchDate = DqBatchSupport.parseBatchDate(dto.getBatchNo());
+
+        DqRule rule;
+        if (dto.getRuleId() != null) {
+            rule = getById(dto.getRuleId());
+        } else if (dto.getRule() != null) {
+            rule = new DqRule();
+            applyDto(rule, dto.getRule(), false);
+            if (rule.getRuleName() == null || rule.getRuleName().isBlank()) {
+                rule.setRuleName("（未保存的试跑规则）");
+            }
+        } else {
+            throw new BusinessException("试跑需要提供 ruleId 或 rule 内容");
+        }
+
+        // 试跑不写历史，因此行数类规则拿不到基线；这里显式取历史基线，
+        // 让「试跑」与「正式执行」的判定口径保持一致，避免试跑全绿、正式跑全红。
+        BigDecimal baseline = rule.getId() == null ? null : dqExecutionService.resolveBaseline(rule);
+        DqExecutionService.Outcome outcome = dqExecutionService.execute(rule, batchDate, baseline);
+
+        QualityRuleResultVO vo = new QualityRuleResultVO();
+        vo.setRuleId(rule.getId());
+        vo.setRuleName(rule.getRuleName());
+        vo.setRuleType(rule.getRuleType());
+        vo.setCheckObject(outcome.compiled().checkObject());
+        vo.setThreshold(outcome.evaluation().threshold());
+        vo.setActualValue(outcome.evaluation().actualValue());
+        vo.setStatus(outcome.evaluation().status() == null ? null : outcome.evaluation().status().getCode());
+        vo.setSeverity(outcome.evaluation().severity());
+        vo.setExecSql(outcome.compiled().sql());
+        vo.setErrorMsg(outcome.errorMessage());
+        vo.setCostMs(outcome.costMs());
+        return vo;
+    }
+
+    // ==================================================================
+    // 映射与校验
+    // ==================================================================
+
+    static QualityRuleVO toVO(DqRule rule) {
+        QualityRuleVO vo = new QualityRuleVO();
+        vo.setId(rule.getId());
+        vo.setRuleName(rule.getRuleName());
+        vo.setRuleType(rule.getRuleType());
+        vo.setTemplateId(rule.getTemplateId());
+        vo.setTemplateCode(rule.getTemplateCode());
+        vo.setDatasourceId(rule.getDatasourceId());
+        vo.setDatasourceName(rule.getDatasourceName());
+        vo.setDatabaseName(rule.getDatabaseName());
+        vo.setTableName(rule.getTableName());
+        vo.setColumnName(rule.getColumnName());
+        vo.setPartitionExpr(rule.getPartitionExpr());
+        vo.setRefDatasourceId(rule.getRefDatasourceId());
+        vo.setRefDatabaseName(rule.getRefDatabaseName());
+        vo.setRefTableName(rule.getRefTableName());
+        vo.setRefColumnName(rule.getRefColumnName());
+        vo.setCompareMode(rule.getCompareMode());
+        vo.setExpectedValue(rule.getExpectedValue());
+        vo.setWarnThreshold(rule.getWarnThreshold());
+        vo.setErrorThreshold(rule.getErrorThreshold());
+        vo.setDisposeMode(rule.getDisposeMode());
+        vo.setOwnerName(rule.getOwnerName());
+        vo.setEnabled(rule.getEnabled() == null || rule.getEnabled() == 1);
+        vo.setCreateTime(rule.getCreateTime());
+        vo.setUpdateTime(rule.getUpdateTime());
+        return vo;
+    }
+
+    private void applyDto(DqRule rule, QualityRuleSaveDTO dto, boolean isNew) {
+        if (dto == null) {
+            throw new BusinessException("规则内容不能为空");
+        }
+        if (isNew && dto.getId() != null) {
+            throw new BusinessException("新增规则不应携带 id");
+        }
+        if (dto.getRuleName() == null || dto.getRuleName().isBlank()) {
+            throw new BusinessException("规则名称不能为空");
+        }
+        QualityRuleType ruleType = QualityRuleType.fromCode(dto.getRuleType());
+        if (ruleType == null) {
+            throw new BusinessException("无法识别的规则类型: " + dto.getRuleType()
+                    + "（必须是 7 类之一，禁止自造同义词）");
+        }
+        if (dto.getTableName() == null || dto.getTableName().isBlank()) {
+            throw new BusinessException("监控表名不能为空");
+        }
+        if (ruleType.isColumnScope() && (dto.getColumnName() == null || dto.getColumnName().isBlank())) {
+            throw new BusinessException("「" + ruleType.getLabel() + "」是字段级规则，必须指定字段");
+        }
+        if (ruleType.isPairScope() && (dto.getRefTableName() == null || dto.getRefTableName().isBlank())) {
+            throw new BusinessException("「" + ruleType.getLabel() + "」是跨表规则，必须指定对照表");
+        }
+
+        rule.setRuleName(dto.getRuleName().trim());
+        rule.setRuleType(ruleType.getCode());
+        rule.setDatasourceId(dto.getDatasourceId());
+        rule.setDatasourceName(dto.getDatasourceName());
+        rule.setDatabaseName(trimToNull(dto.getDatabaseName()));
+        rule.setTableName(dto.getTableName().trim());
+        rule.setColumnName(trimToNull(dto.getColumnName()));
+        rule.setPartitionExpr(trimToNull(dto.getPartitionExpr()));
+        rule.setRefDatasourceId(dto.getRefDatasourceId());
+        rule.setRefDatabaseName(trimToNull(dto.getRefDatabaseName()));
+        rule.setRefTableName(trimToNull(dto.getRefTableName()));
+        rule.setRefColumnName(trimToNull(dto.getRefColumnName()));
+        rule.setCompareMode(normalizeCompareMode(dto.getCompareMode()));
+        rule.setExpectedValue(dto.getExpectedValue() != null
+                ? dto.getExpectedValue() : defaultExpectedValue(ruleType));
+        rule.setWarnThreshold(trimToNull(dto.getWarnThreshold()));
+        rule.setErrorThreshold(trimToNull(dto.getErrorThreshold()));
+        rule.setDisposeMode(normalizeDisposeMode(dto.getDisposeMode()));
+        rule.setOwnerName(trimToNull(dto.getOwnerName()));
+        rule.setEnabled(Boolean.FALSE.equals(dto.getEnabled()) ? 0 : 1);
+        rule.setParams(dto.getParams());
+
+        bindTemplate(rule, dto, ruleType);
+    }
+
+    /**
+     * 绑定模板。
+     *
+     * <p>两种来源：显式传 templateId（界面上选了某个自定义模板），
+     * 或只给了 ruleType（界面按规则类型建规则）—— 后者自动绑定到同名的内置模板，
+     * 这样 {@code rule.templateCode} 永远有值，覆盖率统计才有口径。</p>
+     */
+    private void bindTemplate(DqRule rule, QualityRuleSaveDTO dto, QualityRuleType ruleType) {
+        if (dto.getTemplateId() != null) {
+            DqRuleTemplate template = dqRuleTemplateMapper.selectById(dto.getTemplateId());
+            if (template == null || Integer.valueOf(1).equals(template.getDeleted())) {
+                throw new BusinessException("规则模板不存在: " + dto.getTemplateId());
+            }
+            if (!ruleType.getCode().equals(template.getRuleType())) {
+                throw new BusinessException("所选模板归属的规则类型是「" + template.getRuleType()
+                        + "」，与规则的「" + ruleType.getCode() + "」不一致");
+            }
+            rule.setTemplateId(template.getId());
+            rule.setTemplateCode(template.getTemplateCode());
+            return;
+        }
+        DqRuleTemplate builtin = findBuiltin(ruleType.getCode());
+        if (builtin != null) {
+            rule.setTemplateId(builtin.getId());
+            rule.setTemplateCode(builtin.getTemplateCode());
+        } else {
+            rule.setTemplateId(null);
+            rule.setTemplateCode(dto.getTemplateCode() != null
+                    ? dto.getTemplateCode() : ruleType.getCode());
+        }
+    }
+
+    private DqRuleTemplate findBuiltin(String templateCode) {
+        return dqRuleTemplateMapper.selectOne(new LambdaQueryWrapper<DqRuleTemplate>()
+                .eq(DqRuleTemplate::getTemplateCode, templateCode)
+                .eq(DqRuleTemplate::getTemplateKind, QualityTemplateKind.BUILTIN.getCode())
+                .eq(DqRuleTemplate::getDeleted, 0)
+                .last("LIMIT 1"));
+    }
+
+    /**
+     * 保存前先编译一次校验 SQL。
+     *
+     * <p>目的是把「配置错误」挡在保存这一步：一条渲染不出 SQL 的规则只会在每次调度时
+     * 静默失败，等到有人去看运行记录才发现，代价比保存时报错大得多。
+     * 未选数据源时跳过（此时还无法确定方言）。</p>
+     */
+    private void validateRenderable(DqRule rule) {
+        if (rule.getDatasourceId() == null
+                && (rule.getDatasourceName() == null || rule.getDatasourceName().isBlank())) {
+            return;
+        }
+        dqExecutionService.compile(rule, LocalDate.now());
+    }
+
+    private boolean exists(QualityBatchTargetDTO target, String columnName, String ruleType) {
+        LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(DqRule::getDeleted, 0)
+                .eq(DqRule::getRuleType, ruleType)
+                .eq(DqRule::getTableName, target.getTableName());
+        if (target.getDatabaseName() != null && !target.getDatabaseName().isBlank()) {
+            wrapper.eq(DqRule::getDatabaseName, target.getDatabaseName());
+        }
+        if (columnName == null) {
+            wrapper.isNull(DqRule::getColumnName).or().eq(DqRule::getColumnName, "");
+        } else {
+            wrapper.eq(DqRule::getColumnName, columnName);
+        }
+        return dqRuleMapper.selectCount(wrapper) > 0;
+    }
+
+    private static String buildBatchRuleName(String template, String templateName, QualityBatchTargetDTO target) {
+        String base = template != null && !template.isBlank() ? template : templateName;
+        String scope = target.getColumnName() != null && !target.getColumnName().isBlank()
+                ? target.getTableName() + "." + target.getColumnName()
+                : target.getTableName();
+        return base + " - " + scope;
+    }
+
+    /** 计数类规则的默认期望值是 0（不允许出现异常条数） */
+    private static String defaultExpectedValue(QualityRuleType ruleType) {
+        return switch (ruleType) {
+            case PRIMARY_KEY_UNIQUE, NOT_NULL, VALUE_RANGE -> "0";
+            default -> null;
+        };
+    }
+
+    private static String normalizeCompareMode(String raw) {
+        QualityCompareMode mode = QualityCompareMode.fromCode(raw);
+        return mode == null ? QualityCompareMode.LTE.getCode() : mode.getCode();
+    }
+
+    private static String normalizeDisposeMode(String raw) {
+        QualityDisposeMode mode = QualityDisposeMode.fromCode(raw);
+        return mode == null ? QualityDisposeMode.ALERT.getCode() : mode.getCode();
+    }
+
+    private static String trimToNull(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+}

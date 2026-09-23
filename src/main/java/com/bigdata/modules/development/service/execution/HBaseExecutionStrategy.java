@@ -34,11 +34,16 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
-public class HBaseExecutionStrategy implements ExecutionStrategy {
+public class HBaseExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(HBaseExecutionStrategy.class);
     private static final int MAX_RESULT_ROWS = 10000;
     private static final String DEFAULT_COLUMN_FAMILY = "info";
+
+    @Override
+    protected Logger getLog() {
+        return log;
+    }
 
     private static class HBaseExecResult {
         private final boolean success;
@@ -83,9 +88,6 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
     @Autowired
     private TableMetadataService tableMetadataService;
 
-    @Autowired
-    private ExecutionLogListener executionLogListener;
-
     @Override
     public DatasourceType getEngineType() {
         return DatasourceType.HBASE;
@@ -113,7 +115,7 @@ public class HBaseExecutionStrategy implements ExecutionStrategy {
             HBaseSchema schema = new HBaseSchema(hbaseConnection, tableMetadataService, datasourceConfig.getId());
             schema.loadMetadataFromDb();
 
-            String sql = context.getCodeContent();
+            String sql = context.getExecutionCodeContent();
             log.info("HBase执行SQL: {}", sql.length() > 200 ? sql.substring(0, 200) + "..." : sql);
 
             List<String> sqlStatements = splitSqlStatements(sql);

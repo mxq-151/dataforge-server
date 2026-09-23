@@ -36,6 +36,24 @@ public class MetadataController {
     @Autowired
     private DatasourceConfigMapper datasourceConfigMapper;
 
+    @Autowired
+    private com.bigdata.modules.metadata.service.MetadataAnnotationGapService metadataAnnotationGapService;
+
+    /**
+     * 未标注表 / 字段清单（风险项 R1）。
+     * <p>
+     * 返回表注释为空、和/或存在字段注释为空的表，以及缺失字段明细，并按调用者的表权限过滤。
+     * 用于把「描述缺失」这件事变成可见、可跟踪的清单，而不是逐个表点开才发现。
+     * </p>
+     */
+    @GetMapping("/annotation-gaps")
+    public Result<com.bigdata.modules.metadata.vo.AnnotationGapSummaryVO> getAnnotationGaps(
+            @RequestParam(required = false) Long datasourceId,
+            @RequestParam(required = false) String databaseName,
+            @RequestParam(required = false) Integer limit) {
+        return Result.success(metadataAnnotationGapService.query(datasourceId, databaseName, limit));
+    }
+
     @GetMapping("/tables")
     public Result<Page<TableMetadataVO>> getTableList(
             @RequestParam(defaultValue = "1") int current,

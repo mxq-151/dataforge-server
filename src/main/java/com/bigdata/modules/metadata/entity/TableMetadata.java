@@ -1,6 +1,7 @@
 package com.bigdata.modules.metadata.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.modules.devops.enums.DatasourceType;
@@ -37,6 +38,39 @@ public class TableMetadata {
     private Date createTime;
     private Date updateTime;
     private Integer deleted;
+
+    // ── 资产目录（asset_catalog）治理属性 ──────────────────────────────────
+    // owner/topic/visibility 的字段名与语义对齐既有 indicators 表
+    // （business_owner/tech_owner/topic/visibility），避免同平台两套 owner 语义。
+    // 宽度说明：indicators 的负责人是 varchar(1024) 且未建索引；本表的负责人是
+    // 资产目录的筛选维度，必须可建索引，而 MySQL/InnoDB 索引键上限 3072 字节，
+    // utf8mb4 下 varchar(1024) 建索引会直接失败，故取 varchar(255)。
+
+    /** 业务负责人（为空是治理项之一） */
+    private String businessOwner;
+    /** 技术负责人 */
+    private String techOwner;
+    /** 所属主题域 */
+    private String topic;
+    /** 可见性：public / internal / restricted */
+    private String visibility;
+    /** 人工覆盖的分类编码；为空表示采用表名规范解析结果 */
+    private String categoryCode;
+    /** 资产等级 L1~L5 */
+    private String assetLevel;
+
+    // ── 使用热度（T+1 由 asset_access_log 汇总回写）────────────────────────
+
+    /** 近 30 日浏览数。驼峰推导会得到 browse_cnt30d，与库中 browse_cnt_30d 不符，须显式指定 */
+    @TableField("browse_cnt_30d")
+    private Integer browseCnt30d;
+    /** 近 30 日读取数。同上，显式指定 read_cnt_30d */
+    @TableField("read_cnt_30d")
+    private Integer readCnt30d;
+    /** 收藏数 */
+    private Integer bookmarkCnt;
+    /** 最近访问时间（热度排序用） */
+    private Date lastAccessTime;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -90,4 +124,24 @@ public class TableMetadata {
     public void setUpdateTime(Date updateTime) { this.updateTime = updateTime; }
     public Integer getDeleted() { return deleted; }
     public void setDeleted(Integer deleted) { this.deleted = deleted; }
+    public String getBusinessOwner() { return businessOwner; }
+    public void setBusinessOwner(String businessOwner) { this.businessOwner = businessOwner; }
+    public String getTechOwner() { return techOwner; }
+    public void setTechOwner(String techOwner) { this.techOwner = techOwner; }
+    public String getTopic() { return topic; }
+    public void setTopic(String topic) { this.topic = topic; }
+    public String getVisibility() { return visibility; }
+    public void setVisibility(String visibility) { this.visibility = visibility; }
+    public String getCategoryCode() { return categoryCode; }
+    public void setCategoryCode(String categoryCode) { this.categoryCode = categoryCode; }
+    public String getAssetLevel() { return assetLevel; }
+    public void setAssetLevel(String assetLevel) { this.assetLevel = assetLevel; }
+    public Integer getBrowseCnt30d() { return browseCnt30d; }
+    public void setBrowseCnt30d(Integer browseCnt30d) { this.browseCnt30d = browseCnt30d; }
+    public Integer getReadCnt30d() { return readCnt30d; }
+    public void setReadCnt30d(Integer readCnt30d) { this.readCnt30d = readCnt30d; }
+    public Integer getBookmarkCnt() { return bookmarkCnt; }
+    public void setBookmarkCnt(Integer bookmarkCnt) { this.bookmarkCnt = bookmarkCnt; }
+    public Date getLastAccessTime() { return lastAccessTime; }
+    public void setLastAccessTime(Date lastAccessTime) { this.lastAccessTime = lastAccessTime; }
 }

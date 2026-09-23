@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 
 @Component
-public class SparkExecutionStrategy implements ExecutionStrategy {
+public class SparkExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(SparkExecutionStrategy.class);
 
@@ -33,10 +33,12 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     private ProcessManager processManager;
 
     @Autowired
-    private ExecutionLogListener executionLogListener;
-
-    @Autowired
     private AesUtils aesUtils;
+
+    @Override
+    protected Logger getLog() {
+        return log;
+    }
 
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
@@ -377,7 +379,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
         command.add("--conf");
         command.add("spark.sql.codegen.wholeStage=true");
 
-        String codeContent = context.getCodeContent();
+        String codeContent = context.getExecutionCodeContent();
         if (codeContent == null || codeContent.trim().isEmpty()) {
             codeContent = "SELECT 1";
         }
@@ -405,7 +407,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
     }
 
     private void handleDefaultMode(List<String> command, CodeExecutionContext context) throws Exception {
-        String codeContent = context.getCodeContent();
+        String codeContent = context.getExecutionCodeContent();
         if (codeContent != null && !codeContent.trim().isEmpty()) {
             command.add("-e");
             command.add(codeContent.trim());
@@ -414,7 +416,7 @@ public class SparkExecutionStrategy implements ExecutionStrategy {
 
     private Path createTempScriptFile(CodeExecutionContext context, String suffix) throws Exception {
         Path tempFile = Files.createTempFile("spark_exec_", "." + suffix);
-        String content = context.getCodeContent();
+        String content = context.getExecutionCodeContent();
         if (content == null) {
             content = "";
         }

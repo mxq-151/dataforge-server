@@ -2,6 +2,8 @@ package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.sql.CalciteDdlParser;
+import com.bigdata.common.sql.SqlScriptSplitter;
+import com.bigdata.common.sql.SqlTableCollector;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.system.entity.SysRole;
@@ -32,6 +34,7 @@ import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
 import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
 import net.sf.jsqlparser.expression.operators.relational.InExpression;
 import net.sf.jsqlparser.schema.Column;
+import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.insert.Insert;
 import net.sf.jsqlparser.statement.update.Update;
@@ -65,6 +68,12 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     protected MetadataSyncService metadataSyncService;
 
     @Autowired
+    protected com.bigdata.modules.metadata.service.MetadataSyncAlertService metadataSyncAlertService;
+
+    @Autowired
+    protected SqlPermissionRewriter sqlPermissionRewriter;
+
+    @Autowired
     protected ExecutionLogListener executionLogListener;
 
     protected final ObjectMapper objectMapper = new ObjectMapper();
@@ -75,8 +84,18 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     // ==================== 权限校验 ====================
 
     /**
-     * 默认的权限校验实现：DDL权限检查 + DML表级权限检查。
+     * 默认的权限校验实现：逐条语句做 DDL 权限检查 + DML 表级权限检查。
+     * <p>
+     * 关键点（风险项 R4）：
+     * <ul>
+     *   <li>按分号拆成独立语句逐条校验。旧实现把整段脚本交给 JSqlParser，多语句脚本必然解析失败，
+     *       从而整段放行——这是一条可以绕过表权限的路径。</li>
+     *   <li>解析失败时改为<b>默认拒绝</b>（fail-close）：只要语句以 DML 关键字开头却无法解析，
+     *       就拒绝执行并抛出明确原因，不再「打一条 debug 日志后放行」。</li>
+     *   <li>Calcite 无法识别的 DDL 同样按默认拒绝处理，避免「解析能力不足」等价于「放行」。</li>
+     * </ul>
      * 子类可按需覆写此方法以增加额外的校验逻辑（建议先调用 super.checkPermission()）。
+     * </p>
      */
     @Override
     public void checkPermission(CodeExecutionContext context) {
@@ -84,20 +103,97 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
         if (sql == null || sql.trim().isEmpty()) {
             return;
         }
-        sql = sql.trim();
-
-        // DDL权限检查
-        DdlInfo ddlInfo = detectDdlStatement(sql, context.getPrimaryStorageEngine());
-        if (ddlInfo != null) {
-            if (!hasDdlPermission(context.getSubmitBy())) {
-                getLog().warn("用户[{}]无DDL执行权限, 拒绝执行: {}", context.getSubmitBy(), context.getSubmitByName());
-                throw new SecurityException("权限不足：只有超级管理员和运维人员才能执行DDL语句（CREATE/ALTER/DROP/TRUNCATE）");
-            }
+        if (context.getCodeType() != CodeType.SQL) {
+            // Scala / Python / Jar 等以任意代码访问数据源，不存在可解析的 SQL 语句；
+            // 对这些内容做 SQL 解析只会产生误判（例如 Python 里出现 select = {} 这类标识符）。
+            getLog().debug("代码类型 {} 非 SQL，跳过语句级权限校验", context.getCodeType());
             return;
         }
 
-        // DML表级权限检查
-        checkDmlTablePermission(context, sql, null);
+        List<SqlScriptSplitter.Span> spans = SqlScriptSplitter.split(sql);
+        if (spans.isEmpty()) {
+            return;
+        }
+
+        boolean ddlAllowed = hasDdlPermission(context.getSubmitBy());
+        for (SqlScriptSplitter.Span span : spans) {
+            String statement = span.text(sql);
+            if (SqlScriptSplitter.isCommentOrBlank(statement)) {
+                continue;
+            }
+
+            // DDL权限检查
+            DdlInfo ddlInfo = detectDdlStatement(statement, context.getPrimaryStorageEngine());
+            if (ddlInfo != null) {
+                if (!ddlAllowed) {
+                    getLog().warn("用户[{}]无DDL执行权限, 拒绝执行: {}", context.getSubmitBy(), context.getSubmitByName());
+                    throw new SecurityException("权限不足：只有超级管理员和运维人员才能执行DDL语句（CREATE/ALTER/DROP/TRUNCATE）");
+                }
+                continue;
+            }
+
+            // Calcite 未识别为 DDL：若首关键字是 DDL 关键字，说明解析能力不足，按默认拒绝（fail-close）
+            String keyword = SqlScriptSplitter.firstKeyword(statement);
+            if (DDL_KEYWORDS.contains(keyword)) {
+                if (!ddlAllowed) {
+                    getLog().warn("用户[{}]提交的语句以DDL关键字[{}]开头但无法被解析, 按默认拒绝处理", context.getSubmitBy(), keyword);
+                    throw new SecurityException(
+                            "权限不足：语句以 " + keyword + " 开头（DDL），且平台无法解析该语句，按默认拒绝处理");
+                }
+                getLog().warn("语句以DDL关键字[{}]开头但平台无法解析, 已跳过元数据同步: {}", keyword,
+                        abbreviate(statement));
+                continue;
+            }
+
+            // DML表级权限检查
+            checkDmlTablePermission(context, statement, null);
+        }
+
+        // 行级过滤 / 列白名单：下发前改写 SQL，让约束在引擎侧生效
+        applyRowColumnRewrite(context);
+    }
+
+    /**
+     * 把行级过滤条件与列白名单改写到下发内容里（风险项 R4）。
+     * <p>
+     * 为什么所有引擎统一在下发前改写，而不是只依赖「结果集返回后过滤」：
+     * <ul>
+     *   <li>Spark / Flink / HBase 由外部进程执行，服务端根本拿不到结果集；</li>
+     *   <li>即便拿到结果集，聚合类查询（count / sum）的数值也不受后过滤影响，
+     *       会泄露被行级权限挡住的行的口径。</li>
+     * </ul>
+     * 后过滤仍然保留为第二道防线（见 {@link #applyRowFilterAndMasking}），用于
+     * 无法改写时兜底；改写生效时刻意跳过行过滤的二次应用，避免对已过滤结果重复过滤。
+     * </p>
+     */
+    protected void applyRowColumnRewrite(CodeExecutionContext context) {
+        if (sqlPermissionRewriter == null) {
+            return;
+        }
+        String rewritten = sqlPermissionRewriter.rewrite(context);
+        if (rewritten != null && !rewritten.equals(context.getCodeContent())) {
+            context.setEffectiveCodeContent(rewritten);
+            getLog().info("已按行/列级权限改写下发SQL: executionId={}", context.getExecutionId());
+            if (executionLogListener != null) {
+                executionLogListener.publishLog(context.getExecutionId(),
+                        "[权限] 已按行级过滤/列级权限改写下发的SQL");
+            }
+        }
+    }
+
+    /** DDL 关键字集合：这些关键字开头的语句若无法被 Calcite 识别，需要按默认拒绝处理。 */
+    private static final Set<String> DDL_KEYWORDS = Set.of(
+            "CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME", "COMMENT", "GRANT", "REVOKE", "ANALYZE");
+
+    /** 以这些关键字开头的语句若解析失败，按默认拒绝处理（fail-close）。 */
+    private static final Set<String> DML_KEYWORDS = Set.of(
+            "SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "REPLACE", "MERGE", "UPSERT", "VALUES", "TABLE");
+
+    private String abbreviate(String sql) {
+        if (sql == null) {
+            return "";
+        }
+        return sql.length() > 200 ? sql.substring(0, 200) + "..." : sql;
     }
 
     @Override
@@ -234,79 +330,132 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     // ==================== DML表级权限检查 ====================
 
     /**
-     * 对DML语句（SELECT/INSERT/UPDATE/DELETE）进行表级权限校验
-     * 超级管理员自动跳过检查
+     * 对<b>单条</b> DML 语句（SELECT/INSERT/UPDATE/DELETE）进行表级权限校验。
+     * 超级管理员自动跳过检查。
+     * <p>
+     * 覆盖范围：语句中出现的所有表引用——FROM 与各 JOIN 右侧、FROM 子句里的派生表、
+     * WHERE / HAVING / ON / 投影列中的子查询、UNION 各分支与 CTE。
+     * 写操作的目标表按写权限校验（INSERT/UPDATE/DELETE），其余参与的表按 SELECT 校验。
+     * </p>
+     * <p>
+     * fail-close（风险项 R4）：语句以 DML 关键字开头却解析失败时拒绝执行，
+     * 不再「打一条 debug 日志后放行」。
+     * </p>
      */
     protected void checkDmlTablePermission(CodeExecutionContext context, String sql, String executionId) {
+        if (hasDdlPermission(context.getSubmitBy())) {
+            return;
+        }
+        net.sf.jsqlparser.statement.Statement jsqlStmt;
         try {
-            if (hasDdlPermission(context.getSubmitBy())) {
+            jsqlStmt = CCJSqlParserUtil.parse(sql);
+        } catch (Exception e) {
+            String keyword = SqlScriptSplitter.firstKeyword(sql);
+            if (DML_KEYWORDS.contains(keyword)) {
+                getLog().error("DML权限检查解析失败, 按默认拒绝处理(fail-close): keyword={}, SQL={}, 原因={}",
+                        keyword, abbreviate(sql), e.getMessage());
+                throw new SecurityException(String.format(
+                        "权限校验未通过：语句以 %s 开头但无法被解析，出于安全考虑已拒绝执行。"
+                                + "请确认语句写法，或联系管理员。", keyword));
+            }
+            getLog().warn("非DML语句解析失败, 跳过表级权限检查: keyword={}, SQL={}, 原因={}",
+                    keyword, abbreviate(sql), e.getMessage());
+            return;
+        }
+
+        try {
+            String operation = primaryOperation(jsqlStmt);
+            if (operation == null) {
+                getLog().debug("SQL语句不涉及DML表操作: {}", abbreviate(sql));
                 return;
             }
-            net.sf.jsqlparser.statement.Statement jsqlStmt = CCJSqlParserUtil.parse(sql);
-            String operation = null;
-            List<TableRef> tableRefs = new ArrayList<>();
-            if (jsqlStmt instanceof Select) {
-                operation = DataAccessPermissionService.TABLE_OP_SELECT;
-                tableRefs = extractTablesFromSelect((Select) jsqlStmt);
-            } else if (jsqlStmt instanceof Insert) {
-                operation = DataAccessPermissionService.TABLE_OP_INSERT;
-                Insert insert = (Insert) jsqlStmt;
-                TableRef ref = new TableRef();
-                ref.tableName = insert.getTable().getName();
-                ref.databaseName = insert.getTable().getSchemaName();
-                if (ref.databaseName == null || ref.databaseName.isEmpty()) {
-                    ref.databaseName = insert.getTable().getDatabase() != null ?
-                            insert.getTable().getDatabase().getDatabaseName() : null;
-                }
-                tableRefs.add(ref);
-            } else if (jsqlStmt instanceof Update) {
-                operation = DataAccessPermissionService.TABLE_OP_UPDATE;
-                Update update = (Update) jsqlStmt;
-                TableRef ref = new TableRef();
-                ref.tableName = update.getTable().getName();
-                ref.databaseName = update.getTable().getSchemaName();
-                if (ref.databaseName == null || ref.databaseName.isEmpty()) {
-                    ref.databaseName = update.getTable().getDatabase() != null ?
-                            update.getTable().getDatabase().getDatabaseName() : null;
-                }
-                tableRefs.add(ref);
-            } else if (jsqlStmt instanceof Delete) {
-                operation = DataAccessPermissionService.TABLE_OP_DELETE;
-                Delete delete = (Delete) jsqlStmt;
-                TableRef ref = new TableRef();
-                ref.tableName = delete.getTable().getName();
-                ref.databaseName = delete.getTable().getSchemaName();
-                if (ref.databaseName == null || ref.databaseName.isEmpty()) {
-                    ref.databaseName = delete.getTable().getDatabase() != null ?
-                            delete.getTable().getDatabase().getDatabaseName() : null;
-                }
-                tableRefs.add(ref);
-            }
-            if (operation == null || tableRefs.isEmpty()) {
-                getLog().debug("SQL语句不涉及表操作或无法解析: {}", sql.substring(0, Math.min(50, sql.length())));
+            List<Table> writeTargets = writeTargets(jsqlStmt);
+            List<Table> allTables = SqlTableCollector.statementTables(jsqlStmt);
+            if (allTables.isEmpty()) {
+                getLog().debug("SQL语句中未识别到表引用: {}", abbreviate(sql));
                 return;
             }
-            String datasourceName = context.getPrimaryDatasourceConfig().getDatasourceName();
+
+            String datasourceName = context.getPrimaryDatasourceConfig() != null
+                    ? context.getPrimaryDatasourceConfig().getDatasourceName() : null;
             String defaultDatabase = context.getPrimaryDatasourceDatabaseName();
-            for (TableRef tableRef : tableRefs) {
-                String dbName = tableRef.databaseName != null ? tableRef.databaseName : defaultDatabase;
+
+            for (Table table : allTables) {
+                String dbName = SqlTableCollector.databaseName(table) != null
+                        ? SqlTableCollector.databaseName(table) : defaultDatabase;
+                String requiredOp = isSameTable(writeTargets, table) ? operation
+                        : DataAccessPermissionService.TABLE_OP_SELECT;
                 boolean hasPermission = dataAccessPermissionService.hasTablePermission(
-                        datasourceName, dbName, tableRef.tableName, operation);
+                        datasourceName, dbName, table.getName(), requiredOp);
                 if (!hasPermission) {
                     getLog().warn("用户[{}]无权对表 {}.{} 执行 {} 操作",
-                            context.getSubmitBy(), dbName, tableRef.tableName, operation);
+                            context.getSubmitBy(), dbName, table.getName(), requiredOp);
                     throw new SecurityException(String.format(
                             "权限不足：无权对表 %s.%s 执行 %s 操作",
-                            dbName, tableRef.tableName, operation));
+                            dbName, table.getName(), requiredOp));
                 }
                 getLog().debug("用户[{}]拥有表 {}.{} 的 {} 权限",
-                        context.getSubmitBy(), dbName, tableRef.tableName, operation);
+                        context.getSubmitBy(), dbName, table.getName(), requiredOp);
             }
         } catch (SecurityException e) {
             throw e;
         } catch (Exception e) {
-            getLog().debug("DML权限检查解析失败, 放行执行: {}", e.getMessage());
+            // 语句已解析成功，失败发生在权限判定阶段——同样属于「无法判定」，
+            // 按默认拒绝处理（fail-close），避免静默放行。
+            getLog().error("DML权限检查异常, 按默认拒绝处理(fail-close): SQL={}", abbreviate(sql), e);
+            throw new SecurityException("权限校验未通过：权限判定过程异常，出于安全考虑已拒绝执行。");
         }
+    }
+
+    /** 语句的主操作类型，非 DML 时返回 null。 */
+    private String primaryOperation(net.sf.jsqlparser.statement.Statement stmt) {
+        if (stmt instanceof Select) {
+            return DataAccessPermissionService.TABLE_OP_SELECT;
+        }
+        if (stmt instanceof Insert) {
+            return DataAccessPermissionService.TABLE_OP_INSERT;
+        }
+        if (stmt instanceof Update) {
+            return DataAccessPermissionService.TABLE_OP_UPDATE;
+        }
+        if (stmt instanceof Delete) {
+            return DataAccessPermissionService.TABLE_OP_DELETE;
+        }
+        return null;
+    }
+
+    /** 语句的写操作目标表（INSERT/UPDATE/DELETE 的目标，含多表 DELETE 的目标列表）。 */
+    private List<Table> writeTargets(net.sf.jsqlparser.statement.Statement stmt) {
+        List<Table> targets = new ArrayList<>();
+        if (stmt instanceof Insert) {
+            Table t = ((Insert) stmt).getTable();
+            if (t != null) {
+                targets.add(t);
+            }
+        } else if (stmt instanceof Update) {
+            Table t = ((Update) stmt).getTable();
+            if (t != null) {
+                targets.add(t);
+            }
+        } else if (stmt instanceof Delete) {
+            Delete delete = (Delete) stmt;
+            if (delete.getTable() != null) {
+                targets.add(delete.getTable());
+            }
+            if (delete.getTables() != null) {
+                targets.addAll(delete.getTables());
+            }
+        }
+        return targets;
+    }
+
+    private boolean isSameTable(List<Table> targets, Table table) {
+        for (Table t : targets) {
+            if (t == table) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ==================== SQL解析辅助方法 ====================
@@ -322,76 +471,27 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     }
 
     /**
-     * 从SELECT语句中提取涉及的表引用列表
+     * 从SELECT语句中提取涉及的表引用列表。
+     * <p>
+     * 覆盖 FROM 与各 JOIN 右侧、FROM 子句中的派生表、各层子查询、UNION 分支与 CTE。
+     * 旧实现依赖 {@code SubJoin}/{@code SubSelect} 类名反射，而 JSqlParser 4.9 已把这两个类
+     * 改名为 {@code ParenthesedFromItem}/{@code ParenthesedSelect}，导致 JOIN 与子查询中的表
+     * 完全漏检，现改由 {@link SqlTableCollector} 统一收集。
+     * </p>
      */
     protected List<TableRef> extractTablesFromSelect(Select select) {
         List<TableRef> tableRefs = new ArrayList<>();
         try {
-            Object selectBody = select.getSelectBody();
-            if (selectBody.getClass().getName().contains("PlainSelect")) {
-                java.lang.reflect.Method getFromItemMethod = selectBody.getClass().getMethod("getFromItem");
-                Object fromItem = getFromItemMethod.invoke(selectBody);
-                if (fromItem != null) {
-                    extractTableFromItemDynamic(fromItem, tableRefs);
-                }
+            for (Table table : SqlTableCollector.readTables(select)) {
+                TableRef ref = new TableRef();
+                ref.tableName = table.getName();
+                ref.databaseName = SqlTableCollector.databaseName(table);
+                tableRefs.add(ref);
             }
         } catch (Exception e) {
-            getLog().debug("解析SELECT语句的FROM子句失败: {}", e.getMessage());
+            getLog().warn("提取SELECT语句的表引用失败: {}", e.getMessage());
         }
         return tableRefs;
-    }
-
-    /**
-     * 通过反射动态提取FromItem中的表信息（支持嵌套SubJoin/SubSelect）
-     */
-    protected void extractTableFromItemDynamic(Object fromItem, List<TableRef> tableRefs) {
-        try {
-            String className = fromItem.getClass().getName();
-            if (className.contains(".Table") && !className.contains("Join")) {
-                TableRef ref = new TableRef();
-                java.lang.reflect.Method getNameMethod = fromItem.getClass().getMethod("getName");
-                ref.tableName = (String) getNameMethod.invoke(fromItem);
-                try {
-                    java.lang.reflect.Method getSchemaNameMethod = fromItem.getClass().getMethod("getSchemaName");
-                    ref.databaseName = (String) getSchemaNameMethod.invoke(fromItem);
-                    if (ref.databaseName == null || ref.databaseName.isEmpty()) {
-                        try {
-                            java.lang.reflect.Method getTableMethod = fromItem.getClass().getMethod("getTable");
-                            Object databaseObj = getTableMethod.invoke(fromItem);
-                            if (databaseObj != null) {
-                                java.lang.reflect.Method getDatabaseNameMethod = databaseObj.getClass().getMethod("getDatabaseName");
-                                ref.databaseName = (String) getDatabaseNameMethod.invoke(databaseObj);
-                            }
-                        } catch (Exception ignored) {}
-                    }
-                } catch (NoSuchMethodException ignored) {}
-                tableRefs.add(ref);
-            } else if (className.contains("SubJoin")) {
-                java.lang.reflect.Method getLeftMethod = fromItem.getClass().getMethod("getLeft");
-                Object left = getLeftMethod.invoke(fromItem);
-                extractTableFromItemDynamic(left, tableRefs);
-                java.lang.reflect.Method getJoinsMethod = fromItem.getClass().getMethod("getJoins");
-                @SuppressWarnings("unchecked")
-                List<Object> joins = (List<Object>) getJoinsMethod.invoke(fromItem);
-                for (Object join : joins) {
-                    java.lang.reflect.Method getRightItemMethod = join.getClass().getMethod("getRightItem");
-                    Object rightItem = getRightItemMethod.invoke(join);
-                    extractTableFromItemDynamic(rightItem, tableRefs);
-                }
-            } else if (className.contains("SubSelect")) {
-                java.lang.reflect.Method getSelectBodyMethod = fromItem.getClass().getMethod("getSelectBody");
-                Object subSelectBody = getSelectBodyMethod.invoke(fromItem);
-                if (subSelectBody != null && subSelectBody.getClass().getName().contains("PlainSelect")) {
-                    java.lang.reflect.Method getFromItemMethod = subSelectBody.getClass().getMethod("getFromItem");
-                    Object subFromItem = getFromItemMethod.invoke(subSelectBody);
-                    if (subFromItem != null) {
-                        extractTableFromItemDynamic(subFromItem, tableRefs);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            getLog().debug("动态提取表信息失败: {}", e.getMessage());
-        }
     }
 
     /**
@@ -760,10 +860,20 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
                 } else {
                     getLog().warn("元数据同步失败: RENAME {}.{} TO {}.{}", oldDb, oldTable, newDb, newTable);
                     executionLogListener.publishLog(executionId, "[元数据] 同步失败: RENAME " + oldTable + " TO " + newTable);
+                    // 风险项 R1：同步失败不再只落一条 warn 日志，升级为可检索的告警记录
+                    metadataSyncAlertService.alertSingleTableSyncFailed(
+                            context.getPrimaryDatasourceConfig().getId(),
+                            context.getPrimaryStorageEngine(),
+                            newDb, newTable, "RENAME",
+                            "RENAME 同步失败(dropOk=" + dropOk + ", createOk=" + createOk + ")");
                 }
             } catch (Exception syncEx) {
                 getLog().error("元数据同步异常: RENAME {}.{} TO {}.{}", oldDb, oldTable, newDb, newTable, syncEx);
                 executionLogListener.publishLog(executionId, "[元数据] 同步异常: " + syncEx.getMessage());
+                metadataSyncAlertService.alertSingleTableSyncFailed(
+                        context.getPrimaryDatasourceConfig().getId(),
+                        context.getPrimaryStorageEngine(),
+                        newDb, newTable, "RENAME", "RENAME 同步异常: " + syncEx.getMessage());
             }
             return;
         }
@@ -784,16 +894,33 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
             } else {
                 getLog().warn("元数据同步失败: {}.{}", ddlInfo.databaseName, ddlInfo.tableName);
                 executionLogListener.publishLog(executionId, "[元数据] 同步失败: " + ddlInfo.tableName);
+                // 风险项 R1：同步失败不再只落一条 warn 日志，升级为可检索的告警记录
+                metadataSyncAlertService.alertSingleTableSyncFailed(
+                        context.getPrimaryDatasourceConfig().getId(),
+                        context.getPrimaryStorageEngine(),
+                        ddlInfo.databaseName, ddlInfo.tableName, ddlInfo.ddlType,
+                        "DDL 执行后元数据同步返回失败");
             }
         } catch (Exception syncEx) {
             getLog().error("元数据同步异常: {}.{}", ddlInfo.databaseName, ddlInfo.tableName, syncEx);
             executionLogListener.publishLog(executionId, "[元数据] 同步异常: " + syncEx.getMessage());
+            metadataSyncAlertService.alertSingleTableSyncFailed(
+                    context.getPrimaryDatasourceConfig().getId(),
+                    context.getPrimaryStorageEngine(),
+                    ddlInfo.databaseName, ddlInfo.tableName, ddlInfo.ddlType,
+                    "DDL 执行后元数据同步异常: " + syncEx.getMessage());
         }
     }
 
     /**
-     * 对查询结果统一应用行级过滤和数据脱敏。
-     * 所有SQL执行策略在返回SELECT结果前均可调用此方法。
+     * 对查询结果应用行级过滤（第二道防线）、数据脱敏与列级裁剪。
+     * 所有能拿到结果集的执行策略（JDBC、Kyuubi）在返回SELECT结果前调用。
+     * <p>
+     * 行级过滤是「兜底」：如果 {@link #applyRowColumnRewrite} 已经把行过滤条件注入到
+     * 下发 SQL 并由引擎执行，这里不再重复过滤——重复过滤不仅无意义，多表场景下还会因为
+     * 后过滤只能取「第一张表」的条件而对已过滤的结果产生错误裁剪。
+     * 脱敏与列裁剪不受影响，始终执行。
+     * </p>
      */
     protected void applyRowFilterAndMasking(List<List<String>> rows, List<String> columns,
                                            String sql, CodeExecutionContext context) {
@@ -805,9 +932,14 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
             String dbName = permInfo.tableRef.databaseName != null ?
                     permInfo.tableRef.databaseName : defaultDatabase;
             String tableName = permInfo.tableRef.tableName;
-            // 行级权限（指定行）：按表取过滤条件
-            String mergedRowFilterSql = dataAccessPermissionService.getMergedRowFilterSql(
-                    datasourceName, dbName, tableName);
+            // 行级权限（指定行）：已在下发前注入到 SQL 时不再重复过滤
+            boolean rowFilterAlreadyInjected = context.isCodeRewritten();
+            String mergedRowFilterSql = rowFilterAlreadyInjected ? null
+                    : dataAccessPermissionService.getMergedRowFilterSql(
+                            datasourceName, dbName, tableName);
+            if (rowFilterAlreadyInjected) {
+                getLog().debug("行级过滤已在下发前注入SQL，跳过结果集二次过滤: {}.{}", dbName, tableName);
+            }
             if (mergedRowFilterSql != null && !mergedRowFilterSql.isBlank()) {
                 int beforeSize = rows.size();
                 rows = applyRowFilter(rows, columns, mergedRowFilterSql);

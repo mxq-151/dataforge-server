@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
-public class FlinkExecutionStrategy implements ExecutionStrategy {
+public class FlinkExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(FlinkExecutionStrategy.class);
 
@@ -35,10 +35,12 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
     private ProcessManager processManager;
 
     @Autowired
-    private ExecutionLogListener executionLogListener;
-
-    @Autowired
     private AesUtils aesUtils;
+
+    @Override
+    protected Logger getLog() {
+        return log;
+    }
 
     @Override
     public CodeExecutionResult execute(CodeExecutionContext context) {
@@ -131,7 +133,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
                 return CodeExecutionResult.failure(executionId, output.toString());
             }
         } else {
-            String codeContent = context.getCodeContent();
+            String codeContent = context.getExecutionCodeContent();
             if (codeContent == null) {
                 codeContent = "";
             }
@@ -504,7 +506,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
 
     private Path createTempScriptFile(CodeExecutionContext context, String suffix) throws Exception {
         Path tempFile = Files.createTempFile("flink_exec_", "." + suffix);
-        String content = context.getCodeContent();
+        String content = context.getExecutionCodeContent();
         if (content == null) {
             content = "";
         }
@@ -562,7 +564,7 @@ public class FlinkExecutionStrategy implements ExecutionStrategy {
             sql.append("\n");
         }
 
-        sql.append(context.getCodeContent());
+        sql.append(context.getExecutionCodeContent());
 
         return sql.toString();
     }

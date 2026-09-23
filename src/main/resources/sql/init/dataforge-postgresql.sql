@@ -10,6 +10,166 @@
 -- ============================================================
 BEGIN;
 
+-- ==================================================================
+-- 资产目录模块（asset_*）：对标 DataWorks 数据资产目录
+--   分类不靠人工维护：表名规范 {分层}_{业务域}_{实体描述}_{刷新周期} 可直接
+--   解析出分层与业务域，解析失败即「未分类」并自动成为治理项；
+--   asset_category 只存人工覆盖与显示名。
+-- ==================================================================
+
+-- 资产分类表(分层/业务域，支持人工覆盖)
+CREATE TABLE IF NOT EXISTS asset_category (
+  id BIGSERIAL,
+  category_code VARCHAR(64) NOT NULL,
+  category_name VARCHAR(100) NOT NULL,
+  parent_code VARCHAR(64),
+  category_kind VARCHAR(16) NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  remark VARCHAR(500),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_category_code UNIQUE (category_code)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_category_kind ON asset_category (category_kind);
+CREATE INDEX IF NOT EXISTS idx_asset_category_parent ON asset_category (parent_code);
+COMMENT ON TABLE asset_category IS '资产分类表(分层/业务域，支持人工覆盖)';
+COMMENT ON COLUMN asset_category.category_kind IS '分类维度(layer=数仓分层 domain=业务域)';
+
+-- 资产收藏表
+CREATE TABLE IF NOT EXISTS asset_bookmark (
+  id BIGSERIAL,
+  user_id BIGINT NOT NULL,
+  asset_type VARCHAR(16) NOT NULL,
+  asset_id BIGINT NOT NULL,
+  table_metadata_id BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_bookmark UNIQUE (user_id, asset_type, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_bookmark_user ON asset_bookmark (user_id);
+CREATE INDEX IF NOT EXISTS idx_asset_bookmark_table ON asset_bookmark (table_metadata_id);
+COMMENT ON TABLE asset_bookmark IS '资产收藏表';
+COMMENT ON COLUMN asset_bookmark.asset_type IS '资产类型(table/column/indicator)';
+
+-- 资产访问埋点表(仅追加)：高频写入的轻量表，刻意与 operation_audit_log 分离，
+-- 避免浏览行为淹没真正的操作留痕
+CREATE TABLE IF NOT EXISTS asset_access_log (
+  id BIGSERIAL,
+  user_id BIGINT,
+  user_name VARCHAR(100),
+  asset_type VARCHAR(16) NOT NULL,
+  asset_id BIGINT NOT NULL,
+  table_metadata_id BIGINT,
+  access_type VARCHAR(16) NOT NULL,
+  keyword VARCHAR(200),
+  access_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_access_asset ON asset_access_log (asset_type, asset_id);
+CREATE INDEX IF NOT EXISTS idx_asset_access_time ON asset_access_log (access_time);
+CREATE INDEX IF NOT EXISTS idx_asset_access_user ON asset_access_log (user_id);
+COMMENT ON TABLE asset_access_log IS '资产访问埋点表(仅追加，按日汇总)';
+COMMENT ON COLUMN asset_access_log.access_type IS '访问类型(browse=浏览 read=读取 bookmark=收藏 query=带查询)';
+
+
+-- ==================================================================
+-- 资产目录模块（第二批 / 第三批）：标签、使用说明、使用热度
+--   使用热度走独立的轻量表按日汇总(T+1)，不回写 operation_audit_log；
+--   使用说明复用同一张 asset_doc + 版本历史，避免重复建设 markdown 与版本能力。
+-- ==================================================================
+
+-- 资产使用说明表(markdown，版本历史在 asset_doc_history)
+CREATE TABLE IF NOT EXISTS asset_doc (
+  id BIGSERIAL NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  content TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  update_by VARCHAR(100),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_doc_table UNIQUE (table_metadata_id)
+);
+COMMENT ON TABLE asset_doc IS '资产使用说明表(markdown，版本历史在 asset_doc_history)';
+COMMENT ON COLUMN asset_doc.update_by IS '最后修改人';
+
+-- 资产使用说明版本历史表
+CREATE TABLE IF NOT EXISTS asset_doc_history (
+  id BIGSERIAL NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  version INTEGER NOT NULL,
+  content TEXT,
+  update_by VARCHAR(100),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_doc_history_table ON asset_doc_history (table_metadata_id);
+COMMENT ON TABLE asset_doc_history IS '资产使用说明版本历史表';
+
+-- 资产标签定义表
+CREATE TABLE IF NOT EXISTS asset_tag (
+  id BIGSERIAL NOT NULL,
+  tag_code VARCHAR(64) NOT NULL,
+  tag_name VARCHAR(100) NOT NULL,
+  color VARCHAR(32),
+  remark VARCHAR(500),
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_tag_code UNIQUE (tag_code)
+);
+COMMENT ON TABLE asset_tag IS '资产标签定义表';
+COMMENT ON COLUMN asset_tag.color IS '标签颜色(前端色值，如 #1565c0)';
+
+-- 资产标签关联表(支持表/字段/指标)
+CREATE TABLE IF NOT EXISTS asset_tag_rel (
+  id BIGSERIAL NOT NULL,
+  tag_id BIGINT NOT NULL,
+  asset_type VARCHAR(16) NOT NULL,
+  asset_id BIGINT NOT NULL,
+  table_metadata_id BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_tag_rel UNIQUE (tag_id, asset_type, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_tag_rel_asset ON asset_tag_rel (asset_type, asset_id);
+CREATE INDEX IF NOT EXISTS idx_asset_tag_rel_table ON asset_tag_rel (table_metadata_id);
+COMMENT ON TABLE asset_tag_rel IS '资产标签关联表(支持表/字段/指标)';
+
+-- 资产使用热度日汇总表(T+1，由 asset_access_log 汇总)
+CREATE TABLE IF NOT EXISTS asset_usage_daily (
+  id BIGSERIAL NOT NULL,
+  asset_type VARCHAR(16) NOT NULL DEFAULT 'table',
+  asset_id BIGINT NOT NULL,
+  table_metadata_id BIGINT,
+  stat_date DATE NOT NULL,
+  browse_count INTEGER NOT NULL DEFAULT 0,
+  read_count INTEGER NOT NULL DEFAULT 0,
+  bookmark_count INTEGER NOT NULL DEFAULT 0,
+  relate_count INTEGER NOT NULL DEFAULT 0,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_usage_daily UNIQUE (asset_type, asset_id, stat_date)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_usage_table ON asset_usage_daily (table_metadata_id);
+CREATE INDEX IF NOT EXISTS idx_asset_usage_date ON asset_usage_daily (stat_date);
+COMMENT ON TABLE asset_usage_daily IS '资产使用热度日汇总表(T+1，由 asset_access_log 汇总)';
+COMMENT ON COLUMN asset_usage_daily.stat_date IS '统计日(按日汇总，T+1 生成)';
+COMMENT ON COLUMN asset_usage_daily.relate_count IS '被关联数(引用该资产的规则/指标等)';
+
 -- 表字段元数据表
 CREATE TABLE IF NOT EXISTS column_metadata (
   id BIGSERIAL,
@@ -25,6 +185,9 @@ CREATE TABLE IF NOT EXISTS column_metadata (
   ordinal_position INTEGER NOT NULL DEFAULT 0,
   nullable SMALLINT NOT NULL DEFAULT 1,
   default_value VARCHAR(500),
+  business_desc VARCHAR(1000),
+  security_level VARCHAR(16),
+  hot_score SMALLINT NOT NULL DEFAULT 0,
   sync_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -34,6 +197,37 @@ CREATE TABLE IF NOT EXISTS column_metadata (
 CREATE INDEX IF NOT EXISTS idx_column_metadata_table_metadata_id ON column_metadata (table_metadata_id);
 CREATE INDEX IF NOT EXISTS idx_column_metadata_column_name ON column_metadata (column_name);
 COMMENT ON TABLE column_metadata IS '表字段元数据表';
+COMMENT ON COLUMN column_metadata.business_desc IS '业务描述(与 column_comment 的技术注释区分，供资产目录展示)';
+COMMENT ON COLUMN column_metadata.security_level IS '字段安全等级';
+COMMENT ON COLUMN column_metadata.hot_score IS '字段热度星级(0~5，由使用记录日汇总回写)';
+
+-- 数据质量校验结果表
+CREATE TABLE IF NOT EXISTS data_quality_check_result (
+  id BIGSERIAL,
+  datasource_id BIGINT,
+  datasource_name VARCHAR(100) NOT NULL,
+  database_name VARCHAR(100),
+  table_name VARCHAR(200) NOT NULL,
+  check_item VARCHAR(200) NOT NULL,
+  check_time TIMESTAMP NOT NULL,
+  check_record_count BIGINT NOT NULL DEFAULT 0,
+  fail_record_count BIGINT NOT NULL DEFAULT 0,
+  fail_detail TEXT,
+  rule_type VARCHAR(64),
+  rule_name VARCHAR(200),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dqc_datasource_id ON data_quality_check_result (datasource_id);
+CREATE INDEX IF NOT EXISTS idx_dqc_table ON data_quality_check_result (database_name, table_name);
+CREATE INDEX IF NOT EXISTS idx_dqc_check_time ON data_quality_check_result (check_time);
+CREATE INDEX IF NOT EXISTS idx_dqc_rule_type ON data_quality_check_result (rule_type);
+COMMENT ON TABLE data_quality_check_result IS '数据质量校验结果表';
+COMMENT ON COLUMN data_quality_check_result.check_item IS '检查项(自由文本，历史字段；新链路请用 rule_type/rule_name)';
+COMMENT ON COLUMN data_quality_check_result.rule_type IS '规则类型(7类之一)，历史数据为空表示未分类';
+COMMENT ON COLUMN data_quality_check_result.rule_name IS '规则名';
 
 -- 数据源配置表
 CREATE TABLE IF NOT EXISTS datasource_config (
@@ -184,6 +378,238 @@ CREATE INDEX IF NOT EXISTS idx_dev_script_execution_status ON dev_script_executi
 CREATE INDEX IF NOT EXISTS idx_dev_script_execution_start_time ON dev_script_execution (start_time);
 CREATE INDEX IF NOT EXISTS idx_dev_script_execution_execute_mode ON dev_script_execution (execute_mode);
 COMMENT ON TABLE dev_script_execution IS '脚本执行历史表';
+
+-- ==================================================================
+-- 数据质量模块（dq_*）：对标 DataWorks 数据质量
+--   契约早已存在 —— 智能体提示词里已约定 7 类规则类型（主键唯一性/非空/值域/
+--   行数波动/行数环比/上下游对账/口径一致性）与 DQC 质量层，但平台侧原先只有
+--   结果表 data_quality_check_result（「检查项」是自由文本），规则定义、阈值与
+--   运行记录无处存放。本模块补齐「规则 + 运行」两段。
+--   ⚠ 规则类型是契约：新增/改名必须同时改前端 types/quality.ts 与提示词，禁止自造同义词。
+-- ==================================================================
+
+-- 规则模板表：内置模板即 7 类规则类型(template_code 与类型编码同名)；
+-- 自定义模板仍需归属 7 类之一(差异只在 SQL 模板，不在类型)，否则覆盖率统计失去口径
+CREATE TABLE IF NOT EXISTS dq_rule_template (
+  id BIGSERIAL,
+  template_code VARCHAR(64) NOT NULL,
+  template_name VARCHAR(200) NOT NULL,
+  rule_type VARCHAR(64) NOT NULL,
+  template_kind VARCHAR(16) NOT NULL DEFAULT 'custom',
+  sql_template TEXT,
+  field_types VARCHAR(255),
+  param_schema TEXT,
+  remark VARCHAR(500),
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_dq_template_code UNIQUE (template_code)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_template_rule_type ON dq_rule_template (rule_type);
+COMMENT ON TABLE dq_rule_template IS '数据质量规则模板表';
+COMMENT ON COLUMN dq_rule_template.rule_type IS '规则类型(7类之一:PRIMARY_KEY_UNIQUE/NOT_NULL/VALUE_RANGE/ROW_COUNT_FLUCTUATION/ROW_COUNT_MOM/UPSTREAM_DOWNSTREAM_RECON/METRIC_CONSISTENCY)';
+COMMENT ON COLUMN dq_rule_template.template_kind IS '模板类别(builtin=内置 custom=自定义)';
+
+-- 监控规则表：模板的具体应用，含校验对象、阈值与处置方式。
+--   dispose_mode=BLOCK 即「阻断下游」，落地方式是让质检任务自身跑失败，
+--   DolphinScheduler 的下游节点便不会触发（不依赖任何「反向置为失败」接口）
+CREATE TABLE IF NOT EXISTS dq_rule (
+  id BIGSERIAL,
+  rule_name VARCHAR(200) NOT NULL,
+  rule_type VARCHAR(64) NOT NULL,
+  template_id BIGINT,
+  template_code VARCHAR(64),
+  datasource_id BIGINT,
+  datasource_name VARCHAR(100),
+  database_name VARCHAR(100),
+  table_name VARCHAR(200) NOT NULL,
+  column_name VARCHAR(200),
+  partition_expr VARCHAR(255),
+  ref_datasource_id BIGINT,
+  ref_database_name VARCHAR(100),
+  ref_table_name VARCHAR(200),
+  ref_column_name VARCHAR(200),
+  compare_mode VARCHAR(8) NOT NULL DEFAULT 'EQ',
+  expected_value VARCHAR(255),
+  warn_threshold VARCHAR(255),
+  error_threshold VARCHAR(255),
+  dispose_mode VARCHAR(8) NOT NULL DEFAULT 'ALERT',
+  params TEXT,
+  owner_name VARCHAR(100),
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_table ON dq_rule (database_name, table_name);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_type ON dq_rule (rule_type);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_template ON dq_rule (template_id);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_datasource ON dq_rule (datasource_id);
+COMMENT ON TABLE dq_rule IS '数据质量监控规则表';
+COMMENT ON COLUMN dq_rule.compare_mode IS '比较方式(EQ/NE/GT/GTE/LT/LTE)';
+COMMENT ON COLUMN dq_rule.params IS '自定义模板占位符取值(JSON 对象)；内置模板按规则类型使用固定参数名';
+COMMENT ON COLUMN dq_rule.dispose_mode IS '处置方式(BLOCK=阻断下游 ALERT=告警)，与提示词 S2 的「处置方式」同义';
+COMMENT ON COLUMN dq_rule.owner_name IS '规则负责人';
+COMMENT ON COLUMN dq_rule.warn_threshold IS '橙色(警告)阈值，空表示不设';
+COMMENT ON COLUMN dq_rule.error_threshold IS '红色(异常)阈值，空表示不设';
+
+-- 运行实例表：一次质检任务执行(或一次调度批次)的汇总
+CREATE TABLE IF NOT EXISTS dq_run_instance (
+  id BIGSERIAL,
+  task_id BIGINT,
+  task_name VARCHAR(200),
+  batch_no VARCHAR(64) NOT NULL,
+  trigger_type VARCHAR(16) NOT NULL DEFAULT 'MANUAL',
+  schedule_instance_id BIGINT,
+  target_datasource_id BIGINT,
+  target_database_name VARCHAR(100),
+  target_table_name VARCHAR(200),
+  start_time TIMESTAMP,
+  end_time TIMESTAMP,
+  status VARCHAR(16) NOT NULL DEFAULT 'RUNNING',
+  check_record_count BIGINT NOT NULL DEFAULT 0,
+  fail_record_count BIGINT NOT NULL DEFAULT 0,
+  pass_count INTEGER NOT NULL DEFAULT 0,
+  warn_count INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_run_task ON dq_run_instance (task_id);
+CREATE INDEX IF NOT EXISTS idx_dq_run_batch ON dq_run_instance (batch_no);
+CREATE INDEX IF NOT EXISTS idx_dq_run_table ON dq_run_instance (target_database_name, target_table_name);
+CREATE INDEX IF NOT EXISTS idx_dq_run_status ON dq_run_instance (status);
+CREATE INDEX IF NOT EXISTS idx_dq_run_start_time ON dq_run_instance (start_time);
+COMMENT ON TABLE dq_run_instance IS '数据质量运行实例表';
+COMMENT ON COLUMN dq_run_instance.trigger_type IS '触发方式(SCHEDULE=调度触发 MANUAL=手动触发)';
+COMMENT ON COLUMN dq_run_instance.schedule_instance_id IS '调度触发时对应的调度实例号，用于跳转调度实例详情';
+COMMENT ON COLUMN dq_run_instance.failed_count IS 'SQL 未跑通的规则数，与「校验不通过」区分';
+
+-- 规则级校验结果表：对应提示词「校验输出须可定位：规则名/校验对象/阈值/实际值/是否通过」
+CREATE TABLE IF NOT EXISTS dq_rule_result (
+  id BIGSERIAL,
+  run_id BIGINT NOT NULL,
+  rule_id BIGINT,
+  rule_name VARCHAR(200) NOT NULL,
+  rule_type VARCHAR(64) NOT NULL,
+  check_object VARCHAR(500),
+  threshold VARCHAR(255),
+  actual_value VARCHAR(500),
+  metric_value VARCHAR(64),
+  status VARCHAR(16) NOT NULL DEFAULT 'PASS',
+  severity VARCHAR(16),
+  exec_sql TEXT,
+  error_msg VARCHAR(1000),
+  cost_ms BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_result_run ON dq_rule_result (run_id);
+CREATE INDEX IF NOT EXISTS idx_dq_result_rule ON dq_rule_result (rule_id);
+CREATE INDEX IF NOT EXISTS idx_dq_result_status ON dq_rule_result (status);
+COMMENT ON TABLE dq_rule_result IS '数据质量规则级校验结果表';
+COMMENT ON COLUMN dq_rule_result.rule_name IS '规则名(结果自包含，规则被删后仍可追溯)';
+COMMENT ON COLUMN dq_rule_result.status IS '校验状态(PASS=通过 WARN=橙色异常 ERROR=红色异常 FAILED=校验失败)';
+COMMENT ON COLUMN dq_rule_result.check_object IS '校验对象(表.字段 或 上下游两表)';
+COMMENT ON COLUMN dq_rule_result.metric_value IS '原始度量值(行数类=当期行数 跨表比对=主表值,对照值)；仅存百分比无法回推历史基线';
+
+
+-- ==================================================================
+-- 数据质量模块（第二批 / 第三批）：质检任务、任务与规则关联、告警订阅与发送记录
+--   阻断下游不做「平台反向置调度节点失败」：质检任务作为 DAG 节点，
+--   校验不通过即非零退出，下游自然不执行。告警第一期只落发送记录。
+-- ==================================================================
+
+-- 数据质量告警发送记录表
+CREATE TABLE IF NOT EXISTS dq_alert_log (
+  id BIGSERIAL NOT NULL,
+  run_id BIGINT,
+  task_id BIGINT,
+  rule_id BIGINT,
+  rule_name VARCHAR(200),
+  channel VARCHAR(32) NOT NULL,
+  receiver VARCHAR(200),
+  status VARCHAR(16) NOT NULL DEFAULT 'SUCCESS',
+  fail_reason VARCHAR(500),
+  send_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_alert_log_run ON dq_alert_log (run_id);
+CREATE INDEX IF NOT EXISTS idx_dq_alert_log_task ON dq_alert_log (task_id);
+CREATE INDEX IF NOT EXISTS idx_dq_alert_log_time ON dq_alert_log (send_time);
+COMMENT ON TABLE dq_alert_log IS '数据质量告警发送记录表';
+COMMENT ON COLUMN dq_alert_log.channel IS '告警渠道(site=站内 webhook=回调 email=邮件)，第一期只落记录';
+COMMENT ON COLUMN dq_alert_log.status IS '发送状态(SUCCESS/FAILED)';
+
+-- 数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)
+CREATE TABLE IF NOT EXISTS dq_alert_subscription (
+  id BIGSERIAL NOT NULL,
+  task_id BIGINT NOT NULL,
+  notify_on VARCHAR(64) NOT NULL DEFAULT 'ERROR,FAILED',
+  channels VARCHAR(255),
+  receivers VARCHAR(500),
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_alert_sub_task ON dq_alert_subscription (task_id);
+COMMENT ON TABLE dq_alert_subscription IS '数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)';
+COMMENT ON COLUMN dq_alert_subscription.notify_on IS '触发告警的结果状态集合，逗号分隔，如 ERROR,FAILED (PASS/WARN/ERROR/FAILED)';
+
+-- 数据质量质检任务表(规则集的执行计划)
+CREATE TABLE IF NOT EXISTS dq_task (
+  id BIGSERIAL NOT NULL,
+  task_name VARCHAR(200) NOT NULL,
+  owner_name VARCHAR(100),
+  description VARCHAR(500),
+  datasource_id BIGINT,
+  datasource_name VARCHAR(100),
+  database_name VARCHAR(100),
+  table_name VARCHAR(200),
+  trigger_type VARCHAR(16) NOT NULL DEFAULT 'MANUAL',
+  project_code VARCHAR(200),
+  workflow_code BIGINT,
+  workflow_name VARCHAR(200),
+  node_name VARCHAR(200),
+  dispose_policy VARCHAR(8) NOT NULL DEFAULT 'ALERT',
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_task_table ON dq_task (database_name, table_name);
+CREATE INDEX IF NOT EXISTS idx_dq_task_trigger ON dq_task (trigger_type);
+COMMENT ON TABLE dq_task IS '数据质量质检任务表(规则集的执行计划)';
+COMMENT ON COLUMN dq_task.dispose_policy IS '任务级默认处置策略(BLOCK=阻断下游 ALERT=告警)，规则未单独设置时生效';
+COMMENT ON COLUMN dq_task.node_name IS '关联的调度节点名；阻断由该节点非零退出实现，平台不做反向置失败';
+
+-- 数据质量质检任务与规则的关联表
+CREATE TABLE IF NOT EXISTS dq_task_rule_rel (
+  id BIGSERIAL NOT NULL,
+  task_id BIGINT NOT NULL,
+  rule_id BIGINT NOT NULL,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted SMALLINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_dq_task_rule UNIQUE (task_id, rule_id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_task_rule_rule ON dq_task_rule_rel (rule_id);
+COMMENT ON TABLE dq_task_rule_rel IS '数据质量质检任务与规则的关联表';
 
 -- 指标定义主表
 CREATE TABLE IF NOT EXISTS indicators (
@@ -548,16 +974,39 @@ CREATE TABLE IF NOT EXISTS table_metadata (
   sync_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   table_fingerprint VARCHAR(64),
   columns_fingerprint VARCHAR(64),
+  business_owner VARCHAR(255),
+  tech_owner VARCHAR(255),
+  topic VARCHAR(200),
+  visibility VARCHAR(20) NOT NULL DEFAULT 'internal',
+  category_code VARCHAR(64),
+  asset_level VARCHAR(16),
+  browse_cnt_30d INTEGER NOT NULL DEFAULT 0,
+  read_cnt_30d INTEGER NOT NULL DEFAULT 0,
+  bookmark_cnt INTEGER NOT NULL DEFAULT 0,
+  last_access_time TIMESTAMP,
   create_by BIGINT,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted SMALLINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
-  CONSTRAINT uk_table_storage UNIQUE (storage_engine, database_name, table_name)
+  CONSTRAINT uk_table_storage UNIQUE (storage_engine, database_name, table_name),
+  CONSTRAINT chk_table_metadata_visibility CHECK (visibility IN ('public','internal','restricted'))
 );
 CREATE INDEX IF NOT EXISTS idx_table_metadata_database_name ON table_metadata (database_name);
 CREATE INDEX IF NOT EXISTS idx_table_metadata_table_name ON table_metadata (table_name);
+CREATE INDEX IF NOT EXISTS idx_table_metadata_owner ON table_metadata (business_owner);
+CREATE INDEX IF NOT EXISTS idx_table_metadata_category ON table_metadata (category_code);
 COMMENT ON TABLE table_metadata IS '库表元数据表';
+COMMENT ON COLUMN table_metadata.business_owner IS '业务负责人(语义对齐 indicators.business_owner；本表按负责人筛选，需可建索引，故宽度取 255)';
+COMMENT ON COLUMN table_metadata.tech_owner IS '技术负责人(同上)';
+COMMENT ON COLUMN table_metadata.topic IS '所属主题域(对齐 indicators.topic)';
+COMMENT ON COLUMN table_metadata.visibility IS '可见性(public/internal/restricted，对齐 indicators.visibility)';
+COMMENT ON COLUMN table_metadata.category_code IS '人工覆盖的分类编码；为空表示采用表名规范解析结果';
+COMMENT ON COLUMN table_metadata.asset_level IS '资产等级(L1~L5)';
+COMMENT ON COLUMN table_metadata.browse_cnt_30d IS '近30日浏览数(由 asset_access_log 日汇总回写)';
+COMMENT ON COLUMN table_metadata.read_cnt_30d IS '近30日读取数(由 asset_access_log 日汇总回写)';
+COMMENT ON COLUMN table_metadata.bookmark_cnt IS '收藏数(由 asset_bookmark 回写)';
+COMMENT ON COLUMN table_metadata.last_access_time IS '最近访问时间(埋点回写，用于热度排序)';
 
 -- ------------------------------------------------------------------
 -- ------------------------------------------------------------------
@@ -570,6 +1019,40 @@ INSERT INTO sys_user (id, username, password, real_name, email, phone, status, i
 
 INSERT INTO sys_role (id, role_name, role_code, role_type, description, status, create_time, update_time, deleted) VALUES
 (1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03',0);
+
+-- ------------------------------------------------------------------
+-- 平台级参考数据（非测试数据，任何部署都需要，故放在本脚本而非 testdata）
+--   1) 数据质量 7 类内置规则模板：与智能体提示词、前端 types/quality.ts 同源，
+--      template_code 即规则类型编码；三处必须同时演进，禁止自造同义词。
+--   2) 资产目录数仓分层：与提示词「分层规范」一致（ODS/DWD/DWS/ADS/DIM/DQC/TMP）。
+--      业务域不预置，由表名规范 {分层}_{业务域}_{实体描述}_{刷新周期} 解析产生，
+--      解析失败的资产自动进入「未分类」并成为治理项。
+-- ------------------------------------------------------------------
+
+INSERT INTO dq_rule_template (template_code, template_name, rule_type, template_kind, remark, enabled) VALUES
+('PRIMARY_KEY_UNIQUE', '主键唯一性', 'PRIMARY_KEY_UNIQUE', 'builtin', '主键/唯一键重复检测', 1),
+('NOT_NULL', '非空', 'NOT_NULL', 'builtin', '关键字段空值与空串检测', 1),
+('VALUE_RANGE', '值域', 'VALUE_RANGE', 'builtin', '枚举字典取值与数值区间合法性', 1),
+('ROW_COUNT_FLUCTUATION', '行数波动', 'ROW_COUNT_FLUCTUATION', 'builtin', '当日行数相对历史基线的涨跌幅', 1),
+('ROW_COUNT_MOM', '行数环比', 'ROW_COUNT_MOM', 'builtin', '当期行数与上期行数的对比', 1),
+('UPSTREAM_DOWNSTREAM_RECON', '上下游对账', 'UPSTREAM_DOWNSTREAM_RECON', 'builtin', '上下游同口径记录数/金额一致性', 1),
+('METRIC_CONSISTENCY', '口径一致性', 'METRIC_CONSISTENCY', 'builtin', '同一指标在不同表、不同层之间的计算结果一致性', 1);
+
+INSERT INTO asset_category (category_code, category_name, parent_code, category_kind, sort_order) VALUES
+('ods', 'ODS 贴源层', NULL, 'layer', 1),
+('dwd', 'DWD 明细层', NULL, 'layer', 2),
+('dws', 'DWS 汇总层', NULL, 'layer', 3),
+('ads', 'ADS 应用层', NULL, 'layer', 4),
+('dim', 'DIM 维度层', NULL, 'layer', 5),
+('dqc', 'DQC 质量层', NULL, 'layer', 6),
+('tmp', 'TMP 临时层', NULL, 'layer', 7);
+
+-- 默认资产标签（平台级参考数据；标签本身仍由人工施加到具体资产上）
+INSERT INTO asset_tag (tag_code, tag_name, color, remark, enabled) VALUES
+('CORE', '核心资产', '#c62828', '对业务有直接支撑作用的核心表', 1),
+('HOT', '高频使用', '#1565c0', '近30日读取热度高', 1),
+('PENDING_GOVERN', '待治理', '#f9a825', '命名不合规、未标注或无负责人等', 1),
+('SENSITIVE', '敏感数据', '#6a1b9a', '含个人信息或需脱敏的字段', 1);
 
 -- 同步各自增序列到当前最大 id
 SELECT setval(pg_get_serial_sequence('sys_user','id'), (SELECT COALESCE(MAX(id),1) FROM sys_user));

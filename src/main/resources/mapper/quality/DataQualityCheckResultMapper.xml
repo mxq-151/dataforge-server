@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.bigdata.modules.quality.mapper.DataQualityCheckResultMapper">
+
+    <!--
+      检查失败记录统计：按 表(database_name+table_name) + 日期 + 检查项 聚合未通过记录数。
+      CAST(check_time AS DATE) 在 MySQL/MariaDB/H2/PostgreSQL 均受支持，无需区分方言。
+    -->
+    <select id="selectFailStatistic" resultType="com.bigdata.modules.quality.vo.DataQualityFailStatisticVO">
+        SELECT
+            datasource_id,
+            datasource_name,
+            database_name,
+            table_name,
+            check_item,
+            CAST(check_time AS DATE) AS check_date,
+            SUM(check_record_count) AS check_record_count,
+            SUM(fail_record_count) AS fail_record_count
+        FROM data_quality_check_result
+        WHERE deleted = 0
+          AND fail_record_count > 0
+        <if test="startTime != null">
+            AND check_time &gt;= #{startTime}
+        </if>
+        <if test="endTime != null">
+            AND check_time &lt; #{endTime}
+        </if>
+        <if test="datasourceId != null">
+            AND datasource_id = #{datasourceId}
+        </if>
+        <if test="databaseName != null and databaseName != ''">
+            AND database_name = #{databaseName}
+        </if>
+        <if test="tableName != null and tableName != ''">
+            AND table_name LIKE CONCAT('%', #{tableName}, '%')
+        </if>
+        GROUP BY datasource_id, datasource_name, database_name, table_name, check_item, CAST(check_time AS DATE)
+        ORDER BY check_date DESC, table_name ASC, check_item ASC
+    </select>
+
+</mapper>

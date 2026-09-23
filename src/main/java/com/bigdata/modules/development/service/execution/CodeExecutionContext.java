@@ -11,6 +11,15 @@ public class CodeExecutionContext {
 
     private String executionId;
     private String codeContent;
+    /**
+     * 权限改写后的实际下发内容（行级过滤注入 / 列白名单裁剪，见 SqlPermissionRewriter）。
+     * 为 null 表示无需改写，此时以 {@link #codeContent} 为准。
+     * <p>
+     * 与 {@link #codeContent} 分离的目的是：日志、审计与回显仍然展示用户提交的原始代码，
+     * 只有真正提交给引擎执行的内容被替换。
+     * </p>
+     */
+    private String effectiveCodeContent;
     private CodeType codeType;
     private DatasourceType engineType;
     private List<DatasourceConfig> datasourceConfigs;
@@ -39,6 +48,26 @@ public class CodeExecutionContext {
 
     public void setCodeContent(String codeContent) {
         this.codeContent = codeContent;
+    }
+
+    public String getEffectiveCodeContent() {
+        return effectiveCodeContent;
+    }
+
+    public void setEffectiveCodeContent(String effectiveCodeContent) {
+        this.effectiveCodeContent = effectiveCodeContent;
+    }
+
+    /**
+     * 真正提交给引擎执行的内容：优先使用权限改写后的内容，未改写时回退到用户原始代码。
+     */
+    public String getExecutionCodeContent() {
+        return effectiveCodeContent != null ? effectiveCodeContent : codeContent;
+    }
+
+    /** 是否发生了权限改写。 */
+    public boolean isCodeRewritten() {
+        return effectiveCodeContent != null;
     }
 
     public CodeType getCodeType() {

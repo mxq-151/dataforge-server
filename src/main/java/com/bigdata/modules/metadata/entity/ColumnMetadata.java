@@ -28,6 +28,13 @@ public class ColumnMetadata {
     private Date createTime;
     private Date updateTime;
 
+    /** 业务描述（与 columnComment 的技术注释区分，供资产目录展示） */
+    private String businessDesc;
+    /** 字段安全等级 */
+    private String securityLevel;
+    /** 字段热度星级 0~5（由使用记录日汇总回写） */
+    private Integer hotScore;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public Long getTableMetadataId() { return tableMetadataId; }
@@ -60,4 +67,10 @@ public class ColumnMetadata {
     public void setCreateTime(Date createTime) { this.createTime = createTime; }
     public Date getUpdateTime() { return updateTime; }
     public void setUpdateTime(Date updateTime) { this.updateTime = updateTime; }
+    public String getBusinessDesc() { return businessDesc; }
+    public void setBusinessDesc(String businessDesc) { this.businessDesc = businessDesc; }
+    public String getSecurityLevel() { return securityLevel; }
+    public void setSecurityLevel(String securityLevel) { this.securityLevel = securityLevel; }
+    public Integer getHotScore() { return hotScore; }
+    public void setHotScore(Integer hotScore) { this.hotScore = hotScore; }
 }
