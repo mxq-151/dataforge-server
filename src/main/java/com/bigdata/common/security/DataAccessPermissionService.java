@@ -65,9 +65,106 @@ public class DataAccessPermissionService {
     @Autowired
     private SysTablePermissionRowMapper tablePermissionRowMapper;
 
+    @Autowired
+    private SysUserMapper sysUserMapper;
+
+    @Autowired
+    private SysRoleMapper sysRoleMapper;
+
     public boolean isAdmin() {
         List<String> roles = SecurityUtils.getCurrentUserRoles();
         return roles != null && roles.stream().anyMatch(r -> ADMIN_ROLE_CODE.equalsIgnoreCase(r));
+    }
+
+    /**
+     * 按指定用户判定管理员身份（不依赖 SecurityContext，供外部作业/服务调用）。
+     * <p>
+     * 先看用户表的超级管理员标记，再看租户内角色编码，与
+     * {@code AbstractBaseExecutionStrategy#hasDdlPermission(Long)} 的口径保持一致。
+     * </p>
+     */
+    public boolean isAdmin(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user != null && Integer.valueOf(1).equals(user.getIsAdmin())) {
+            return true;
+        }
+        List<Long> roleIds = getUserRoleIds(userId);
+        if (roleIds.isEmpty()) {
+            return false;
+        }
+        List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
+        if (roles == null || roles.isEmpty()) {
+            return false;
+        }
+        return roles.stream()
+                .map(SysRole::getRoleCode)
+                .filter(Objects::nonNull)
+                .anyMatch(code -> ADMIN_ROLE_CODE.equalsIgnoreCase(code));
+    }
+
+    /**
+     * 按指定用户判定表权限（不依赖 SecurityContext，供外部作业/服务调用）。
+     * <p>匹配语义与 {@link #hasTablePermission} 完全一致，只是用户身份由入参给出。</p>
+     */
+    public boolean hasTablePermissionForUser(Long userId, String datasourceName, String databaseName,
+                                            String tableName, String operation) {
+        if (userId == null) {
+            return false;
+        }
+        if (isAdmin(userId)) {
+            return true;
+        }
+        List<Long> tablePermissionIds = resolveTablePermissionIds(userId);
+        if (tablePermissionIds.isEmpty()) {
+            return false;
+        }
+        List<SysTablePermission> permissions = sysTablePermissionMapper.selectBatchIds(tablePermissionIds);
+        for (SysTablePermission perm : permissions) {
+            if (matchesTablePermission(perm, datasourceName, databaseName, tableName)
+                    && hasTableOperation(perm, operation)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 按指定用户判定文件权限（不依赖 SecurityContext，供外部作业/服务调用）。
+     * <p>匹配语义与 {@link #hasFilePermission} 完全一致，只是用户身份由入参给出。</p>
+     */
+    public boolean hasFilePermissionForUser(Long userId, String path, Long storageConfigId, int requiredType) {
+        if (userId == null) {
+            return false;
+        }
+        if (isAdmin(userId)) {
+            return true;
+        }
+        List<Long> filePermissionIds = resolveFilePermissionIds(userId);
+        if (filePermissionIds.isEmpty()) {
+            return false;
+        }
+        List<SysFilePermission> permissions = sysFilePermissionMapper.selectBatchIds(filePermissionIds);
+        for (SysFilePermission perm : permissions) {
+            if (matchesFilePermission(perm, path, storageConfigId, requiredType)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 指定用户的角色所绑定的表权限明细 ID（去重）。 */
+    private List<Long> resolveTablePermissionIds(Long userId) {
+        List<Long> roleIds = getUserRoleIds(userId);
+        return roleIds.isEmpty() ? Collections.emptyList() : getTablePermissionIdsByRoleIds(roleIds);
+    }
+
+    /** 指定用户的角色所绑定的文件权限明细 ID（去重）。 */
+    private List<Long> resolveFilePermissionIds(Long userId) {
+        List<Long> roleIds = getUserRoleIds(userId);
+        return roleIds.isEmpty() ? Collections.emptyList() : getFilePermissionIdsByRoleIds(roleIds);
     }
 
     public void checkFileReadPermission(String path, Long storageConfigId) {

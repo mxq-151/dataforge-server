@@ -55,6 +55,14 @@ jwt:
 aes:
   key: Bigdata2026AesK@
 
+# 数据资源权限校验接口（POST /system/permission/check）的共享密钥。
+# 该接口由执行引擎（Spark 作业）在无登录态的情况下回调，改用请求头 X-Permission-Check-Token 鉴权；
+# Spark 侧需配置同一值（write.compliance.permission.check.token）。
+# 留空则接口拒绝一切调用；生产环境请按环境覆盖（如环境变量 PERMISSION_CHECK_SECRET）。
+permission:
+  check:
+    secret: dataforge-permission-check-2026-shared-secret
+
 engine:
   spark:
     home: /Users/mxq/Desktop/bigdata-workspace/spark-4.1.1-bin-hadoop3

@@ -66,6 +66,10 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/system/auth/login").permitAll()
+                        // 执行引擎（Spark 作业等）回调的数据资源权限校验接口：调用方无登录态，
+                        // 用户身份由请求体携带，鉴权走请求头 X-Permission-Check-Token（共享密钥，
+                        // 在 PermissionController 内校验），因此这里不要求 JWT。
+                        .requestMatchers(HttpMethod.POST, "/system/permission/check").permitAll()
                         .requestMatchers(HttpMethod.GET, "/devops/datasource/types").permitAll()
                         .requestMatchers(HttpMethod.GET, "/devops/storage/types").permitAll()
                         .requestMatchers(HttpMethod.GET, "/file/explorer/storage-types").permitAll()

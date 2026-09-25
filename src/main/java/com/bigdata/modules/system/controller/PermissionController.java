@@ -2,29 +2,88 @@ package com.bigdata.modules.system.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.annotation.AuditLog;
+import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.AssignPermissionDTO;
+import com.bigdata.modules.system.dto.DataResourcePermissionCheckDTO;
 import com.bigdata.modules.system.dto.FilePermissionDTO;
 import com.bigdata.modules.system.dto.TablePermissionDTO;
 import com.bigdata.modules.system.entity.SysFilePermission;
 import com.bigdata.modules.system.entity.SysTablePermission;
+import com.bigdata.modules.system.service.DataResourcePermissionCheckService;
 import com.bigdata.modules.system.service.PermissionService;
+import com.bigdata.modules.system.vo.DataResourcePermissionCheckVO;
 import com.bigdata.modules.system.vo.FilePermissionVO;
 import com.bigdata.modules.system.vo.RolePermissionsVO;
 import com.bigdata.modules.system.vo.TablePermissionVO;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 
 @RestController
 @RequestMapping("/system/permission")
 public class PermissionController {
 
+    private static final Logger logger = LoggerFactory.getLogger(PermissionController.class);
+
     @Autowired
     private PermissionService permissionService;
+
+    @Autowired
+    private DataResourcePermissionCheckService dataResourcePermissionCheckService;
+
+    /** 共享密钥。留空表示未配置，接口一律拒绝（fail-close）。 */
+    @Value("${permission.check.secret:}")
+    private String checkSecret;
+
+    /** 数据资源权限校验的共享密钥请求头。 */
+    private static final String CHECK_TOKEN_HEADER = "X-Permission-Check-Token";
+
+    /**
+     * 数据资源权限批量校验。
+     * <p>
+     * 供 Spark 等外部执行作业回调：作业侧上报本次访问的资源清单，服务端按提交用户判定。
+     * 请求方是执行引擎（非浏览器登录态），因此不要求 JWT；改用共享密钥请求头
+     * {@value #CHECK_TOKEN_HEADER} 鉴权，用户身份仍由请求体给出。
+     * </p>
+     */
+    @PostMapping("/check")
+    public Result<DataResourcePermissionCheckVO> check(
+            @RequestHeader(value = CHECK_TOKEN_HEADER, required = false) String checkToken,
+            @RequestBody DataResourcePermissionCheckDTO dto) {
+        verifyCheckToken(checkToken);
+        return Result.success(dataResourcePermissionCheckService.check(dto));
+    }
+
+    /**
+     * 校验共享密钥。
+     * <p>
+     * <b>默认拒绝</b>：未配置密钥、请求头缺失或不匹配，一律拒绝调用，不做「验不了就放行」。
+     * 比较用常量时间算法，避免通过响应耗时逐字节猜测密钥。
+     * </p>
+     */
+    private void verifyCheckToken(String checkToken) {
+        if (!StringUtils.hasText(checkSecret)) {
+            logger.error("数据资源权限校验接口未配置共享密钥（permission.check.secret），已拒绝调用");
+            throw new BusinessException(503, "数据资源权限校验接口未配置共享密钥，已拒绝调用");
+        }
+        if (!StringUtils.hasText(checkToken)
+                || !MessageDigest.isEqual(checkSecret.trim().getBytes(StandardCharsets.UTF_8),
+                        checkToken.trim().getBytes(StandardCharsets.UTF_8))) {
+            logger.warn("数据资源权限校验接口共享密钥校验未通过，已拒绝调用");
+            throw new BusinessException(403, "共享密钥校验未通过");
+        }
+    }
 
 
     @GetMapping("/file/list")
