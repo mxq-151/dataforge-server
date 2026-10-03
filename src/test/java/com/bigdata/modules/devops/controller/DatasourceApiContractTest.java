@@ -11,6 +11,7 @@ import com.bigdata.modules.devops.vo.DatasourceTypeMetaVO;
 import com.bigdata.modules.development.service.execution.CodeExecutionService;
 import com.bigdata.modules.development.service.execution.CodeType;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
+import com.bigdata.modules.metadata.service.TableStorageSizeRefreshService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -64,6 +65,8 @@ class DatasourceApiContractTest {
     private MetadataSyncService metadataSyncService;
     @Mock
     private CodeExecutionService codeExecutionService;
+    @Mock
+    private TableStorageSizeRefreshService tableStorageSizeRefreshService;
 
     private MockMvc mockMvc;
 
@@ -74,6 +77,8 @@ class DatasourceApiContractTest {
                 datasourceController, "datasourceConfigService", datasourceConfigService);
         org.springframework.test.util.ReflectionTestUtils.setField(
                 datasourceController, "metadataSyncService", metadataSyncService);
+        org.springframework.test.util.ReflectionTestUtils.setField(
+                datasourceController, "tableStorageSizeRefreshService", tableStorageSizeRefreshService);
 
         ExecutionEngineController engineController = new ExecutionEngineController();
         org.springframework.test.util.ReflectionTestUtils.setField(
@@ -349,6 +354,71 @@ class DatasourceApiContractTest {
                 assertEquals(type.getLanguage().stream().map(CodeType::getCode).collect(Collectors.toList()),
                         vo.getLanguage());
             }
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /devops/datasource/{id}/refresh-table-size - 手动刷新存储大小")
+    class RefreshTableSizeTests {
+
+        /** 新接口用生产 ObjectMapper（camelCase），避免断言到线上不存在的 snake_case 字段名 */
+        private final ObjectMapper productionMapper = ContractMockMvcSupport.productionObjectMapper();
+        private MockMvc productionMockMvc;
+
+        @BeforeEach
+        void setUpProductionMvc() {
+            DatasourceConfigController controller = new DatasourceConfigController();
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    controller, "datasourceConfigService", datasourceConfigService);
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    controller, "metadataSyncService", metadataSyncService);
+            org.springframework.test.util.ReflectionTestUtils.setField(
+                    controller, "tableStorageSizeRefreshService", tableStorageSizeRefreshService);
+            productionMockMvc = ContractMockMvcSupport.productionMockMvc(controller);
+        }
+
+        private JsonNode postForJson(String url, Object... uriVars) throws Exception {
+            MvcResult result = productionMockMvc.perform(post(url, uriVars))
+                    .andExpect(status().isOk())
+                    .andReturn();
+            return productionMapper.readTree(result.getResponse().getContentAsString());
+        }
+
+        @Test
+        @DisplayName("单数据源：返回实际更新的表数")
+        void testRefreshSingleDatasource() throws Exception {
+            when(datasourceConfigService.getDatasourceById(1L))
+                    .thenReturn(config(1L, "mysql-prod", DatasourceType.MYSQL));
+            when(tableStorageSizeRefreshService.refreshDatasource(any())).thenReturn(12);
+
+            JsonNode body = postForJson("/devops/datasource/1/refresh-table-size");
+
+            assertEquals(200, body.get("code").asInt());
+            assertEquals(12, body.get("data").asInt());
+        }
+
+        @Test
+        @DisplayName("数据源不存在：返回错误码，不触发刷新")
+        void testRefreshSingleDatasource_notFound() throws Exception {
+            when(datasourceConfigService.getDatasourceById(99L)).thenReturn(null);
+
+            JsonNode body = postForJson("/devops/datasource/99/refresh-table-size");
+
+            assertEquals(404, body.get("code").asInt());
+        }
+
+        @Test
+        @DisplayName("全部数据源：返回刷新摘要 datasourceCount/updatedTables/failedDatasources")
+        void testRefreshAllDatasources() throws Exception {
+            when(tableStorageSizeRefreshService.refreshAll())
+                    .thenReturn(new TableStorageSizeRefreshService.RefreshResult(3, 42, 1));
+
+            JsonNode body = postForJson("/devops/datasource/refresh-table-size");
+
+            assertEquals(200, body.get("code").asInt());
+            assertEquals(3, body.get("data").get("datasourceCount").asInt());
+            assertEquals(42, body.get("data").get("updatedTables").asInt());
+            assertEquals(1, body.get("data").get("failedDatasources").asInt());
         }
     }
 }

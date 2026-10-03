@@ -14,6 +14,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 /**
  * JDBC类型执行策略的抽象基类。
@@ -258,12 +259,34 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
                     tables.add(tableMeta);
                 }
             }
+            // 系统表口径补齐：存储大小/建表修改时间/分区列/压缩算法（按真实引擎分支，失败仅告警）
+            new JdbcTableStatsCollector(getLog()).fill(
+                    datasourceConfig.getDatasourceType(), connection, databaseName, tables);
         } catch (Exception e) {
             getLog().warn("获取表列表失败[database={}]: {}", databaseName, e.getMessage());
         } finally {
             closeQuietly(connection);
         }
         return tables;
+    }
+
+    /**
+     * 采集「表名 → 存储字节数」：复用系统表统计口径，供每日存储大小刷新任务使用。
+     * 失败时返回空 Map（调用方覆盖写，不影响存量值）。
+     */
+    @Override
+    public Map<String, Long> listTableSizes(DatasourceConfig datasourceConfig, String databaseName) {
+        Connection connection = null;
+        try {
+            connection = datasourceConfigService.getConnection(datasourceConfig.getId(), databaseName);
+            return new JdbcTableStatsCollector(getLog())
+                    .loadSizeBytes(datasourceConfig.getDatasourceType(), connection, databaseName);
+        } catch (Exception e) {
+            getLog().warn("采集表存储大小失败[database={}]: {}", databaseName, e.getMessage());
+            return Map.of();
+        } finally {
+            closeQuietly(connection);
+        }
     }
 
     @Override
@@ -282,6 +305,8 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
                     col.setColumnComment(rs.getString("REMARKS"));
                     col.setOrdinalPosition(position++);
                     col.setNullable("YES".equals(rs.getString("IS_NULLABLE")) ? 1 : 0);
+                    // 默认值（驱动对无默认值返回 null；个别驱动不提供该列时由外层 catch 兜底）
+                    col.setDefaultValue(rs.getString("COLUMN_DEF"));
                     col.setDatabaseName(databaseName);
                     col.setTableName(tableName);
                     columns.add(col);

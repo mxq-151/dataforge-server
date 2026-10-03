@@ -290,6 +290,107 @@ class MetadataSyncServiceTest {
         assertTrue(result2.isEmpty());
     }
 
+    // ==================== 分区列 / 压缩算法 / 默认值 完善测试 ====================
+
+    /**
+     * DDL 路径：Hive 表属性中的分区列（含类型声明）与压缩算法应规范化后落库，
+     * 且字段清单中命中的分区列被标记 isPartition=1。
+     */
+    @Test
+    void testSyncSingleTableMetadata_partitionAndCompressionPersisted() {
+        when(datasourceConfigService.getDatasourceById(1L)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, "tmall_dw", "ods_order")).thenReturn(null);
+
+        ColumnMetadataVO partitionCol = new ColumnMetadataVO();
+        partitionCol.setColumnName("dt");
+        partitionCol.setColumnType("STRING");
+        partitionCol.setOrdinalPosition(1);
+        ColumnMetadataVO normalCol = new ColumnMetadataVO();
+        normalCol.setColumnName("order_id");
+        normalCol.setColumnType("BIGINT");
+        normalCol.setOrdinalPosition(2);
+        when(executionStrategy.listColumns(eq(mockConfig), eq("tmall_dw"), eq("ods_order")))
+                .thenReturn(new ArrayList<>(Arrays.asList(partitionCol, normalCol)));
+
+        AbstractBaseExecutionStrategy.HiveTableAttributes attrs =
+                new AbstractBaseExecutionStrategy.HiveTableAttributes();
+        attrs.partitionColumns = "dt STRING, `region`";
+        attrs.compressionCodec = "SNAPPY";
+
+        assertTrue(metadataSyncService.syncSingleTableMetadata(
+                1L, DatasourceType.HIVE, "tmall_dw", "ods_order", "CREATE", attrs));
+
+        verify(tableMetadataService).syncSingleTable(
+                eq(DatasourceType.HIVE),
+                argThat(table -> table != null
+                        && "dt,region".equals(table.getPartitionColumns())
+                        && "SNAPPY".equals(table.getCompression())),
+                argThat(cols -> cols != null && cols.size() == 2
+                        && Integer.valueOf(1).equals(cols.get(0).getIsPartition())
+                        && Integer.valueOf(0).equals(cols.get(1).getIsPartition())));
+    }
+
+    /**
+     * Kyuubi 路径：表级分区列缺失时，从字段 isPartition 标记反哺 table_metadata.partition_columns。
+     */
+    @Test
+    void testSyncSingleTableMetadata_backfillPartitionColumnsFromColumnFlag() {
+        when(datasourceConfigService.getDatasourceById(1L)).thenReturn(mockConfig);
+        when(executionStrategyFactory.getStrategy(mockConfig)).thenReturn(executionStrategy);
+        when(tableMetadataMapper.getTableMetadata(DatasourceType.HIVE, "ods", "partitioned_tbl")).thenReturn(null);
+
+        ColumnMetadataVO normalCol = new ColumnMetadataVO();
+        normalCol.setColumnName("id");
+        normalCol.setColumnType("BIGINT");
+        normalCol.setOrdinalPosition(1);
+        ColumnMetadataVO partitionCol = new ColumnMetadataVO();
+        partitionCol.setColumnName("dt");
+        partitionCol.setColumnType("STRING");
+        partitionCol.setOrdinalPosition(2);
+        partitionCol.setIsPartition(1);
+        when(executionStrategy.listColumns(eq(mockConfig), eq("ods"), eq("partitioned_tbl")))
+                .thenReturn(new ArrayList<>(Arrays.asList(normalCol, partitionCol)));
+
+        assertTrue(metadataSyncService.syncSingleTableMetadata(
+                1L, DatasourceType.HIVE, "ods", "partitioned_tbl", "CREATE", null));
+
+        verify(tableMetadataService).syncSingleTable(
+                eq(DatasourceType.HIVE),
+                argThat(table -> table != null && "dt".equals(table.getPartitionColumns())),
+                anyList());
+    }
+
+    /** merge 应复制分区列与最近修改时间（统计采集新增的两个字段） */
+    @Test
+    void testMergeTableMetadata_partitionAndLastModifyTime() throws Exception {
+        java.lang.reflect.Method method = MetadataSyncService.class.getDeclaredMethod("mergeTableMetadata",
+                TableMetadata.class, TableMetadata.class);
+        method.setAccessible(true);
+
+        TableMetadata target = new TableMetadata();
+        TableMetadata source = new TableMetadata();
+        source.setPartitionColumns("dt,region");
+        Date modifyTime = new Date(1712345678000L);
+        source.setLastModifyTime(modifyTime);
+
+        method.invoke(metadataSyncService, target, source);
+
+        assertEquals("dt,region", target.getPartitionColumns());
+        assertEquals(modifyTime, target.getLastModifyTime());
+    }
+
+    /** 分区列文本规范化：Hive 类型声明、Doris 反引号、ClickHouse 表达式、带参数类型 */
+    @Test
+    void testNormalizePartitionColumns() {
+        assertEquals("dt,region", MetadataSyncService.normalizePartitionColumns("dt STRING, `region`"));
+        assertEquals("dt", MetadataSyncService.normalizePartitionColumns("dt decimal(10,2)"));
+        assertEquals("toYYYYMM(event_date)", MetadataSyncService.normalizePartitionColumns("toYYYYMM(event_date)"));
+        assertEquals("k1,k2", MetadataSyncService.normalizePartitionColumns("`k1`, `k2`"));
+        assertNull(MetadataSyncService.normalizePartitionColumns("  "));
+        assertNull(MetadataSyncService.normalizePartitionColumns(null));
+    }
+
     // ==================== CREATE EXTERNAL TABLE DDL 元数据同步（真实数据）====================
 
     /** 用户提供的真实建表SQL：tmall_dw.ods_product 外部表 */

@@ -1048,11 +1048,192 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                     }
                 }
             }
+            // 表属性补齐：DESCRIBE EXTENDED 提供分区列/存储大小/行数/压缩算法/位置/最后修改时间
+            for (TableMetadata tableMeta : tables) {
+                enrichFromDescribeExtended(baseUrl, sessionHandle, databaseName, tableMeta);
+            }
         } catch (Exception e) {
             log.warn("通过Kyuubi获取表列表失败[{}]: {}", databaseName, e.getMessage());
         }
         // Session由缓存管理，不在此关闭
         return tables;
+    }
+
+    /**
+     * 通过 DESCRIBE EXTENDED 补齐单表属性（逐表调用，失败只告警不阻断）。
+     * <p>Hive 的统计信息（totalSize/numRows）依赖表级统计是否已生成，缺失时保持空值，
+     * merge 落库时不会覆盖已有数据。</p>
+     */
+    private void enrichFromDescribeExtended(String baseUrl, String sessionHandle,
+                                            String databaseName, TableMetadata tableMeta) {
+        try {
+            String sql = "DESCRIBE EXTENDED " + databaseName + "." + tableMeta.getTableName();
+            String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
+            if (operationHandle == null) {
+                return;
+            }
+            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            if (result.status == OperationStatus.FINISHED && result.rows != null) {
+                applyDescribeExtended(result.rows, tableMeta);
+            }
+        } catch (Exception e) {
+            log.warn("采集表属性失败[{}.{}]: {}", databaseName, tableMeta.getTableName(), e.getMessage());
+        }
+    }
+
+    /**
+     * 采集「表名 → 存储字节数」：SHOW TABLES 取清单，逐表 DESCRIBE EXTENDED 取 totalSize。
+     * <p>供每日存储大小刷新任务使用；单表取数失败只跳过该表，不影响其余。</p>
+     */
+    @Override
+    public Map<String, Long> listTableSizes(DatasourceConfig datasourceConfig, String databaseName) {
+        Map<String, Long> sizes = new LinkedHashMap<>();
+        try {
+            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
+            SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(),
+                    datasourceConfig.getPassword(), ctx);
+            if (entry == null) {
+                return sizes;
+            }
+            String sessionHandle = entry.sessionHandle;
+            String operationHandle = submitOperation(baseUrl, sessionHandle, "SHOW TABLES IN " + databaseName);
+            if (operationHandle == null) {
+                return sizes;
+            }
+            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            if (result.status != OperationStatus.FINISHED || result.rows == null) {
+                return sizes;
+            }
+            for (List<String> row : result.rows) {
+                if (row.isEmpty() || row.get(0) == null || row.get(0).isBlank()) {
+                    continue;
+                }
+                String tableName = row.get(0).trim();
+                Long size = fetchTableSizeBytes(baseUrl, sessionHandle, databaseName, tableName);
+                if (size != null && size > 0) {
+                    sizes.put(tableName, size);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("通过Kyuubi采集表存储大小失败[{}]: {}", databaseName, e.getMessage());
+        }
+        return sizes;
+    }
+
+    private Long fetchTableSizeBytes(String baseUrl, String sessionHandle, String databaseName, String tableName) {
+        try {
+            String operationHandle = submitOperation(baseUrl, sessionHandle,
+                    "DESCRIBE EXTENDED " + databaseName + "." + tableName);
+            if (operationHandle == null) {
+                return null;
+            }
+            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            if (result.status == OperationStatus.FINISHED && result.rows != null) {
+                TableMetadata probe = new TableMetadata();
+                applyDescribeExtended(result.rows, probe);
+                return probe.getSizeBytes();
+            }
+        } catch (Exception e) {
+            log.warn("采集表存储大小失败[{}.{}]: {}", databaseName, tableName, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 解析 DESCRIBE EXTENDED 输出并补齐表属性（包可见，便于单测）。
+     *
+     * <p>输出为分段文本：{@code # Partition Information} 段列出分区列；详细表信息段包含
+     * {@code Location}、{@code totalSize}、{@code transient_lastDdlTime}
+     * 等参数，以及 ORC/Parquet 的压缩属性。仅识别已知键，其余行忽略。</p>
+     */
+    static void applyDescribeExtended(List<List<String>> rows, TableMetadata tableMeta) {
+        if (rows == null || tableMeta == null) {
+            return;
+        }
+        List<String> partitions = new ArrayList<>();
+        boolean inPartitionSection = false;
+        boolean inDetailedSection = false;
+        for (List<String> row : rows) {
+            if (row == null || row.isEmpty() || row.get(0) == null) {
+                continue;
+            }
+            String first = row.get(0).trim();
+            if (first.startsWith("#")) {
+                // 分段标记切换状态；表头行（如 # col_name）保持当前状态不变
+                if (first.equalsIgnoreCase("# Partition Information")) {
+                    inPartitionSection = true;
+                } else if (first.equalsIgnoreCase("# Detailed Table Information")) {
+                    inPartitionSection = false;
+                    inDetailedSection = true;
+                }
+                continue;
+            }
+            if (first.isEmpty()) {
+                continue;
+            }
+            if (inPartitionSection) {
+                partitions.add(first);
+                continue;
+            }
+            if (!inDetailedSection) {
+                // 列定义段的行不是表参数，避免同名列表被误当参数
+                continue;
+            }
+            String value = lastNonBlank(row);
+            if (value == null) {
+                continue;
+            }
+            switch (first.toLowerCase(Locale.ROOT).replace(":", "")) {
+                case "location" -> {
+                    if (tableMeta.getLocation() == null || tableMeta.getLocation().isBlank()) {
+                        tableMeta.setLocation(value);
+                    }
+                }
+                case "totalsize" -> {
+                    Long size = parseLongValue(value);
+                    if (size != null) {
+                        tableMeta.setSizeBytes(size);
+                    }
+                }
+                case "transient_lastddltime" -> {
+                    Long epochSeconds = parseLongValue(value);
+                    if (epochSeconds != null && epochSeconds > 0) {
+                        tableMeta.setLastModifyTime(new Date(epochSeconds * 1000L));
+                    }
+                }
+                case "compression", "orc.compress", "parquet.compression" -> {
+                    if (tableMeta.getCompression() == null || tableMeta.getCompression().isBlank()) {
+                        tableMeta.setCompression(value.toUpperCase(Locale.ROOT));
+                    }
+                }
+                default -> {
+                    // 其余参数（owner/numFiles 等）不落库
+                }
+            }
+        }
+        if (!partitions.isEmpty()) {
+            tableMeta.setPartitionColumns(String.join(",", partitions));
+        }
+    }
+
+    /** 取行内最后一个非空单元格（DESCRIBE 输出的值可能在第 2 或第 3 位） */
+    private static String lastNonBlank(List<String> row) {
+        for (int i = row.size() - 1; i >= 0; i--) {
+            String cell = row.get(i);
+            if (cell != null && !cell.isBlank()) {
+                return cell.trim();
+            }
+        }
+        return null;
+    }
+
+    private static Long parseLongValue(String value) {
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Override
@@ -1071,26 +1252,65 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
             OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
             if (result.status == OperationStatus.FINISHED && result.rows != null) {
-                int position = 1;
-                for (List<String> row : result.rows) {
-                    if (row.size() < 2) continue;
-                    ColumnMetadataVO col = new ColumnMetadataVO();
-                    col.setColumnName(row.get(0));
-                    col.setColumnType(row.get(1));
-                    col.setOrdinalPosition(position++);
-                    col.setNullable(1);
-                    col.setDatabaseName(databaseName);
-                    col.setTableName(tableName);
-                    if (row.size() >= 3) {
-                        col.setColumnComment(row.get(2));
-                    }
-                    columns.add(col);
-                }
+                applyDescribeColumns(result.rows, columns, databaseName, tableName);
             }
         } catch (Exception e) {
             log.warn("通过Kyuubi获取字段信息失败[{}.{}]: {}", databaseName, tableName, e.getMessage());
         }
         // Session由缓存管理，不在此关闭
         return columns;
+    }
+
+    /**
+     * 解析 DESCRIBE 输出（包可见，便于单测）。
+     *
+     * <p>输出为分段文本，除列定义外还包含 {@code # Partition Information} 分区段。
+     * 分区段中的列是 Hive 元数据的分区列（不在主列清单中），统一补充为 isPartition=1 的字段行，
+     * 既保证「字段信息完整」，也作为表级分区列反哺的数据源。表头/分段行（以 # 开头）与重复列不入库。</p>
+     */
+    static void applyDescribeColumns(List<List<String>> rows, List<ColumnMetadataVO> columns,
+                                     String databaseName, String tableName) {
+        if (rows == null || columns == null) {
+            return;
+        }
+        Set<String> seen = new HashSet<>();
+        for (ColumnMetadataVO existing : columns) {
+            if (existing.getColumnName() != null) {
+                seen.add(existing.getColumnName().toLowerCase(Locale.ROOT));
+            }
+        }
+        boolean inPartitionSection = false;
+        for (List<String> row : rows) {
+            if (row == null || row.isEmpty() || row.get(0) == null) {
+                continue;
+            }
+            String first = row.get(0).trim();
+            if (first.startsWith("#")) {
+                if (first.equalsIgnoreCase("# Partition Information")) {
+                    inPartitionSection = true;
+                } else if (first.equalsIgnoreCase("# Detailed Table Information")) {
+                    inPartitionSection = false;
+                }
+                continue;
+            }
+            if (first.isEmpty() || row.size() < 2) {
+                continue;
+            }
+            if (!seen.add(first.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            ColumnMetadataVO col = new ColumnMetadataVO();
+            col.setColumnName(first);
+            col.setColumnType(row.get(1));
+            col.setOrdinalPosition(columns.size() + 1);
+            col.setNullable(1);
+            col.setDatabaseName(databaseName);
+            col.setTableName(tableName);
+            col.setIsPartition(inPartitionSection ? 1 : 0);
+            if (row.size() >= 3 && row.get(2) != null && !row.get(2).isBlank()) {
+                col.setColumnComment(row.get(2).trim());
+            }
+            columns.add(col);
+        }
     }
 }

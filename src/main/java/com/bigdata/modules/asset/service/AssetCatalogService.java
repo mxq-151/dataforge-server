@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.utils.SecurityUtils;
+import com.bigdata.modules.asset.entity.AssetCatalogDaily;
 import com.bigdata.modules.asset.entity.AssetTag;
 import com.bigdata.modules.asset.entity.AssetTagRel;
 import com.bigdata.modules.asset.mapper.AssetTagMapper;
@@ -146,6 +147,9 @@ public class AssetCatalogService {
     @Autowired
     private AssetBookmarkService bookmarkService;
 
+    @Autowired
+    private AssetCatalogSnapshotService snapshotService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // ==================================================================
@@ -155,18 +159,37 @@ public class AssetCatalogService {
     /**
      * 目录树。
      *
+     * <p>读 T+1 的资产目录快照（{@code asset_catalog_daily}）；分层/业务域直接用快照里
+     * 已固化的解析结果，不在查询期重新解析表名。快照尚未生成过时（首次部署）回退到
+     * 实时计算，避免目录在这段窗口里显示为空。</p>
+     *
      * @param view          engine=数据源→库→表；convention=分层→业务域→表
      * @param datasourceId  可选，限定数据源
      * @param databaseName  可选，限定库
      * @param keyword       可选，按表名/表注释模糊过滤（过滤后再建树，保证父节点计数与可见子节点一致）
      */
     public List<CatalogTreeNodeVO> tree(String view, Long datasourceId, String databaseName, String keyword) {
-        List<TableMetadata> tables = loadTables(datasourceId, databaseName, keyword);
+        LocalDate statDate = snapshotService.latestStatDate();
+        List<TreeRow> rows = statDate == null
+                ? liveTreeRows(datasourceId, databaseName, keyword)
+                : snapshotTreeRows(statDate, datasourceId, databaseName, keyword);
         boolean convention = "convention".equalsIgnoreCase(view == null ? "" : view.trim());
-        return convention ? buildConventionTree(tables) : buildEngineTree(tables);
+        return convention ? buildConventionTree(rows) : buildEngineTree(rows);
     }
 
-    private List<TableMetadata> loadTables(Long datasourceId, String databaseName, String keyword) {
+    /**
+     * 目录树的最小行视图。
+     *
+     * <p>把「读快照」与「实时回退」两条来源统一成同一份建树输入，
+     * 使树构建逻辑只写一遍；同时把分层/业务域从「表名解析」解耦成显式字段。</p>
+     */
+    private record TreeRow(Long id, Long datasourceId, String databaseName, String tableName,
+                           String storageEngine, String layerCode, String domainCode,
+                           boolean conventionParsed) {
+    }
+
+    /** 实时回退：直接读 table_metadata 并即时解析表名（快照不可用时使用） */
+    private List<TreeRow> liveTreeRows(Long datasourceId, String databaseName, String keyword) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TableMetadata::getDeleted, 0);
         if (datasourceId != null) {
@@ -181,20 +204,43 @@ public class AssetCatalogService {
                     .or().like(TableMetadata::getTableComment, value));
         }
         wrapper.orderByAsc(TableMetadata::getDatabaseName).orderByAsc(TableMetadata::getTableName);
-        return permissionSupport.filterSelectable(tableMetadataMapper.selectList(wrapper));
+
+        List<TableMetadata> tables = permissionSupport.filterSelectable(tableMetadataMapper.selectList(wrapper));
+        List<TreeRow> rows = new ArrayList<>(tables.size());
+        for (TableMetadata table : tables) {
+            TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
+            rows.add(new TreeRow(table.getId(), table.getDatasourceId(), table.getDatabaseName(),
+                    table.getTableName(), engineCodeOf(table),
+                    parsed.layerCode(), parsed.domainCode(), parsed.parsed()));
+        }
+        return rows;
+    }
+
+    /** 读快照，取分层/业务域为已固化结果 */
+    private List<TreeRow> snapshotTreeRows(LocalDate statDate, Long datasourceId,
+                                           String databaseName, String keyword) {
+        List<AssetCatalogDaily> snapshots = permissionSupport.filterSelectableSnapshots(
+                snapshotService.load(statDate, datasourceId, databaseName, keyword));
+        List<TreeRow> rows = new ArrayList<>(snapshots.size());
+        for (AssetCatalogDaily row : snapshots) {
+            rows.add(new TreeRow(row.getTableMetadataId(), row.getDatasourceId(), row.getDatabaseName(),
+                    row.getTableName(), row.getStorageEngine(),
+                    row.getLayerCode(), row.getDomainCode(), isParsed(row.getConventionParsed())));
+        }
+        return rows;
     }
 
     /** 引擎视角：数据源 → 库 → 表 */
-    private List<CatalogTreeNodeVO> buildEngineTree(List<TableMetadata> tables) {
-        Map<Long, List<TableMetadata>> byDatasource = new LinkedHashMap<>();
-        for (TableMetadata table : tables) {
-            byDatasource.computeIfAbsent(table.getDatasourceId(), k -> new ArrayList<>()).add(table);
+    private List<CatalogTreeNodeVO> buildEngineTree(List<TreeRow> tables) {
+        Map<Long, List<TreeRow>> byDatasource = new LinkedHashMap<>();
+        for (TreeRow table : tables) {
+            byDatasource.computeIfAbsent(table.datasourceId(), k -> new ArrayList<>()).add(table);
         }
 
         List<CatalogTreeNodeVO> roots = new ArrayList<>();
-        for (Map.Entry<Long, List<TableMetadata>> entry : byDatasource.entrySet()) {
+        for (Map.Entry<Long, List<TreeRow>> entry : byDatasource.entrySet()) {
             Long datasourceId = entry.getKey();
-            List<TableMetadata> datasourceTables = entry.getValue();
+            List<TreeRow> datasourceTables = entry.getValue();
 
             CatalogTreeNodeVO datasourceNode = new CatalogTreeNodeVO();
             datasourceNode.setKey("engine:" + (datasourceId == null ? "unknown" : datasourceId));
@@ -204,15 +250,15 @@ public class AssetCatalogService {
             datasourceNode.setDatasourceId(datasourceId);
             datasourceNode.setAssetCount(datasourceTables.size());
 
-            Map<String, List<TableMetadata>> byDatabase = new LinkedHashMap<>();
-            for (TableMetadata table : datasourceTables) {
-                byDatabase.computeIfAbsent(nullToDefault(table.getDatabaseName(), "(未指定库)"),
+            Map<String, List<TreeRow>> byDatabase = new LinkedHashMap<>();
+            for (TreeRow table : datasourceTables) {
+                byDatabase.computeIfAbsent(nullToDefault(table.databaseName(), "(未指定库)"),
                         k -> new ArrayList<>()).add(table);
             }
-            datasourceNode.setStorageEngine(engineCodeOf(datasourceTables));
+            datasourceNode.setStorageEngine(engineCodeOfRows(datasourceTables));
 
             List<CatalogTreeNodeVO> databaseNodes = new ArrayList<>();
-            for (Map.Entry<String, List<TableMetadata>> dbEntry : byDatabase.entrySet()) {
+            for (Map.Entry<String, List<TreeRow>> dbEntry : byDatabase.entrySet()) {
                 CatalogTreeNodeVO databaseNode = new CatalogTreeNodeVO();
                 databaseNode.setKey("db:" + (datasourceId == null ? "unknown" : datasourceId) + ":" + dbEntry.getKey());
                 databaseNode.setLabel(dbEntry.getKey());
@@ -232,21 +278,20 @@ public class AssetCatalogService {
     }
 
     /** 规范视角：分层 → 业务域 → 表 */
-    private List<CatalogTreeNodeVO> buildConventionTree(List<TableMetadata> tables) {
-        Map<String, Map<String, List<TableMetadata>>> byLayer = new LinkedHashMap<>();
-        for (TableMetadata table : tables) {
-            TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
-            String layer = parsed.layerCode() == null
-                    ? TableNameConventionParser.UNCLASSIFIED_LAYER : parsed.layerCode();
-            String domain = parsed.domainCode() == null
-                    ? TableNameConventionParser.UNCLASSIFIED_LAYER : parsed.domainCode();
+    private List<CatalogTreeNodeVO> buildConventionTree(List<TreeRow> tables) {
+        Map<String, Map<String, List<TreeRow>>> byLayer = new LinkedHashMap<>();
+        for (TreeRow table : tables) {
+            String layer = table.layerCode() == null
+                    ? TableNameConventionParser.UNCLASSIFIED_LAYER : table.layerCode();
+            String domain = table.domainCode() == null
+                    ? TableNameConventionParser.UNCLASSIFIED_LAYER : table.domainCode();
             byLayer.computeIfAbsent(layer, k -> new LinkedHashMap<>())
                     .computeIfAbsent(domain, k -> new ArrayList<>())
                     .add(table);
         }
 
         List<CatalogTreeNodeVO> roots = new ArrayList<>();
-        for (Map.Entry<String, Map<String, List<TableMetadata>>> layerEntry : byLayer.entrySet()) {
+        for (Map.Entry<String, Map<String, List<TreeRow>>> layerEntry : byLayer.entrySet()) {
             String layerCode = layerEntry.getKey();
             int total = layerEntry.getValue().values().stream().mapToInt(List::size).sum();
 
@@ -259,7 +304,7 @@ public class AssetCatalogService {
             layerNode.setUnclassified(TableNameConventionParser.UNCLASSIFIED_LAYER.equals(layerCode));
 
             List<CatalogTreeNodeVO> domainNodes = new ArrayList<>();
-            for (Map.Entry<String, List<TableMetadata>> domainEntry : layerEntry.getValue().entrySet()) {
+            for (Map.Entry<String, List<TreeRow>> domainEntry : layerEntry.getValue().entrySet()) {
                 String domainCode = domainEntry.getKey();
                 CatalogTreeNodeVO domainNode = new CatalogTreeNodeVO();
                 domainNode.setKey("domain:" + layerCode + "." + domainCode);
@@ -291,23 +336,22 @@ public class AssetCatalogService {
         return roots;
     }
 
-    private List<CatalogTreeNodeVO> toTableNodes(List<TableMetadata> tables) {
+    private List<CatalogTreeNodeVO> toTableNodes(List<TreeRow> tables) {
         List<CatalogTreeNodeVO> nodes = new ArrayList<>(tables.size());
-        for (TableMetadata table : tables) {
-            TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
+        for (TreeRow table : tables) {
             CatalogTreeNodeVO node = new CatalogTreeNodeVO();
-            node.setKey("table:" + table.getId());
-            node.setLabel(table.getTableName());
+            node.setKey("table:" + table.id());
+            node.setLabel(table.tableName());
             node.setNodeKind("table");
-            node.setTableMetadataId(table.getId());
-            node.setDatasourceId(table.getDatasourceId());
-            node.setStorageEngine(engineCodeOf(table));
-            node.setDatabaseName(table.getDatabaseName());
-            node.setTableName(table.getTableName());
-            node.setLayerCode(parsed.layerCode());
-            node.setDomainCode(parsed.domainCode());
+            node.setTableMetadataId(table.id());
+            node.setDatasourceId(table.datasourceId());
+            node.setStorageEngine(nullToDefault(table.storageEngine(), ""));
+            node.setDatabaseName(table.databaseName());
+            node.setTableName(table.tableName());
+            node.setLayerCode(table.layerCode());
+            node.setDomainCode(table.domainCode());
             node.setAssetCount(1);
-            node.setUnclassified(!parsed.parsed());
+            node.setUnclassified(!table.conventionParsed());
             nodes.add(node);
         }
         nodes.sort(Comparator.comparing(CatalogTreeNodeVO::getLabel,
@@ -370,7 +414,15 @@ public class AssetCatalogService {
         return result;
     }
 
+    /** 表检索：优先走 T+1 快照，快照未生成时回退实时计算 */
     private List<AssetSearchHitVO> searchTables(String keyword, String layerCode, String domainCode) {
+        LocalDate statDate = snapshotService.latestStatDate();
+        return statDate == null
+                ? searchTablesLive(keyword, layerCode, domainCode)
+                : searchTablesFromSnapshot(statDate, keyword, layerCode, domainCode);
+    }
+
+    private List<AssetSearchHitVO> searchTablesLive(String keyword, String layerCode, String domainCode) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TableMetadata::getDeleted, 0)
                 .and(w -> w.like(TableMetadata::getTableName, keyword)
@@ -382,7 +434,7 @@ public class AssetCatalogService {
         List<AssetSearchHitVO> hits = new ArrayList<>();
         for (TableMetadata table : permissionSupport.filterSelectable(matched)) {
             TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
-            if (!matchesCategory(parsed, layerCode, domainCode)) {
+            if (!matchesCategory(parsed.layerCode(), parsed.domainCode(), layerCode, domainCode)) {
                 continue;
             }
             AssetSearchHitVO hit = new AssetSearchHitVO();
@@ -395,6 +447,32 @@ public class AssetCatalogService {
             hit.setOwnerName(table.getBusinessOwner());
             hit.setLayerCode(parsed.layerCode());
             hit.setDomainCode(parsed.domainCode());
+            hits.add(hit);
+        }
+        return hits;
+    }
+
+    private List<AssetSearchHitVO> searchTablesFromSnapshot(LocalDate statDate, String keyword,
+                                                           String layerCode, String domainCode) {
+        List<AssetCatalogDaily> candidates = snapshotService.load(statDate, null, null, keyword);
+        if (candidates.size() > SEARCH_SCAN_CAP) {
+            candidates = new ArrayList<>(candidates.subList(0, SEARCH_SCAN_CAP));
+        }
+        List<AssetSearchHitVO> hits = new ArrayList<>();
+        for (AssetCatalogDaily row : permissionSupport.filterSelectableSnapshots(candidates)) {
+            if (!matchesCategory(row.getLayerCode(), row.getDomainCode(), layerCode, domainCode)) {
+                continue;
+            }
+            AssetSearchHitVO hit = new AssetSearchHitVO();
+            hit.setAssetType("table");
+            hit.setId(row.getTableMetadataId());
+            hit.setTableMetadataId(row.getTableMetadataId());
+            hit.setTitle(row.getTableName());
+            hit.setSubtitle(row.getDatabaseName() + "." + row.getTableName());
+            hit.setMatchedText(row.getTableComment());
+            hit.setOwnerName(row.getBusinessOwner());
+            hit.setLayerCode(row.getLayerCode());
+            hit.setDomainCode(row.getDomainCode());
             hits.add(hit);
         }
         return hits;
@@ -430,7 +508,7 @@ public class AssetCatalogService {
                 continue;
             }
             TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
-            if (!matchesCategory(parsed, layerCode, domainCode)) {
+            if (!matchesCategory(parsed.layerCode(), parsed.domainCode(), layerCode, domainCode)) {
                 continue;
             }
             AssetSearchHitVO hit = new AssetSearchHitVO();
@@ -542,6 +620,7 @@ public class AssetCatalogService {
         vo.setColdDays(table.getColdDays() == null ? 180 : table.getColdDays());
         vo.setKeepDays(table.getKeepDays() == null ? 720 : table.getKeepDays());
         vo.setStorageFormat(nullToDefault(table.getStorageFormat(), ""));
+        vo.setCompression(nullToDefault(table.getCompression(), ""));
         vo.setLocation(nullToDefault(table.getLocation(), ""));
         vo.setPartitionColumns(parsePartitionColumns(table.getPartitionColumns()));
         vo.setLastModifyTime(formatTime(table.getLastModifyTime()));
@@ -991,14 +1070,14 @@ public class AssetCatalogService {
     }
 
     /** 分层/业务域筛选：任一为空表示不筛该类 */
-    private boolean matchesCategory(TableNameConventionParser.Parsed parsed,
+    private boolean matchesCategory(String rowLayer, String rowDomain,
                                     String layerCode, String domainCode) {
         if (layerCode != null && !layerCode.isBlank()
-                && !layerCode.trim().equalsIgnoreCase(nullToDefault(parsed.layerCode(), ""))) {
+                && !layerCode.trim().equalsIgnoreCase(nullToDefault(rowLayer, ""))) {
             return false;
         }
         return domainCode == null || domainCode.isBlank()
-                || domainCode.trim().equalsIgnoreCase(nullToDefault(parsed.domainCode(), ""));
+                || domainCode.trim().equalsIgnoreCase(nullToDefault(rowDomain, ""));
     }
 
     /**
@@ -1050,14 +1129,18 @@ public class AssetCatalogService {
         return result;
     }
 
-    private String engineCodeOf(List<TableMetadata> tables) {
-        for (TableMetadata table : tables) {
-            String code = engineCodeOf(table);
+    private String engineCodeOfRows(List<TreeRow> tables) {
+        for (TreeRow table : tables) {
+            String code = table.storageEngine();
             if (code != null && !code.isBlank()) {
                 return code;
             }
         }
         return "";
+    }
+
+    private static boolean isParsed(Integer conventionParsed) {
+        return conventionParsed != null && conventionParsed == 1;
     }
 
     private String engineCodeOf(TableMetadata table) {

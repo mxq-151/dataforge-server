@@ -2,6 +2,7 @@ package com.bigdata.modules.asset.service;
 
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.DataAccessPermissionService;
+import com.bigdata.modules.asset.entity.AssetCatalogDaily;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.metadata.entity.TableMetadata;
@@ -134,6 +135,70 @@ public class AssetPermissionSupport {
         for (TableMetadata table : candidates) {
             if (table.getId() != null && visibleIds.contains(table.getId())) {
                 result.add(table);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 批量过滤出当前用户可 SELECT 的资产目录快照行。
+     *
+     * <p>与 {@link #filterSelectable(Collection)} 同一套口径，只是入参换成快照实体。
+     * 快照里存的是全量资产，可见性必须按当前用户实时判定 —— 权限不进快照，
+     * 否则授权变更会被快照滞后一天生效。</p>
+     */
+    public List<AssetCatalogDaily> filterSelectableSnapshots(Collection<AssetCatalogDaily> snapshots) {
+        if (snapshots == null || snapshots.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<AssetCatalogDaily> candidates = new ArrayList<>();
+        for (AssetCatalogDaily row : snapshots) {
+            if (row != null) {
+                candidates.add(row);
+            }
+        }
+        if (candidates.isEmpty()) {
+            return candidates;
+        }
+        if (isAdmin()) {
+            return candidates;
+        }
+
+        Map<String, List<AssetCatalogDaily>> groups = new LinkedHashMap<>();
+        for (AssetCatalogDaily row : candidates) {
+            String dsName = datasourceName(row.getDatasourceId());
+            String key = (dsName == null ? "" : dsName) + "\u0000"
+                    + (row.getDatabaseName() == null ? "" : row.getDatabaseName());
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        }
+
+        Set<Long> visibleIds = new HashSet<>();
+        for (Map.Entry<String, List<AssetCatalogDaily>> entry : groups.entrySet()) {
+            List<AssetCatalogDaily> group = entry.getValue();
+            AssetCatalogDaily sample = group.get(0);
+            String dsName = datasourceName(sample.getDatasourceId());
+            String dbName = sample.getDatabaseName();
+
+            Map<String, AssetCatalogDaily> byTableName = new LinkedHashMap<>();
+            for (AssetCatalogDaily row : group) {
+                if (row.getTableName() != null) {
+                    byTableName.putIfAbsent(row.getTableName(), row);
+                }
+            }
+            Set<String> allowed = permissionService.filterAccessibleTables(
+                    dsName, dbName, byTableName.keySet(), DataAccessPermissionService.TABLE_OP_SELECT);
+            for (String tableName : allowed) {
+                AssetCatalogDaily row = byTableName.get(tableName);
+                if (row != null && row.getTableMetadataId() != null) {
+                    visibleIds.add(row.getTableMetadataId());
+                }
+            }
+        }
+
+        List<AssetCatalogDaily> result = new ArrayList<>(candidates.size());
+        for (AssetCatalogDaily row : candidates) {
+            if (row.getTableMetadataId() != null && visibleIds.contains(row.getTableMetadataId())) {
+                result.add(row);
             }
         }
         return result;

@@ -11,6 +11,10 @@ import com.bigdata.modules.asset.service.AssetInventoryService;
 import com.bigdata.modules.asset.service.AssetMetaService;
 import com.bigdata.modules.asset.service.AssetProducerService;
 import com.bigdata.modules.asset.service.AssetUsageService;
+import com.bigdata.modules.asset.service.SchedulerTaskMetricsService;
+import com.bigdata.modules.asset.task.AssetCatalogSnapshotTask;
+import com.bigdata.modules.asset.task.AssetUsageRollupTask;
+import com.bigdata.modules.asset.task.SchedulerTaskMetricsCollectTask;
 import com.bigdata.modules.asset.vo.AssetCategoryVO;
 import com.bigdata.modules.asset.vo.AssetColumnVO;
 import com.bigdata.modules.asset.vo.AssetDocHistoryVO;
@@ -44,6 +48,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -52,8 +57,11 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -67,7 +75,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>锁定三件事，任何一件被破坏都会让前端 {@code src/api/assetCatalog.ts} 静默失效：</p>
  * <ol>
- *   <li><b>路由可达</b>：24 条映射与前端调用逐一对应（少写 /api 前缀、拼错子路径都会 404）；</li>
+ *   <li><b>路由可达</b>：30 条映射与前端已接通的调用逐一对应（少写 /api 前缀、拼错子路径都会 404）；</li>
  *   <li><b>字段命名 = camelCase</b>：服务端返回体由 {@code WebMvcConfig} 的 {@code @Primary}
  *       {@code ObjectMapper} 序列化，{@code application.yml} 里的
  *       {@code property-naming-strategy: SNAKE_CASE} <b>不生效</b>（见服务端 README 注意事项 4）。
@@ -102,6 +110,14 @@ class AssetCatalogApiContractTest {
     private AssetInventoryService assetInventoryService;
     @Mock
     private AssetProducerService assetProducerService;
+    @Mock
+    private SchedulerTaskMetricsService schedulerTaskMetricsService;
+    @Mock
+    private AssetCatalogSnapshotTask catalogSnapshotTask;
+    @Mock
+    private AssetUsageRollupTask usageRollupTask;
+    @Mock
+    private SchedulerTaskMetricsCollectTask schedulerMetricsTask;
 
     private MockMvc mockMvc;
 
@@ -115,6 +131,10 @@ class AssetCatalogApiContractTest {
         ReflectionTestUtils.setField(controller, "assetMetaService", assetMetaService);
         ReflectionTestUtils.setField(controller, "assetInventoryService", assetInventoryService);
         ReflectionTestUtils.setField(controller, "assetProducerService", assetProducerService);
+        ReflectionTestUtils.setField(controller, "schedulerTaskMetricsService", schedulerTaskMetricsService);
+        ReflectionTestUtils.setField(controller, "catalogSnapshotTask", catalogSnapshotTask);
+        ReflectionTestUtils.setField(controller, "usageRollupTask", usageRollupTask);
+        ReflectionTestUtils.setField(controller, "schedulerMetricsTask", schedulerMetricsTask);
         mockMvc = ContractMockMvcSupport.productionMockMvc(controller);
     }
 
@@ -141,6 +161,8 @@ class AssetCatalogApiContractTest {
                 .content("{\"businessOwner\":\"zhangsan\",\"techOwner\":\"lisi\"}"));
         calls.add(put("/asset/table/1/category").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"categoryCode\":\"trade.order\",\"visibility\":\"internal\"}"));
+        calls.add(put("/asset/table/1/lifecycle").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"hotDays\":90,\"coldDays\":180,\"keepDays\":720}"));
         calls.add(put("/asset/table/1/tags").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"tagCodes\":[\"core\"]}"));
         calls.add(get("/asset/table/1/doc"));
@@ -160,6 +182,13 @@ class AssetCatalogApiContractTest {
                 .content("{\"items\":[{\"assetType\":\"table\",\"assetId\":1,\"accessType\":\"browse\"}]}"));
         calls.add(get("/asset/inventory/overview"));
         calls.add(get("/asset/inventory/health"));
+        // 资产概况看板：五个看板均已接入（top-compute / task-delay 的数据由
+        // SchedulerTaskMetricsCollectTask 每日从 DolphinScheduler 采集落库）
+        calls.add(get("/asset/inventory/env-project"));
+        calls.add(get("/asset/inventory/top-assets?sortBy=access&limit=100"));
+        calls.add(get("/asset/inventory/top-compute?sortBy=resource&limit=50"));
+        calls.add(get("/asset/inventory/task-delay?days=30"));
+        calls.add(get("/asset/inventory/size-growth?growthPercent=10&minSizeBytes=10737418240"));
         return calls;
     }
 
@@ -208,11 +237,11 @@ class AssetCatalogApiContractTest {
     class RouteCoverage {
 
         @Test
-        @DisplayName("前端 24 个调用全部命中，无 404 / 405")
+        @DisplayName("前端已接通的 30 个调用全部命中，无 404 / 405")
         void allFrontendCallsAreMapped() throws Exception {
             List<MockHttpServletRequestBuilder> calls = frontendCalls();
-            assertEquals(24, calls.size(),
-                    "路由表条数必须与前端 assetCatalog.ts 的调用数一致；新增接口时请同步本表");
+            assertEquals(30, calls.size(),
+                    "路由表条数必须与前端 assetCatalog.ts 中已接通的调用数一致；新增接口时请同步本表");
 
             for (MockHttpServletRequestBuilder builder : calls) {
                 mockMvc.perform(builder).andExpect(status().isOk());
@@ -787,5 +816,71 @@ class AssetCatalogApiContractTest {
         vo.setUpdateTime("2026-09-17T09:00:00");
         vo.setUpdateBy("zhangsan");
         return vo;
+    }
+
+    @Nested
+    @DisplayName("POST /asset/task/*/run - 任务手动触发")
+    class TaskRunEndpointTests {
+
+        @Test
+        @DisplayName("快照：statDate 参数绑定并返回 camelCase 摘要")
+        void testRunCatalogSnapshot() throws Exception {
+            LocalDate statDate = LocalDate.of(2026, 9, 1);
+            when(catalogSnapshotTask.runOnce(statDate))
+                    .thenReturn(new AssetCatalogSnapshotTask.RunResult(statDate, 128, 3));
+
+            JsonNode data = dataOf(post("/asset/task/catalog-snapshot/run").param("statDate", "2026-09-01"));
+
+            assertEquals("2026-09-01", data.get("statDate").asText());
+            assertEquals(128, data.get("tableCount").asInt());
+            assertEquals(3, data.get("purged").asInt());
+        }
+
+        @Test
+        @DisplayName("快照：缺省统计日按 T+1 口径取昨天")
+        void testRunCatalogSnapshot_defaultYesterday() throws Exception {
+            when(catalogSnapshotTask.runOnce(any(LocalDate.class)))
+                    .thenReturn(new AssetCatalogSnapshotTask.RunResult(LocalDate.now().minusDays(1), 1, 0));
+
+            dataOf(post("/asset/task/catalog-snapshot/run"));
+
+            verify(catalogSnapshotTask).runOnce(LocalDate.now().minusDays(1));
+        }
+
+        @Test
+        @DisplayName("未来统计日被拒绝：返回错误且不触发任务")
+        void testRunFutureDateRejected() throws Exception {
+            JsonNode body = call(post("/asset/task/usage-rollup/run")
+                    .param("statDate", LocalDate.now().plusDays(1).toString()));
+
+            assertNotEquals(200, body.get("code").asInt());
+            verify(usageRollupTask, never()).runOnce(any(LocalDate.class));
+        }
+
+        @Test
+        @DisplayName("热度汇总：返回 assetCount/hotUpdated/tablesUpdated")
+        void testRunUsageRollup() throws Exception {
+            when(usageRollupTask.runOnce(any(LocalDate.class)))
+                    .thenReturn(new AssetUsageRollupTask.RunResult(LocalDate.of(2026, 9, 29), 45, 12, 30));
+
+            JsonNode data = dataOf(post("/asset/task/usage-rollup/run"));
+
+            assertEquals(45, data.get("assetCount").asInt());
+            assertEquals(12, data.get("hotUpdated").asInt());
+            assertEquals(30, data.get("tablesUpdated").asInt());
+        }
+
+        @Test
+        @DisplayName("调度指标：返回采集摘要，skippedReason 原样透传")
+        void testRunSchedulerMetrics() throws Exception {
+            when(schedulerMetricsTask.runOnce(any(LocalDate.class)))
+                    .thenReturn(new SchedulerTaskMetricsService.CollectResult(
+                            LocalDate.of(2026, 9, 29), 0, 0, 0, "调度系统未配置"));
+
+            JsonNode data = dataOf(post("/asset/task/scheduler-metrics/run"));
+
+            assertEquals("调度系统未配置", data.get("skippedReason").asText());
+            assertEquals(0, data.get("rowCount").asInt());
+        }
     }
 }

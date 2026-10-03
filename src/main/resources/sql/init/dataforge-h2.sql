@@ -167,6 +167,83 @@ COMMENT ON TABLE asset_usage_daily IS '资产使用热度日汇总表(T+1，由 
 COMMENT ON COLUMN asset_usage_daily.stat_date IS '统计日(按日汇总，T+1 生成)';
 COMMENT ON COLUMN asset_usage_daily.relate_count IS '被关联数(引用该资产的规则/指标等)';
 
+-- 资产目录日快照表(T+1，一行=一张表×一个统计日)
+CREATE TABLE IF NOT EXISTS asset_catalog_daily (
+  id BIGINT AUTO_INCREMENT NOT NULL,
+  stat_date DATE NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  datasource_id BIGINT,
+  datasource_name VARCHAR(200),
+  storage_engine VARCHAR(40),
+  database_name VARCHAR(100),
+  table_name VARCHAR(200) NOT NULL,
+  table_comment VARCHAR(1000),
+  table_type VARCHAR(50),
+  layer_code VARCHAR(40),
+  domain_code VARCHAR(40),
+  convention_parsed TINYINT NOT NULL DEFAULT 0,
+  refresh_cycle VARCHAR(8),
+  category_code VARCHAR(64),
+  business_owner VARCHAR(255),
+  tech_owner VARCHAR(255),
+  topic VARCHAR(255),
+  visibility VARCHAR(20),
+  asset_level VARCHAR(8),
+  row_count BIGINT,
+  size_bytes BIGINT,
+  column_count INT NOT NULL DEFAULT 0,
+  tag_count INT NOT NULL DEFAULT 0,
+  indicator_count INT NOT NULL DEFAULT 0,
+  quality_rule_count INT NOT NULL DEFAULT 0,
+  has_doc TINYINT NOT NULL DEFAULT 0,
+  health_issue_count INT NOT NULL DEFAULT 0,
+  health_issue_codes VARCHAR(500),
+  browse_count_30d INT NOT NULL DEFAULT 0,
+  read_count_30d INT NOT NULL DEFAULT 0,
+  bookmark_count INT NOT NULL DEFAULT 0,
+  last_access_time TIMESTAMP,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_catalog_daily ON asset_catalog_daily (stat_date, table_metadata_id);
+CREATE INDEX IF NOT EXISTS idx_asset_catalog_daily_layer ON asset_catalog_daily (stat_date, layer_code);
+CREATE INDEX IF NOT EXISTS idx_asset_catalog_daily_domain ON asset_catalog_daily (stat_date, domain_code);
+CREATE INDEX IF NOT EXISTS idx_asset_catalog_daily_ds ON asset_catalog_daily (stat_date, datasource_id);
+COMMENT ON TABLE asset_catalog_daily IS '资产目录日快照表(T+1，一行=一张表×一个统计日)';
+COMMENT ON COLUMN asset_catalog_daily.stat_date IS '统计日';
+COMMENT ON COLUMN asset_catalog_daily.layer_code IS '命名规范解析出的分层编码(未解析为NULL)';
+COMMENT ON COLUMN asset_catalog_daily.domain_code IS '命名规范解析出的业务域编码(未解析为NULL)';
+COMMENT ON COLUMN asset_catalog_daily.health_issue_codes IS '治理项编码集合(逗号分隔)';
+
+-- 调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)
+CREATE TABLE IF NOT EXISTS scheduler_task_run_daily (
+  id BIGINT AUTO_INCREMENT NOT NULL,
+  stat_date DATE NOT NULL,
+  project_code VARCHAR(100) NOT NULL DEFAULT '',
+  project_name VARCHAR(200),
+  workflow_code BIGINT,
+  workflow_name VARCHAR(200) NOT NULL DEFAULT '',
+  node_name VARCHAR(200) NOT NULL DEFAULT '',
+  task_type VARCHAR(40) NOT NULL DEFAULT '',
+  task_run_count INT NOT NULL DEFAULT 0,
+  delayed_count INT NOT NULL DEFAULT 0,
+  success_count INT NOT NULL DEFAULT 0,
+  failed_count INT NOT NULL DEFAULT 0,
+  total_duration_seconds BIGINT NOT NULL DEFAULT 0,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_scheduler_task_run_daily ON scheduler_task_run_daily (stat_date, project_code, workflow_name, node_name, task_type);
+CREATE INDEX IF NOT EXISTS idx_scheduler_task_run_date ON scheduler_task_run_daily (stat_date);
+CREATE INDEX IF NOT EXISTS idx_scheduler_task_run_project ON scheduler_task_run_daily (stat_date, project_code);
+COMMENT ON TABLE scheduler_task_run_daily IS '调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)';
+COMMENT ON COLUMN scheduler_task_run_daily.stat_date IS '统计日(任务实际开始日)';
+COMMENT ON COLUMN scheduler_task_run_daily.delayed_count IS '延迟实例数(实际开始晚于计划开始)';
+
 -- 表字段元数据表
 CREATE TABLE IF NOT EXISTS column_metadata (
   id BIGINT AUTO_INCREMENT,

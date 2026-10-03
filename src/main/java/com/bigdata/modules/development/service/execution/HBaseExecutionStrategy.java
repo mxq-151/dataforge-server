@@ -29,7 +29,9 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -608,11 +610,15 @@ public class HBaseExecutionStrategy extends AbstractBaseExecutionStrategy {
             org.apache.hadoop.hbase.client.Admin admin = hbaseConn.getAdmin();
             try {
                 org.apache.hadoop.hbase.TableName[] tableNames = admin.listTableNames();
+                // RegionMetrics 需按 (ServerName, TableName) 查询，先取一次活跃 RegionServer 列表
+                List<org.apache.hadoop.hbase.ServerName> liveServers =
+                        new ArrayList<>(admin.getClusterMetrics().getLiveServerMetrics().keySet());
                 for (org.apache.hadoop.hbase.TableName tn : tableNames) {
                     TableMetadata tableMeta = new TableMetadata();
                     tableMeta.setTableName(tn.getNameAsString());
                     tableMeta.setTableType("TABLE");
                     tableMeta.setDatabaseName(databaseName);
+                    fillHBaseAttributes(admin, liveServers, tn, tableMeta);
                     tables.add(tableMeta);
                 }
             } finally {
@@ -622,6 +628,85 @@ public class HBaseExecutionStrategy extends AbstractBaseExecutionStrategy {
             log.warn("获取HBase表列表失败: {}", e.getMessage());
         }
         return tables;
+    }
+
+    /**
+     * 补齐 HBase 表的存储大小与压缩算法（失败只记 debug，不阻断表清单）。
+     *
+     * <p>存储大小按 Region 的 StoreFile 实际占用合计（压缩后字节数）；
+     * 压缩算法取列族的压缩类型，多列族不同算法时逗号分隔。HBase 无分区概念，不填分区列；
+     * 行数需全表扫描，不具备低成本口径，保持空值。</p>
+     */
+    private void fillHBaseAttributes(org.apache.hadoop.hbase.client.Admin admin,
+                                     List<org.apache.hadoop.hbase.ServerName> liveServers,
+                                     org.apache.hadoop.hbase.TableName tn, TableMetadata tableMeta) {
+        try {
+            org.apache.hadoop.hbase.client.TableDescriptor descriptor = admin.getDescriptor(tn);
+            java.util.Set<String> codecs = new java.util.LinkedHashSet<>();
+            for (org.apache.hadoop.hbase.client.ColumnFamilyDescriptor cf : descriptor.getColumnFamilies()) {
+                org.apache.hadoop.hbase.io.compress.Compression.Algorithm algorithm = cf.getCompressionType();
+                if (algorithm != null) {
+                    codecs.add(algorithm.getName().toUpperCase(java.util.Locale.ROOT));
+                }
+            }
+            if (!codecs.isEmpty()) {
+                tableMeta.setCompression(String.join(",", codecs));
+            }
+        } catch (Exception e) {
+            log.debug("采集HBase列族压缩算法失败[{}]: {}", tn.getNameAsString(), e.getMessage());
+        }
+        long bytes = hbaseTableSizeBytes(admin, liveServers, tn);
+        if (bytes > 0) {
+            tableMeta.setSizeBytes(bytes);
+        }
+    }
+
+    /** Region 的 StoreFile 实际占用合计（压缩后字节数）；失败返回 0 */
+    private long hbaseTableSizeBytes(org.apache.hadoop.hbase.client.Admin admin,
+                                     List<org.apache.hadoop.hbase.ServerName> liveServers,
+                                     org.apache.hadoop.hbase.TableName tn) {
+        try {
+            long bytes = 0L;
+            for (org.apache.hadoop.hbase.ServerName server : liveServers) {
+                for (org.apache.hadoop.hbase.RegionMetrics metrics : admin.getRegionMetrics(server, tn)) {
+                    org.apache.hadoop.hbase.Size size = metrics.getStoreFileSize();
+                    if (size != null) {
+                        bytes += (long) size.get();
+                    }
+                }
+            }
+            return bytes;
+        } catch (Exception e) {
+            log.debug("采集HBase存储大小失败[{}]: {}", tn.getNameAsString(), e.getMessage());
+            return 0L;
+        }
+    }
+
+    /**
+     * 采集「表名 → 存储字节数」，供每日存储大小刷新任务使用。
+     */
+    @Override
+    public Map<String, Long> listTableSizes(DatasourceConfig datasourceConfig, String databaseName) {
+        Map<String, Long> sizes = new LinkedHashMap<>();
+        try {
+            Connection hbaseConn = getOrCreateConnection(datasourceConfig);
+            org.apache.hadoop.hbase.client.Admin admin = hbaseConn.getAdmin();
+            try {
+                List<org.apache.hadoop.hbase.ServerName> liveServers =
+                        new ArrayList<>(admin.getClusterMetrics().getLiveServerMetrics().keySet());
+                for (org.apache.hadoop.hbase.TableName tn : admin.listTableNames()) {
+                    long bytes = hbaseTableSizeBytes(admin, liveServers, tn);
+                    if (bytes > 0) {
+                        sizes.put(tn.getNameAsString(), bytes);
+                    }
+                }
+            } finally {
+                admin.close();
+            }
+        } catch (Exception e) {
+            log.warn("采集HBase表存储大小失败: {}", e.getMessage());
+        }
+        return sizes;
     }
 
     @Override

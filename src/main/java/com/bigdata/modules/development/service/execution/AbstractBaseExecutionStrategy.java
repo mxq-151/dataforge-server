@@ -274,6 +274,17 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
                 info.hiveAttributes.compressionCodec = calciteAttrs.compressionCodec;
                 info.hiveAttributes.isPartitioned = calciteAttrs.isPartitioned;
                 info.hiveAttributes.partitionColumns = calciteAttrs.partitionColumns;
+                // ClickHouse 的分区表达式（PARTITION BY expr）复用分区列口径落库
+                if (info.hiveAttributes.partitionColumns == null && calciteAttrs.partitionByExpr != null) {
+                    info.hiveAttributes.partitionColumns = calciteAttrs.partitionByExpr.trim();
+                }
+                // Doris/StarRocks 的压缩算法来自 PROPERTIES('compression')，与 Hive TBLPROPERTIES 口径合并
+                if (info.hiveAttributes.compressionCodec == null && calciteAttrs.properties != null) {
+                    String codec = calciteAttrs.properties.get("compression");
+                    if (codec != null && !codec.isBlank()) {
+                        info.hiveAttributes.compressionCodec = codec.trim();
+                    }
+                }
 
                 getLog().info("[DDL-DEBUG-D1] 提取到表属性: engine={}, type={}, comment={}, storageFormat={}, location={}",
                         calciteAttrs.engineType, info.hiveAttributes.tableType, info.hiveAttributes.tableComment,

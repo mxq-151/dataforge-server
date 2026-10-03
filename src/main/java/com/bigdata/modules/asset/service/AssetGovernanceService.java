@@ -5,6 +5,7 @@ import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.modules.asset.dto.AssetCategoryUpdateDTO;
 import com.bigdata.modules.asset.dto.AssetDocSaveDTO;
+import com.bigdata.modules.asset.dto.AssetLifecycleUpdateDTO;
 import com.bigdata.modules.asset.dto.AssetOwnerUpdateDTO;
 import com.bigdata.modules.asset.dto.AssetTagsUpdateDTO;
 import com.bigdata.modules.asset.entity.AssetDoc;
@@ -170,6 +171,43 @@ public class AssetGovernanceService {
         log.info("更新资产分类: table={}.{}, categoryCode={}, topic={}, visibility={}, assetLevel={}",
                 table.getDatabaseName(), table.getTableName(),
                 dto.getCategoryCode(), dto.getTopic(), dto.getVisibility(), dto.getAssetLevel());
+    }
+
+    // ==================================================================
+    // 生命周期
+    // ==================================================================
+
+    /**
+     * 修改生命周期（热 / 冷 / 保留天数）。
+     *
+     * <p>三个字段整体覆盖写：语义上它们是一个有序三元组，分开增量提交会短暂出现
+     * 非法组合（例如先把热天数调大、再调冷天数）。因此在同一事务内整体校验
+     * {@code hotDays ≤ coldDays ≤ keepDays} 后一次写入。</p>
+     */
+    @Transactional
+    public void updateLifecycle(Long tableId, AssetLifecycleUpdateDTO dto) {
+        TableMetadata table = requireVisibleTable(tableId);
+        if (dto == null || dto.getHotDays() == null || dto.getColdDays() == null || dto.getKeepDays() == null) {
+            throw new BusinessException("hotDays / coldDays / keepDays 均不能为空");
+        }
+        int hot = dto.getHotDays();
+        int cold = dto.getColdDays();
+        int keep = dto.getKeepDays();
+        if (hot <= 0 || cold <= 0 || keep <= 0) {
+            throw new BusinessException("生命周期天数必须为正整数");
+        }
+        if (hot > cold || cold > keep) {
+            throw new BusinessException("生命周期需满足 热数据天数 ≤ 冷数据天数 ≤ 保留天数");
+        }
+
+        TableMetadata update = new TableMetadata();
+        update.setId(table.getId());
+        update.setHotDays(hot);
+        update.setColdDays(cold);
+        update.setKeepDays(keep);
+        tableMetadataMapper.updateById(update);
+        log.info("更新资产生命周期: table={}.{}, hotDays={}, coldDays={}, keepDays={}",
+                table.getDatabaseName(), table.getTableName(), hot, cold, keep);
     }
 
     // ==================================================================

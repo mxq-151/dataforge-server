@@ -89,6 +89,9 @@ public class AssetTableDetailVO implements Serializable {
     /** 存储格式 */
     private String storageFormat;
 
+    /** 压缩算法（口径来源：Hive/Kyuubi 表参数、Doris PROPERTIES、ClickHouse 列编码、HBase 列族） */
+    private String compression;
+
     /** 存储位置 */
     private String location;
 
@@ -175,6 +178,8 @@ public class AssetTableDetailVO implements Serializable {
     public void setKeepDays(Integer keepDays) { this.keepDays = keepDays; }
     public String getStorageFormat() { return storageFormat; }
     public void setStorageFormat(String storageFormat) { this.storageFormat = storageFormat; }
+    public String getCompression() { return compression; }
+    public void setCompression(String compression) { this.compression = compression; }
     public String getLocation() { return location; }
     public void setLocation(String location) { this.location = location; }
     public List<String> getPartitionColumns() { return partitionColumns; }

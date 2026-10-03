@@ -153,6 +153,75 @@ CREATE TABLE IF NOT EXISTS `asset_usage_daily` (
   KEY `idx_asset_usage_date` (`stat_date`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产使用热度日汇总表(T+1，由 asset_access_log 汇总)';
 
+-- 资产目录日快照表(T+1，一行=一张表×一个统计日)
+CREATE TABLE IF NOT EXISTS `asset_catalog_daily` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `stat_date` date NOT NULL COMMENT '统计日',
+  `table_metadata_id` bigint NOT NULL COMMENT '表元数据ID',
+  `datasource_id` bigint DEFAULT NULL COMMENT '数据源ID',
+  `datasource_name` varchar(200) DEFAULT NULL COMMENT '数据源名称',
+  `storage_engine` varchar(40) DEFAULT NULL COMMENT '存储引擎编码',
+  `database_name` varchar(100) DEFAULT NULL COMMENT '库名',
+  `table_name` varchar(200) NOT NULL COMMENT '表名',
+  `table_comment` varchar(1000) DEFAULT NULL COMMENT '表注释',
+  `table_type` varchar(50) DEFAULT NULL COMMENT '表类型',
+  `layer_code` varchar(40) DEFAULT NULL COMMENT '命名规范解析出的分层编码(未解析为NULL)',
+  `domain_code` varchar(40) DEFAULT NULL COMMENT '命名规范解析出的业务域编码(未解析为NULL)',
+  `convention_parsed` tinyint NOT NULL DEFAULT 0 COMMENT '是否符合命名规范(四要素齐备)',
+  `refresh_cycle` varchar(8) DEFAULT NULL COMMENT '刷新周期后缀',
+  `category_code` varchar(64) DEFAULT NULL COMMENT '人工覆盖的分类编码',
+  `business_owner` varchar(255) DEFAULT NULL COMMENT '业务负责人',
+  `tech_owner` varchar(255) DEFAULT NULL COMMENT '技术负责人',
+  `topic` varchar(255) DEFAULT NULL COMMENT '所属主题域',
+  `visibility` varchar(20) DEFAULT NULL COMMENT '可见性(public/internal/restricted)',
+  `asset_level` varchar(8) DEFAULT NULL COMMENT '资产等级L1~L5',
+  `row_count` bigint DEFAULT NULL COMMENT '行数',
+  `size_bytes` bigint DEFAULT NULL COMMENT '存储字节数',
+  `column_count` int NOT NULL DEFAULT 0 COMMENT '字段数',
+  `tag_count` int NOT NULL DEFAULT 0 COMMENT '表标签数',
+  `indicator_count` int NOT NULL DEFAULT 0 COMMENT '关联指标数',
+  `quality_rule_count` int NOT NULL DEFAULT 0 COMMENT '已启用质量规则数',
+  `has_doc` tinyint NOT NULL DEFAULT 0 COMMENT '是否有使用说明',
+  `health_issue_count` int NOT NULL DEFAULT 0 COMMENT '治理项数量',
+  `health_issue_codes` varchar(500) DEFAULT NULL COMMENT '治理项编码集合(逗号分隔)',
+  `browse_count_30d` int NOT NULL DEFAULT 0 COMMENT '近30日浏览数',
+  `read_count_30d` int NOT NULL DEFAULT 0 COMMENT '近30日读取数',
+  `bookmark_count` int NOT NULL DEFAULT 0 COMMENT '收藏数',
+  `last_access_time` datetime DEFAULT NULL COMMENT '最近访问时间',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_asset_catalog_daily` (`stat_date`,`table_metadata_id`),
+  KEY `idx_asset_catalog_daily_layer` (`stat_date`,`layer_code`),
+  KEY `idx_asset_catalog_daily_domain` (`stat_date`,`domain_code`),
+  KEY `idx_asset_catalog_daily_ds` (`stat_date`,`datasource_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产目录日快照表(T+1，一行=一张表×一个统计日)';
+
+-- 调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)
+CREATE TABLE IF NOT EXISTS `scheduler_task_run_daily` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `stat_date` date NOT NULL COMMENT '统计日(任务实际开始日)',
+  `project_code` varchar(100) NOT NULL DEFAULT '' COMMENT '调度项目编码',
+  `project_name` varchar(200) DEFAULT NULL COMMENT '调度项目名',
+  `workflow_code` bigint DEFAULT NULL COMMENT '工作流编码',
+  `workflow_name` varchar(200) NOT NULL DEFAULT '' COMMENT '工作流名',
+  `node_name` varchar(200) NOT NULL DEFAULT '' COMMENT '节点(任务)名',
+  `task_type` varchar(40) NOT NULL DEFAULT '' COMMENT '任务类型(SPARK/HIVE/FLINK等)',
+  `task_run_count` int NOT NULL DEFAULT 0 COMMENT '任务实例数(窗口内执行次数)',
+  `delayed_count` int NOT NULL DEFAULT 0 COMMENT '延迟实例数(实际开始晚于计划开始)',
+  `success_count` int NOT NULL DEFAULT 0 COMMENT '成功实例数',
+  `failed_count` int NOT NULL DEFAULT 0 COMMENT '失败实例数',
+  `total_duration_seconds` bigint NOT NULL DEFAULT 0 COMMENT '累计运行时长(秒)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_scheduler_task_run_daily` (`stat_date`,`project_code`,`workflow_name`,`node_name`,`task_type`),
+  KEY `idx_scheduler_task_run_date` (`stat_date`),
+  KEY `idx_scheduler_task_run_project` (`stat_date`,`project_code`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)';
+
 -- 表字段元数据表
 CREATE TABLE IF NOT EXISTS `column_metadata` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',

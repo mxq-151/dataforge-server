@@ -366,7 +366,7 @@ public class AssetHealthService {
     }
 
     /** 影响面描述：既说数量占比，也说这条治理项到底意味着什么 */
-    private String buildImpact(Issue issue, int hitCount, int totalCount) {
+    public String buildImpact(Issue issue, int hitCount, int totalCount) {
         if (totalCount == 0) {
             return "暂无纳管资产";
         }

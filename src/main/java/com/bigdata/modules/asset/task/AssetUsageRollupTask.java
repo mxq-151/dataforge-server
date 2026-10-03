@@ -38,15 +38,30 @@ public class AssetUsageRollupTask {
     @Autowired
     private AssetUsageService assetUsageService;
 
+    /** 单次执行摘要：供定时日志与手动触发接口共用 */
+    public record RunResult(LocalDate statDate, int assetCount, int hotUpdated, int tablesUpdated) {
+    }
+
+    /**
+     * 跑一次资产使用热度汇总：按日聚合访问明细并回写热度冗余列。
+     *
+     * <p>定时任务与手动触发共用同一入口，保证两条路径口径一致；汇总为幂等覆盖写，
+     * 可安全重放。异常向上抛出，由调用方决定记录或返回错误。</p>
+     */
+    public RunResult runOnce(LocalDate statDate) {
+        AssetUsageService.RollupResult result = assetUsageService.rollupDaily(statDate);
+        int tables = assetUsageService.refreshTableCounters();
+        return new RunResult(statDate, result.assetCount(), result.hotUpdated(), tables);
+    }
+
     /** 每日 01:30 汇总前一天的访问明细并回写热度 */
     @Scheduled(cron = "0 30 1 * * ?")
     public void rollupYesterday() {
         LocalDate statDate = LocalDate.now().minusDays(1);
         try {
-            AssetUsageService.RollupResult result = assetUsageService.rollupDaily(statDate);
-            int tables = assetUsageService.refreshTableCounters();
+            RunResult result = runOnce(statDate);
             log.info("资产热度日汇总任务完成：日期={}, 资产数={}, 字段热度={}, 冗余列回写={}",
-                    statDate, result.assetCount(), result.hotUpdated(), tables);
+                    statDate, result.assetCount(), result.hotUpdated(), result.tablesUpdated());
         } catch (Exception e) {
             log.error("资产热度日汇总任务失败：日期={}（汇总为幂等操作，下次执行会重算补齐）", statDate, e);
         }

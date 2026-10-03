@@ -5,7 +5,9 @@ import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.vo.ColumnMetadataVO;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public interface ExecutionStrategy {
 
@@ -49,5 +51,16 @@ public interface ExecutionStrategy {
      */
     default List<ColumnMetadataVO> listColumns(DatasourceConfig datasourceConfig, String databaseName, String tableName) {
         return new ArrayList<>();
+    }
+
+    /**
+     * 采集指定库的「表名 → 存储字节数」，供每日存储大小刷新使用。
+     *
+     * <p>只需大小、不做整表元数据同步时应走本方法：JDBC 系查系统表、Kyuubi 走
+     * DESCRIBE EXTENDED、HBase 走 RegionMetrics。默认无低成本口径，返回空 Map；
+     * 实现方失败时同样返回已采集到的部分（调用方按覆盖写处理，不影响存量值）。</p>
+     */
+    default Map<String, Long> listTableSizes(DatasourceConfig datasourceConfig, String databaseName) {
+        return new HashMap<>();
     }
 }

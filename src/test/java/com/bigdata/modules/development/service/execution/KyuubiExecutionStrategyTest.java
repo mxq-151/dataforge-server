@@ -270,6 +270,104 @@ class KyuubiExecutionStrategyTest {
         }
     }
 
+    // ==================== DESCRIBE 解析（纯逻辑，不依赖网络）====================
+
+    @Nested
+    @DisplayName("applyDescribeColumns - DESCRIBE 分段解析")
+    class DescribeColumnsTests {
+
+        @Test
+        @DisplayName("分区段字段被标记 isPartition=1 并补录入清单，表头行不入库")
+        void testApplyDescribeColumns_withPartitionSection() {
+            List<List<String>> rows = List.of(
+                    List.of("# col_name", "data_type", "comment"),
+                    List.of("order_id", "bigint", "订单号"),
+                    List.of("amount", "decimal(10,2)", "金额"),
+                    List.of("# Partition Information", "", ""),
+                    List.of("# col_name", "data_type", "comment"),
+                    List.of("dt", "string", "分区日期"));
+            List<ColumnMetadataVO> columns = new java.util.ArrayList<>();
+
+            KyuubiExecutionStrategy.applyDescribeColumns(rows, columns, "dw", "dwd_order");
+
+            assertEquals(3, columns.size(), "# 表头行不应入库");
+            assertEquals("order_id", columns.get(0).getColumnName());
+            assertEquals("订单号", columns.get(0).getColumnComment());
+            assertEquals(Integer.valueOf(0), columns.get(0).getIsPartition());
+            assertEquals("dt", columns.get(2).getColumnName());
+            assertEquals("分区日期", columns.get(2).getColumnComment());
+            assertEquals(Integer.valueOf(1), columns.get(2).getIsPartition());
+        }
+
+        @Test
+        @DisplayName("非分区表：仅有列定义段，全部 isPartition=0")
+        void testApplyDescribeColumns_withoutPartitions() {
+            List<List<String>> rows = List.of(
+                    List.of("# col_name", "data_type", "comment"),
+                    List.of("id", "bigint", ""));
+            List<ColumnMetadataVO> columns = new java.util.ArrayList<>();
+
+            KyuubiExecutionStrategy.applyDescribeColumns(rows, columns, "dw", "plain_tbl");
+
+            assertEquals(1, columns.size());
+            assertEquals(Integer.valueOf(0), columns.get(0).getIsPartition());
+        }
+    }
+
+    @Nested
+    @DisplayName("applyDescribeExtended - 表属性解析")
+    class DescribeExtendedTests {
+
+        @Test
+        @DisplayName("分区列/大小/行数/压缩/位置/修改时间被解析，列定义段同名行不误入")
+        void testApplyDescribeExtended() {
+            List<List<String>> rows = List.of(
+                    List.of("# col_name", "data_type", "comment"),
+                    List.of("location", "string", "列定义段里的同名列"),
+                    List.of("# Partition Information", "", ""),
+                    List.of("# col_name", "data_type", "comment"),
+                    List.of("dt", "string", ""),
+                    List.of("region", "string", ""),
+                    List.of("# Detailed Table Information", "", ""),
+                    List.of("Database:", "dw", ""),
+                    List.of("Location:", "jfs://myjfs/warehouse/dwd_order", ""),
+                    List.of("Table Parameters:", "", ""),
+                    List.of("totalSize", "1048576", ""),
+                    List.of("numRows", "2000", ""),
+                    List.of("transient_lastDdlTime", "1712345678", ""),
+                    List.of("orc.compress", "SNAPPY", ""));
+            TableMetadata table = new TableMetadata();
+
+            KyuubiExecutionStrategy.applyDescribeExtended(rows, table);
+
+            assertEquals("dt,region", table.getPartitionColumns());
+            assertEquals("jfs://myjfs/warehouse/dwd_order", table.getLocation(),
+                    "列定义段的同名列不应写入 location");
+            assertEquals(1048576L, table.getSizeBytes());
+            assertNull(table.getRowCount(), "行数不在采集范围，即使输出中有 numRows 也不解析");
+            assertEquals(new java.util.Date(1712345678L * 1000L), table.getLastModifyTime());
+            assertEquals("SNAPPY", table.getCompression());
+        }
+
+        @Test
+        @DisplayName("无统计信息时保持空值（不猜测）")
+        void testApplyDescribeExtended_withoutStatistics() {
+            List<List<String>> rows = List.of(
+                    List.of("# col_name", "data_type", "comment"),
+                    List.of("id", "bigint", ""),
+                    List.of("# Detailed Table Information", "", ""),
+                    List.of("Owner:", "hive", ""));
+            TableMetadata table = new TableMetadata();
+
+            KyuubiExecutionStrategy.applyDescribeExtended(rows, table);
+
+            assertNull(table.getSizeBytes());
+            assertNull(table.getRowCount());
+            assertNull(table.getPartitionColumns());
+            assertNull(table.getLocation());
+        }
+    }
+
     // ==================== 辅助方法 ====================
 
     /** 创建指向真实Kyuubi服务的DatasourceConfig */

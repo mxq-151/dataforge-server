@@ -232,6 +232,16 @@ public final class CalciteDdlParser {
             attrs.keyColumns = keyTypeMatcher.group(2).replaceAll("`", "").trim();
         }
 
+        // PARTITION BY RANGE(`dt`) / LIST(`region`) / HASH(k1) 等
+        Pattern partitionByPattern = Pattern.compile(
+                "(?i)\\bPARTITION\\s+BY\\s+(?:RANGE|LIST|HASH)?\\s*\\(([^)]+)\\)");
+        Matcher partitionByMatcher = partitionByPattern.matcher(sql);
+        if (partitionByMatcher.find()) {
+            attrs.isPartitioned = true;
+            attrs.partitionColumns = partitionByMatcher.group(1)
+                    .replaceAll("`", "").trim();
+        }
+
         // DISTRIBUTED BY HASH(...) BUCKETS N
         Pattern distributedPattern = Pattern.compile(
                 "(?i)\\bDISTRIBUTED\\s+BY\\s+HASH\\s*\\(([^)]+)\\)\\s+BUCKETS\\s+(\\d+)");

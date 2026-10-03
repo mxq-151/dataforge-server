@@ -82,6 +82,7 @@ public class MetadataSyncService {
             log.info("[DDL-DEBUG-D3] ExecutionStrategy获取成功: {}", strategy.getClass().getSimpleName());
             List<ColumnMetadataVO> columnVOs = strategy.listColumns(config, databaseName, tableName);
             log.info("[DDL-DEBUG-D4] listColumns返回字段数量: {}", columnVOs != null ? columnVOs.size() : "null");
+            backfillPartitionColumns(targetTable, columnVOs);
             List<ColumnMetadata> columns = convertToColumnMetadataEntities(columnVOs, targetTable, storageEngine, databaseName);
 
             log.info("[DDL-DEBUG-D3] 准备写入DB: table={}, columns={}", targetTable.getTableName(), columns.size());
@@ -151,6 +152,7 @@ public class MetadataSyncService {
                         }
                         // 通过ExecutionStrategy获取字段信息
                         List<ColumnMetadataVO> columnVOs = strategy.listColumns(config, db, remoteTable.getTableName());
+                        backfillPartitionColumns(targetTable, columnVOs);
                         List<ColumnMetadata> columns = convertToColumnMetadataEntities(columnVOs, targetTable, storageEngine, db);
                         tableMetadataService.syncSingleTable(storageEngine, targetTable, columns);
                         successCount++;
@@ -180,9 +182,9 @@ public class MetadataSyncService {
     }
 
     /**
-     * 判断是否为系统数据库，跳过同步
+     * 判断是否为系统数据库，跳过同步/统计（包可见：供每日大小刷新复用同一口径）
      */
-    private boolean isSystemDatabase(String dbName) {
+    static boolean isSystemDatabase(String dbName) {
         if (dbName == null || dbName.isEmpty()) return true;
         String lower = dbName.toLowerCase();
         return "information_schema".equals(lower)
@@ -220,6 +222,12 @@ public class MetadataSyncService {
         if (source.getRowCount() != null) {
             target.setRowCount(source.getRowCount());
         }
+        if (source.getPartitionColumns() != null) {
+            target.setPartitionColumns(source.getPartitionColumns());
+        }
+        if (source.getLastModifyTime() != null) {
+            target.setLastModifyTime(source.getLastModifyTime());
+        }
         if (source.getSizeBytes() != null) {
             target.setSizeBytes(source.getSizeBytes());
         }
@@ -230,7 +238,7 @@ public class MetadataSyncService {
 
     /**
      * 将从DDL语句中提取的Hive表级属性应用到TableMetadata实体。
-     * 包括：表类型(EXTERNAL/MANAGED)、表注释、存储格式、存储路径等。
+     * 包括：表类型(EXTERNAL/MANAGED)、表注释、存储格式、存储路径、分区列与压缩算法。
      */
     private void applyHiveAttributes(TableMetadata target, AbstractBaseExecutionStrategy.HiveTableAttributes attrs) {
         if (attrs == null || target == null) return;
@@ -246,6 +254,123 @@ public class MetadataSyncService {
         if (attrs.location != null) {
             target.setLocation(attrs.location);
         }
+        String partitionColumns = normalizePartitionColumns(attrs.partitionColumns);
+        if (partitionColumns != null) {
+            target.setPartitionColumns(partitionColumns);
+        }
+        if (attrs.compressionCodec != null && !attrs.compressionCodec.isBlank()) {
+            target.setCompression(attrs.compressionCodec.trim());
+        }
+    }
+
+    /**
+     * 规范化分区列文本：不同引擎/来源格式不一（Hive 为「列名 类型」、Doris 为裸列名、
+     * ClickHouse 为分区表达式），统一为逗号分隔的列名/表达式文本后再落库。
+     * <p>示例：{@code "dt STRING, `region`"} → {@code "dt,region"}；
+     * {@code "toYYYYMM(event_date)"} 原样保留。</p>
+     *
+     * @return 规范化结果；入参为空或无有效内容时返回 null（调用方据此跳过写入，避免误覆盖）
+     */
+    static String normalizePartitionColumns(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        List<String> names = new ArrayList<>();
+        for (String part : splitTopLevelComma(raw)) {
+            String token = part.trim().replace("`", "").replace("\"", "");
+            if (token.isEmpty()) {
+                continue;
+            }
+            // 去掉类型声明：「dt STRING」「dt decimal(10,2)」→「dt」；表达式（toYYYYMM(x)）原样保留
+            String name = firstTopLevelToken(token).replaceAll("\\s+", " ").trim();
+            if (!name.isBlank()) {
+                names.add(name);
+            }
+        }
+        return names.isEmpty() ? null : String.join(",", names);
+    }
+
+    /** 取顶层（括号外）第一个空白之前的内容；无顶层空白时原样返回 */
+    private static String firstTopLevelToken(String token) {
+        int depth = 0;
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth = Math.max(0, depth - 1);
+            } else if (Character.isWhitespace(c) && depth == 0) {
+                return token.substring(0, i);
+            }
+        }
+        return token;
+    }
+
+    /** 按顶层逗号切分（忽略括号内的逗号，兼容 decimal(10,2) 之类类型） */
+    private static List<String> splitTopLevelComma(String raw) {
+        List<String> parts = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int depth = 0;
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth = Math.max(0, depth - 1);
+            }
+            if (c == ',' && depth == 0) {
+                parts.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(c);
+            }
+        }
+        parts.add(current.toString());
+        return parts;
+    }
+
+    /**
+     * 从字段清单反哺表级分区列。
+     *
+     * <p>Kyuubi 等引擎的表级分区信息只能从 DESCRIBE 的分区段获得（体现在列的 isPartition 上），
+     * 表级列表为空时用字段标记补齐，保证 table_metadata.partition_columns 不为空。</p>
+     */
+    private void backfillPartitionColumns(TableMetadata table, List<ColumnMetadataVO> columnVOs) {
+        if (table == null || columnVOs == null || columnVOs.isEmpty()) {
+            return;
+        }
+        if (table.getPartitionColumns() != null && !table.getPartitionColumns().isBlank()) {
+            return;
+        }
+        List<String> names = new ArrayList<>();
+        for (ColumnMetadataVO vo : columnVOs) {
+            if (vo.getIsPartition() != null && vo.getIsPartition() == 1
+                    && vo.getColumnName() != null && !vo.getColumnName().isBlank()) {
+                names.add(vo.getColumnName().trim());
+            }
+        }
+        if (!names.isEmpty()) {
+            table.setPartitionColumns(String.join(",", names));
+        }
+    }
+
+    /** 解析表级分区列文本为小写列名/表达式集合（用于标记字段 isPartition） */
+    private static Set<String> parsePartitionNames(TableMetadata table) {
+        if (table == null) {
+            return Set.of();
+        }
+        String normalized = normalizePartitionColumns(table.getPartitionColumns());
+        if (normalized == null) {
+            return Set.of();
+        }
+        Set<String> names = new HashSet<>();
+        for (String part : normalized.split(",")) {
+            String name = part.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!name.isEmpty()) {
+                names.add(name);
+            }
+        }
+        return names;
     }
 
     /**
@@ -258,6 +383,7 @@ public class MetadataSyncService {
         List<ColumnMetadata> columns = new ArrayList<>();
         if (columnVOs == null) return columns;
 
+        Set<String> partitionNames = parsePartitionNames(table);
         for (ColumnMetadataVO vo : columnVOs) {
             ColumnMetadata col = new ColumnMetadata();
             col.setTableMetadataId(table != null ? table.getId() : null);
@@ -270,11 +396,27 @@ public class MetadataSyncService {
             col.setNullable(vo.getNullable());
             col.setDefaultValue(vo.getDefaultValue());
             col.setOrdinalPosition(vo.getOrdinalPosition());
-            col.setIsPartition(vo.getIsPartition() != null ? vo.getIsPartition() : 0);
+            col.setIsPartition(resolvePartitionFlag(vo, partitionNames));
             col.setIsPrimaryKey(vo.getIsPrimaryKey() != null ? vo.getIsPrimaryKey() : 0);
             col.setSyncTime(new java.util.Date());
             columns.add(col);
         }
         return columns;
+    }
+
+    /**
+     * 分区标记取「字段自带」与「表级分区列匹配」的并集：
+     * 前者来自 Kyuubi DESCRIBE 分区段，后者覆盖 JDBC/DDL 路径（表级已知列名，无字段级信息）。
+     */
+    private static Integer resolvePartitionFlag(ColumnMetadataVO vo, Set<String> tablePartitionNames) {
+        if (vo.getIsPartition() != null && vo.getIsPartition() == 1) {
+            return 1;
+        }
+        if (vo.getColumnName() == null) {
+            return vo.getIsPartition() != null ? vo.getIsPartition() : 0;
+        }
+        boolean matched = tablePartitionNames.contains(
+                vo.getColumnName().trim().toLowerCase(java.util.Locale.ROOT));
+        return matched ? 1 : (vo.getIsPartition() != null ? vo.getIsPartition() : 0);
     }
 }

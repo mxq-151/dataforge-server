@@ -70,3 +70,15 @@ engine:
     home: /opt/flink
   jar:
     base-path: /Users/mxq/jars/
+
+# 调度系统（DolphinScheduler）只读接入。
+# 两处共用本组配置：
+#   1) /asset/table/{id}/producers —— 按表名实时反查产出工作流；
+#   2) 调度运行指标采集（SchedulerTaskMetricsCollectTask，每日 03:30）—— 支撑
+#      「资产概况」的 TOP 任务与任务延迟率看板。
+# base-url 为空表示未接入：产出任务返回空列表、运行指标采集静默跳过，均不报错。
+scheduler:
+  dolphinscheduler:
+    base-url: ''
+    token: ''
+    default-project-code: '1'

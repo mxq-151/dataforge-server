@@ -13,6 +13,7 @@ import com.bigdata.modules.devops.vo.DatasourceConfigVO;
 import com.bigdata.modules.devops.vo.DatasourceTypeMetaVO;
 import com.bigdata.modules.development.service.execution.ExecutionStrategyFactory;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
+import com.bigdata.modules.metadata.service.TableStorageSizeRefreshService;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +40,9 @@ public class DatasourceConfigController {
 
     @Autowired
     private ExecutionStrategyFactory executionStrategyFactory;
+
+    @Autowired
+    private TableStorageSizeRefreshService tableStorageSizeRefreshService;
 
 
 
@@ -110,6 +114,34 @@ public class DatasourceConfigController {
                                                         @RequestParam(required = false) Long id) {
         ConnectionTestResult result = datasourceConfigService.testConnectionByConfig(dto, id);
         return Result.success(result);
+    }
+
+    /**
+     * 手动刷新单个数据源的表存储大小。
+     *
+     * <p>与每日 02:15 的定时刷新任务同一口径（{@link TableStorageSizeRefreshService}）：
+     * 幂等覆盖写，只更新已纳管表的 size_bytes，取不到大小的表保持原值；
+     * 表多/连接慢的数据源耗时会较长，前端需放宽超时。</p>
+     *
+     * @return 实际更新的表数
+     */
+    @PostMapping("/{id}/refresh-table-size")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public Result<Integer> refreshTableSize(@PathVariable Long id) {
+        DatasourceConfig config = datasourceConfigService.getDatasourceById(id);
+        if (config == null) {
+            return Result.error(404, "数据源不存在");
+        }
+        return Result.success(tableStorageSizeRefreshService.refreshDatasource(config));
+    }
+
+    /**
+     * 手动刷新全部数据源的表存储大小，返回刷新摘要（逐数据源隔离失败，单个失败不影响其余）。
+     */
+    @PostMapping("/refresh-table-size")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public Result<TableStorageSizeRefreshService.RefreshResult> refreshAllTableSize() {
+        return Result.success(tableStorageSizeRefreshService.refreshAll());
     }
 
     @GetMapping("/types")
