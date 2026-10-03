@@ -111,7 +111,6 @@ class RoleControllerIntegrationTest {
         role.setRoleType(roleType != null ? roleType : "business");
         role.setDescription(description);
         role.setStatus(status != null ? status : 1);
-        role.setDeleted(0);
         sysRoleMapper.insert(role);
         return role;
     }
@@ -123,7 +122,6 @@ class RoleControllerIntegrationTest {
         user.setRealName("Test User " + username);
         user.setStatus(1);
         user.setIsAdmin(0);
-        user.setDeleted(0);
         sysUserMapper.insert(user);
         return user;
     }
@@ -135,7 +133,6 @@ class RoleControllerIntegrationTest {
         tenant.setStatus(1);
         tenant.setOwnerId(ownerId);
         tenant.setPassword("tenant_password");
-        tenant.setDeleted(0);
         sysTenantMapper.insert(tenant);
         return tenant;
     }
@@ -162,7 +159,6 @@ class RoleControllerIntegrationTest {
         perm.setMenuName(menuName);
         perm.setParentId(0L);
         perm.setSortOrder(1);
-        perm.setDeleted(0);
         sysMenuPermissionMapper.insert(perm);
         return perm;
     }
@@ -178,7 +174,6 @@ class RoleControllerIntegrationTest {
         perm.setCanUpdate(0);
         perm.setCanDelete(0);
         perm.setCanExport(0);
-        perm.setDeleted(0);
         sysTablePermissionMapper.insert(perm);
         return perm;
     }
@@ -190,7 +185,6 @@ class RoleControllerIntegrationTest {
         perm.setFilePath("/test/path/" + permissionName);
         perm.setPermissionType(1);
         perm.setRecursive(0);
-        perm.setDeleted(0);
         sysFilePermissionMapper.insert(perm);
         return perm;
     }
@@ -365,7 +359,7 @@ class RoleControllerIntegrationTest {
             assertEquals(200, result.getCode(), "删除角色应成功");
 
             SysRole deletedRole = sysRoleMapper.selectById(roleId);
-            assertNull(deletedRole, "删除后角色应不存在（逻辑删除）");
+            assertNull(deletedRole, "删除后角色应不存在");
 
             System.out.println("  删除结果: 成功 ✓");
             System.out.println("  已删除角色ID: " + roleId);

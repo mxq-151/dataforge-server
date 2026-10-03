@@ -198,8 +198,7 @@ public class AssetUsageService {
 
         Map<LocalDate, int[]> byDate = new HashMap<>();
         LambdaQueryWrapper<AssetUsageDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetUsageDaily::getDeleted, 0)
-                .eq(AssetUsageDaily::getAssetType, "table")
+        wrapper.eq(AssetUsageDaily::getAssetType, "table")
                 .eq(AssetUsageDaily::getAssetId, tableMetadataId)
                 .ge(AssetUsageDaily::getStatDate, from)
                 .le(AssetUsageDaily::getStatDate, today);
@@ -226,7 +225,6 @@ public class AssetUsageService {
     }
 
     private List<ColumnMetadata> columnsOf(Long tableMetadataId) {
-        // column_metadata 无 deleted 列
         LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ColumnMetadata::getTableMetadataId, tableMetadataId);
         return columnMetadataMapper.selectList(wrapper);
@@ -253,8 +251,7 @@ public class AssetUsageService {
         Map<Long, Integer> hits = new HashMap<>();
         if (!columnIds.isEmpty()) {
             LambdaQueryWrapper<AssetUsageDaily> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(AssetUsageDaily::getDeleted, 0)
-                    .eq(AssetUsageDaily::getAssetType, "column")
+            wrapper.eq(AssetUsageDaily::getAssetType, "column")
                     .in(AssetUsageDaily::getAssetId, columnIds);
             for (AssetUsageDaily row : assetUsageDailyMapper.selectList(wrapper)) {
                 int count = (row.getBrowseCount() == null ? 0 : row.getBrowseCount())
@@ -373,8 +370,7 @@ public class AssetUsageService {
             int[] counts = entry.getValue();
 
             LambdaQueryWrapper<AssetUsageDaily> existingWrapper = new LambdaQueryWrapper<>();
-            existingWrapper.eq(AssetUsageDaily::getDeleted, 0)
-                    .eq(AssetUsageDaily::getAssetType, assetType)
+            existingWrapper.eq(AssetUsageDaily::getAssetType, assetType)
                     .eq(AssetUsageDaily::getAssetId, assetId)
                     .eq(AssetUsageDaily::getStatDate, statDate);
             List<AssetUsageDaily> existing = assetUsageDailyMapper.selectList(existingWrapper);
@@ -446,7 +442,6 @@ public class AssetUsageService {
         usageWrapper.select("table_metadata_id AS table_id",
                         "SUM(browse_count) AS browse_cnt",
                         "SUM(read_count) AS read_cnt")
-                .eq("deleted", 0)
                 .eq("asset_type", "table")
                 .ge("stat_date", from)
                 .isNotNull("table_metadata_id")
@@ -462,7 +457,6 @@ public class AssetUsageService {
 
         QueryWrapper<AssetBookmark> bookmarkWrapper = new QueryWrapper<>();
         bookmarkWrapper.select("table_metadata_id AS table_id", "COUNT(*) AS bookmark_cnt")
-                .eq("deleted", 0)
                 .eq("asset_type", "table")
                 .isNotNull("table_metadata_id")
                 .groupBy("table_metadata_id");
@@ -521,8 +515,7 @@ public class AssetUsageService {
             return;
         }
         QueryWrapper<AssetBookmark> wrapper = new QueryWrapper<>();
-        wrapper.eq("deleted", 0)
-                .eq("asset_type", "table")
+        wrapper.eq("asset_type", "table")
                 .eq("table_metadata_id", tableMetadataId);
         Long count = assetBookmarkMapper.selectCount(wrapper);
 

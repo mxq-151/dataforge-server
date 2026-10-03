@@ -40,8 +40,6 @@ public class ProgramParams implements Serializable {
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 
-    private Integer deleted;
-
     public Long getProjectId() {
         return projectId;
     }
@@ -120,13 +118,5 @@ public class ProgramParams implements Serializable {
 
     public void setUpdateTime(LocalDateTime updateTime) {
         this.updateTime = updateTime;
-    }
-
-    public Integer getDeleted() {
-        return deleted;
-    }
-
-    public void setDeleted(Integer deleted) {
-        this.deleted = deleted;
     }
 }

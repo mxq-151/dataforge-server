@@ -48,8 +48,7 @@ public class AssetMetaService {
     /** 启用的标签定义 */
     public List<AssetTagVO> listTags() {
         LambdaQueryWrapper<AssetTag> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetTag::getDeleted, 0)
-                .eq(AssetTag::getEnabled, 1)
+        wrapper.eq(AssetTag::getEnabled, 1)
                 .orderByAsc(AssetTag::getTagCode);
         List<AssetTagVO> result = new ArrayList<>();
         for (AssetTag tag : assetTagMapper.selectList(wrapper)) {
@@ -108,8 +107,7 @@ public class AssetMetaService {
 
     private List<AssetCategory> configuredCategories() {
         LambdaQueryWrapper<AssetCategory> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetCategory::getDeleted, 0)
-                .orderByAsc(AssetCategory::getSortOrder)
+        wrapper.orderByAsc(AssetCategory::getSortOrder)
                 .orderByAsc(AssetCategory::getCategoryCode);
         return assetCategoryMapper.selectList(wrapper);
     }
@@ -117,7 +115,7 @@ public class AssetMetaService {
     /** 从现存表名里发现业务域编码 */
     private Set<String> discoverDomains() {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.select(TableMetadata::getTableName).eq(TableMetadata::getDeleted, 0);
+        wrapper.select(TableMetadata::getTableName);
         Set<String> domains = new LinkedHashSet<>();
         for (TableMetadata table : tableMetadataMapper.selectList(wrapper)) {
             String domain = TableNameConventionParser.parse(table.getTableName()).domainCode();

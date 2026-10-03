@@ -67,7 +67,6 @@ public class DqRuleTemplateService {
         ensureBuiltinTemplates();
         Map<String, DqRuleTemplate> byCode = dqRuleTemplateMapper.selectList(
                         new LambdaQueryWrapper<DqRuleTemplate>()
-                                .eq(DqRuleTemplate::getDeleted, 0)
                                 .eq(DqRuleTemplate::getTemplateKind, QualityTemplateKind.BUILTIN.getCode()))
                 .stream()
                 .collect(Collectors.toMap(DqRuleTemplate::getTemplateCode, t -> t, (a, b) -> a));
@@ -113,7 +112,6 @@ public class DqRuleTemplateService {
     public void ensureBuiltinTemplates() {
         List<DqRuleTemplate> existing = dqRuleTemplateMapper.selectList(
                 new LambdaQueryWrapper<DqRuleTemplate>()
-                        .eq(DqRuleTemplate::getDeleted, 0)
                         .eq(DqRuleTemplate::getTemplateKind, QualityTemplateKind.BUILTIN.getCode()));
         Map<String, DqRuleTemplate> byCode = existing.stream()
                 .collect(Collectors.toMap(DqRuleTemplate::getTemplateCode, t -> t, (a, b) -> a));
@@ -139,7 +137,6 @@ public class DqRuleTemplateService {
             seed.setFieldTypes(definition.fieldTypes());
             seed.setRemark(definition.ruleType().getDesc());
             seed.setEnabled(1);
-            seed.setDeleted(0);
             dqRuleTemplateMapper.insert(seed);
             log.warn("补齐缺失的内置规则模板目录行: {}（说明该环境的建库脚本未种全 7 类）",
                     definition.templateCode());
@@ -153,8 +150,7 @@ public class DqRuleTemplateService {
     public Page<QualityRuleTemplateVO> pageCustom(int current, int size, String ruleType, String keyword) {
         Page<DqRuleTemplate> page = new Page<>(current, size);
         LambdaQueryWrapper<DqRuleTemplate> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqRuleTemplate::getDeleted, 0)
-                .eq(DqRuleTemplate::getTemplateKind, QualityTemplateKind.CUSTOM.getCode());
+        wrapper.eq(DqRuleTemplate::getTemplateKind, QualityTemplateKind.CUSTOM.getCode());
         if (ruleType != null && !ruleType.isBlank()) {
             wrapper.eq(DqRuleTemplate::getRuleType, ruleType.trim());
         }
@@ -176,7 +172,7 @@ public class DqRuleTemplateService {
             throw new BusinessException("模板 ID 不能为空");
         }
         DqRuleTemplate template = dqRuleTemplateMapper.selectById(id);
-        if (template == null || Integer.valueOf(1).equals(template.getDeleted())) {
+        if (template == null) {
             throw new BusinessException("规则模板不存在: " + id);
         }
         return template;
@@ -185,14 +181,12 @@ public class DqRuleTemplateService {
     public void create(QualityTemplateSaveDTO dto) {
         validate(dto, true);
         long duplicated = dqRuleTemplateMapper.selectCount(new LambdaQueryWrapper<DqRuleTemplate>()
-                .eq(DqRuleTemplate::getTemplateCode, dto.getTemplateCode().trim())
-                .eq(DqRuleTemplate::getDeleted, 0));
+                .eq(DqRuleTemplate::getTemplateCode, dto.getTemplateCode().trim()));
         if (duplicated > 0) {
             throw new BusinessException("模板编码已存在: " + dto.getTemplateCode());
         }
         DqRuleTemplate entity = new DqRuleTemplate();
         applyDto(entity, dto);
-        entity.setDeleted(0);
         dqRuleTemplateMapper.insert(entity);
     }
 
@@ -205,7 +199,6 @@ public class DqRuleTemplateService {
         assertCustom(existing, "修改");
         long duplicated = dqRuleTemplateMapper.selectCount(new LambdaQueryWrapper<DqRuleTemplate>()
                 .eq(DqRuleTemplate::getTemplateCode, dto.getTemplateCode().trim())
-                .eq(DqRuleTemplate::getDeleted, 0)
                 .ne(DqRuleTemplate::getId, dto.getId()));
         if (duplicated > 0) {
             throw new BusinessException("模板编码已存在: " + dto.getTemplateCode());
@@ -218,14 +211,12 @@ public class DqRuleTemplateService {
         DqRuleTemplate existing = getById(id);
         assertCustom(existing, "删除");
         long referenced = dqRuleMapper.selectCount(new LambdaQueryWrapper<DqRule>()
-                .eq(DqRule::getTemplateId, id)
-                .eq(DqRule::getDeleted, 0));
+                .eq(DqRule::getTemplateId, id));
         if (referenced > 0) {
             throw new BusinessException("该模板已被 " + referenced + " 条监控规则引用，"
                     + "删除会导致这些规则无法渲染校验 SQL；请先解除引用");
         }
-        existing.setDeleted(1);
-        dqRuleTemplateMapper.updateById(existing);
+        dqRuleTemplateMapper.deleteById(existing.getId());
     }
 
     // ==================================================================

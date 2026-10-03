@@ -10,13 +10,13 @@
             table_type, table_comment,
             partition_columns, storage_format, compression, location, row_count, size_bytes,
             table_create_time, hot_days, cold_days, keep_days,
-            sync_time, deleted
+            sync_time
         ) VALUES (
             #{t.datasourceId}, #{t.storageEngine}, #{t.catalogName}, #{t.databaseName}, #{t.tableName},
             #{t.tableType}, #{t.tableComment},
             #{t.partitionColumns}, #{t.storageFormat}, #{t.compression}, #{t.location}, #{t.rowCount}, #{t.sizeBytes},
             #{t.tableCreateTime}, #{t.hotDays}, #{t.coldDays}, #{t.keepDays},
-            #{t.syncTime}, #{t.deleted}
+            #{t.syncTime}
         )
         ON DUPLICATE KEY UPDATE
         catalog_name = #{t.catalogName},
@@ -32,8 +32,7 @@
         hot_days = #{t.hotDays},
         cold_days = #{t.coldDays},
         keep_days = #{t.keepDays},
-        sync_time = #{t.syncTime},
-        deleted = #{t.deleted}
+        sync_time = #{t.syncTime}
     </insert>
 
 </mapper>

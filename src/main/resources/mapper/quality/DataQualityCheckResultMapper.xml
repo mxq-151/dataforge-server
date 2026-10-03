@@ -17,8 +17,7 @@
             SUM(check_record_count) AS check_record_count,
             SUM(fail_record_count) AS fail_record_count
         FROM data_quality_check_result
-        WHERE deleted = 0
-          AND fail_record_count > 0
+        WHERE fail_record_count > 0
         <if test="startTime != null">
             AND check_time &gt;= #{startTime}
         </if>

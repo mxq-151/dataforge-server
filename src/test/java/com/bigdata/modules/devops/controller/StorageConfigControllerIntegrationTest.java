@@ -105,7 +105,6 @@ class StorageConfigControllerIntegrationTest {
         config.setStorageType(type);
         config.setEndpoint("http://localhost:9000");
         config.setStatus(1);
-        config.setDeleted(0);
         storageConfigMapper.insert(config);
         return config.getId();
     }

@@ -338,8 +338,7 @@ public class AssetInventoryService {
                 tableMetadataMapper.selectList(new LambdaQueryWrapper<TableMetadata>()
                         .select(TableMetadata::getId, TableMetadata::getDatasourceId,
                                 TableMetadata::getDatabaseName, TableMetadata::getTableName,
-                                TableMetadata::getSizeBytes)
-                        .eq(TableMetadata::getDeleted, 0)));
+                                TableMetadata::getSizeBytes)));
         Map<Long, ProjectRef> projects = projectByDatasource();
 
         Map<String, AssetEnvProjectStatVO> grouped = new LinkedHashMap<>();
@@ -387,8 +386,7 @@ public class AssetInventoryService {
                         .select(TableMetadata::getId, TableMetadata::getDatasourceId,
                                 TableMetadata::getDatabaseName, TableMetadata::getTableName,
                                 TableMetadata::getSizeBytes, TableMetadata::getBrowseCnt30d,
-                                TableMetadata::getReadCnt30d, TableMetadata::getBusinessOwner)
-                        .eq(TableMetadata::getDeleted, 0)));
+                                TableMetadata::getReadCnt30d, TableMetadata::getBusinessOwner)));
         Map<Long, ProjectRef> projects = projectByDatasource();
 
         List<AssetTopAssetVO> rows = new ArrayList<>();
@@ -529,7 +527,7 @@ public class AssetInventoryService {
     private Map<Long, ProjectRef> projectByDatasource() {
         Map<Long, ProjectRef> result = new HashMap<>();
         for (DevProject project : devProjectMapper.selectList(
-                new LambdaQueryWrapper<DevProject>().eq(DevProject::getDeleted, 0))) {
+                new LambdaQueryWrapper<DevProject>()))) {
             if (project.getDefaultDatasourceId() == null) {
                 continue;
             }
@@ -559,7 +557,6 @@ public class AssetInventoryService {
      */
     private List<TableMetadata> visibleTables(String projectCode, boolean withOwnerColumns) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getDeleted, 0);
         if (withOwnerColumns) {
             wrapper.select(TableMetadata::getId, TableMetadata::getDatasourceId,
                     TableMetadata::getDatabaseName, TableMetadata::getTableName,
@@ -618,7 +615,6 @@ public class AssetInventoryService {
         long total = 0L;
         for (int start = 0; start < tableIds.size(); start += ID_CHUNK) {
             List<Long> chunk = tableIds.subList(start, Math.min(start + ID_CHUNK, tableIds.size()));
-            // column_metadata 无 deleted 列，这里不能加逻辑删除条件
             LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
             wrapper.in(ColumnMetadata::getTableMetadataId, chunk);
             Long count = columnMetadataMapper.selectCount(wrapper);

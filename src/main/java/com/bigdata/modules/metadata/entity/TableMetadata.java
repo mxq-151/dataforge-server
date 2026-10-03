@@ -37,7 +37,6 @@ public class TableMetadata {
     private Long createBy;
     private Date createTime;
     private Date updateTime;
-    private Integer deleted;
 
     // ── 资产目录（asset_catalog）治理属性 ──────────────────────────────────
     // owner/topic/visibility 的字段名与语义对齐既有 indicators 表
@@ -122,8 +121,6 @@ public class TableMetadata {
     public void setCreateTime(Date createTime) { this.createTime = createTime; }
     public Date getUpdateTime() { return updateTime; }
     public void setUpdateTime(Date updateTime) { this.updateTime = updateTime; }
-    public Integer getDeleted() { return deleted; }
-    public void setDeleted(Integer deleted) { this.deleted = deleted; }
     public String getBusinessOwner() { return businessOwner; }
     public void setBusinessOwner(String businessOwner) { this.businessOwner = businessOwner; }
     public String getTechOwner() { return techOwner; }

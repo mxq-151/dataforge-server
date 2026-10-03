@@ -132,7 +132,6 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             table.setId(existing.getId());
             table.setStorageEngine(storageEngine);
             table.setSyncTime(new Date());
-            table.setDeleted(0);
             table.setTableFingerprint(newTableFingerprint);
             table.setColumnsFingerprint(newColumnsFingerprint);
             updateById(table);
@@ -140,7 +139,6 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             table.setId(null);
             table.setStorageEngine(storageEngine);
             table.setSyncTime(new Date());
-            table.setDeleted(0);
             table.setTableFingerprint(newTableFingerprint);
             table.setColumnsFingerprint(newColumnsFingerprint);
             save(table);

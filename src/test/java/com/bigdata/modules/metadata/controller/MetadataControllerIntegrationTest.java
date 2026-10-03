@@ -106,7 +106,6 @@ class MetadataControllerIntegrationTest {
         ds.setUsername("test");
         ds.setPassword("test");
         ds.setConnectionStatus(1);
-        ds.setDeleted(0);
         datasourceConfigMapper.insert(ds);
         return ds;
     }
@@ -121,7 +120,6 @@ class MetadataControllerIntegrationTest {
         table.setTableType("MANAGED_TABLE");
         table.setTableComment(comment);
         table.setSyncTime(new Date());
-        table.setDeleted(0);
         tableMetadataMapper.insert(table);
         return table;
     }
@@ -151,7 +149,6 @@ class MetadataControllerIntegrationTest {
         tenant.setTenantName("test_tenant_" + System.currentTimeMillis());
         tenant.setTenantCode("T_" + System.currentTimeMillis());
         tenant.setStatus(1);
-        tenant.setDeleted(0);
         tenant.setPassword("123456");
         sysTenantMapper.insert(tenant);
 
@@ -160,7 +157,6 @@ class MetadataControllerIntegrationTest {
         role.setRoleCode("R_" + System.currentTimeMillis());
         role.setRoleType("CUSTOM");
         role.setStatus(1);
-        role.setDeleted(0);
         sysRoleMapper.insert(role);
 
         SysTenantUser tenantUser = new SysTenantUser();
@@ -185,7 +181,6 @@ class MetadataControllerIntegrationTest {
         tablePerm.setCanUpdate(0);
         tablePerm.setCanDelete(0);
         tablePerm.setCanExport(0);
-        tablePerm.setDeleted(0);
         sysTablePermissionMapper.insert(tablePerm);
 
         SysRoleTablePermission roleTablePerm = new SysRoleTablePermission();
@@ -444,7 +439,6 @@ class MetadataControllerIntegrationTest {
             maskingPerm.setCanDelete(0);
             maskingPerm.setCanExport(0);
             maskingPerm.setDataMaskingRule("{\"phone\":\"partial\"}");
-            maskingPerm.setDeleted(0);
             sysTablePermissionMapper.insert(maskingPerm);
             System.out.println("  已创建脱敏权限: " + maskingPerm.getId());
 

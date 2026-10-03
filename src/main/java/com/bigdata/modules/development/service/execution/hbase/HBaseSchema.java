@@ -35,8 +35,7 @@ public class HBaseSchema extends AbstractSchema {
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TableMetadata> wrapper =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         wrapper.eq(TableMetadata::getStorageEngine, DatasourceType.HBASE)
-               .eq(TableMetadata::getDatasourceId, datasourceId)
-               .eq(TableMetadata::getDeleted, 0);
+               .eq(TableMetadata::getDatasourceId, datasourceId);
         List<TableMetadata> tables = tableMetadataService.list(wrapper);
 
         for (TableMetadata tableMeta : tables) {

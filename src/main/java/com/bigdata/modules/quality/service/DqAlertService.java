@@ -38,7 +38,6 @@ public class DqAlertService {
 
     public Page<QualityAlertSubscriptionVO> page(int current, int size, Long taskId) {
         LambdaQueryWrapper<DqAlertSubscription> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqAlertSubscription::getDeleted, 0);
         if (taskId != null) {
             wrapper.eq(DqAlertSubscription::getTaskId, taskId);
         }
@@ -76,7 +75,7 @@ public class DqAlertService {
             throw new BusinessException("告警订阅必须指定质检任务");
         }
         DqTask task = dqTaskMapper.selectById(vo.getTaskId());
-        if (task == null || Integer.valueOf(1).equals(task.getDeleted())) {
+        if (task == null) {
             throw new BusinessException("质检任务不存在: " + vo.getTaskId());
         }
         String notifyOn = normalizeNotifyOn(vo.getNotifyOn());
@@ -92,19 +91,17 @@ public class DqAlertService {
         DqAlertSubscription entity;
         if (vo.getId() != null) {
             entity = dqAlertSubscriptionMapper.selectById(vo.getId());
-            if (entity == null || Integer.valueOf(1).equals(entity.getDeleted())) {
+            if (entity == null) {
                 throw new BusinessException("告警订阅不存在: " + vo.getId());
             }
         } else {
             long existing = dqAlertSubscriptionMapper.selectCount(new LambdaQueryWrapper<DqAlertSubscription>()
-                    .eq(DqAlertSubscription::getTaskId, vo.getTaskId())
-                    .eq(DqAlertSubscription::getDeleted, 0));
+                    .eq(DqAlertSubscription::getTaskId, vo.getTaskId()));
             if (existing > 0) {
                 throw new BusinessException("该任务已存在告警订阅；多条订阅会让同一次异常重复通知，"
                         + "请在已有订阅里追加渠道与接收人");
             }
             entity = new DqAlertSubscription();
-            entity.setDeleted(0);
         }
         entity.setTaskId(vo.getTaskId());
         entity.setNotifyOn(notifyOn);

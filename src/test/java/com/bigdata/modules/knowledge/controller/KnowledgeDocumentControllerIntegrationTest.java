@@ -56,7 +56,6 @@ class KnowledgeDocumentControllerIntegrationTest {
         doc.setViewCount(0);
         doc.setTags("db,test");
         doc.setDescription("数据库直接创建的文档");
-        doc.setDeleted(0);
         knowledgeDocumentMapper.insert(doc);
         return doc.getId();
     }
@@ -200,12 +199,8 @@ class KnowledgeDocumentControllerIntegrationTest {
             System.out.println("  删除文档ID: " + id);
 
             KnowledgeDocument afterDelete = knowledgeDocumentMapper.selectById(id);
-            if (afterDelete != null) {
-                assertEquals(1, afterDelete.getDeleted(), "逻辑删除后deleted应为1");
-                System.out.println("  验证: 逻辑删除成功(deleted=1) ✓");
-            } else {
-                System.out.println("  验证: 物理删除成功(记录不存在) ✓");
-            }
+            assertNull(afterDelete, "删除后记录应已被物理删除");
+            System.out.println("  验证: 物理删除成功(记录不存在) ✓");
         }
 
         @Test
@@ -532,7 +527,6 @@ class KnowledgeDocumentControllerIntegrationTest {
             doc.setStatus(0);
             doc.setSyncToRag(0);
             doc.setViewCount(0);
-            doc.setDeleted(0);
             knowledgeDocumentMapper.insert(doc);
 
             KnowledgeDocument doc2 = new KnowledgeDocument();
@@ -544,7 +538,6 @@ class KnowledgeDocumentControllerIntegrationTest {
             doc2.setStatus(0);
             doc2.setSyncToRag(0);
             doc2.setViewCount(0);
-            doc2.setDeleted(0);
             knowledgeDocumentMapper.insert(doc2);
 
             Result<Page<KnowledgeDocumentVO>> result = knowledgeDocumentController.getList(1, 10, "Kyuubi", null);
@@ -573,7 +566,6 @@ class KnowledgeDocumentControllerIntegrationTest {
             titleMatchDoc.setStatus(0);
             titleMatchDoc.setSyncToRag(0);
             titleMatchDoc.setViewCount(0);
-            titleMatchDoc.setDeleted(0);
             knowledgeDocumentMapper.insert(titleMatchDoc);
 
             KnowledgeDocument contentMatchDoc = new KnowledgeDocument();
@@ -585,7 +577,6 @@ class KnowledgeDocumentControllerIntegrationTest {
             contentMatchDoc.setStatus(0);
             contentMatchDoc.setSyncToRag(0);
             contentMatchDoc.setViewCount(0);
-            contentMatchDoc.setDeleted(0);
             knowledgeDocumentMapper.insert(contentMatchDoc);
 
             Result<Page<KnowledgeDocumentVO>> result = knowledgeDocumentController.getList(1, 10, "数据治理", null);

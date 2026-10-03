@@ -164,7 +164,6 @@ public class DqRunService {
         instance.setWarnCount(0);
         instance.setErrorCount(0);
         instance.setFailedCount(0);
-        instance.setDeleted(0);
         dqRunInstanceMapper.insert(instance);
 
         Long runId = instance.getId();
@@ -301,7 +300,6 @@ public class DqRunService {
                     legacy.setFailRecordCount(notPassed ? 1L : 0L);
                 }
                 legacy.setFailDetail(buildLegacyFailDetail(result));
-                legacy.setDeleted(0);
                 legacy.setCreateTime(now);
                 legacy.setUpdateTime(now);
                 dataQualityCheckResultMapper.insert(legacy);
@@ -372,7 +370,6 @@ public class DqRunService {
         row.setRuleId(rule.getId());
         row.setRuleName(rule.getRuleName());
         row.setRuleType(rule.getRuleType());
-        row.setDeleted(0);
         try {
             BigDecimal baseline = dqExecutionService.resolveBaseline(rule);
             DqExecutionService.Outcome outcome = dqExecutionService.execute(rule, batchDate, baseline);
@@ -426,7 +423,6 @@ public class DqRunService {
         List<DqAlertSubscription> subscriptions = dqAlertSubscriptionMapper.selectList(
                 new LambdaQueryWrapper<DqAlertSubscription>()
                         .eq(DqAlertSubscription::getTaskId, task.getId())
-                        .eq(DqAlertSubscription::getDeleted, 0)
                         .eq(DqAlertSubscription::getEnabled, 1));
         if (subscriptions.isEmpty()) {
             return;
@@ -451,7 +447,6 @@ public class DqRunService {
                         alert.setStatus("PENDING");
                         alert.setFailReason("告警通道尚未接入，已登记待发");
                         alert.setSendTime(LocalDateTime.now());
-                        alert.setDeleted(0);
                         dqAlertLogMapper.insert(alert);
                     }
                 }
@@ -478,7 +473,6 @@ public class DqRunService {
     public Page<QualityRunInstanceVO> page(int current, int size, Long taskId, String batchNo,
                                            String status, LocalDate startDate, LocalDate endDate) {
         LambdaQueryWrapper<DqRunInstance> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqRunInstance::getDeleted, 0);
         if (taskId != null) {
             wrapper.eq(DqRunInstance::getTaskId, taskId);
         }
@@ -507,7 +501,7 @@ public class DqRunService {
             throw new BusinessException("运行实例 ID 不能为空");
         }
         DqRunInstance instance = dqRunInstanceMapper.selectById(id);
-        if (instance == null || Integer.valueOf(1).equals(instance.getDeleted())) {
+        if (instance == null) {
             throw new BusinessException("运行实例不存在: " + id);
         }
         return instance;
@@ -517,7 +511,6 @@ public class DqRunService {
     public List<QualityRuleResultVO> listResults(Long runId) {
         List<DqRuleResult> rows = dqRuleResultMapper.selectList(new LambdaQueryWrapper<DqRuleResult>()
                 .eq(DqRuleResult::getRunId, runId)
-                .eq(DqRuleResult::getDeleted, 0)
                 .orderByAsc(DqRuleResult::getId));
         return rows.stream().map(DqRunService::toVO).collect(Collectors.toList());
     }
@@ -558,7 +551,6 @@ public class DqRunService {
             instance.setWarnCount(0);
             instance.setErrorCount(0);
             instance.setFailedCount(0);
-            instance.setDeleted(0);
             dqRunInstanceMapper.insert(instance);
         }
 
@@ -578,7 +570,6 @@ public class DqRunService {
         row.setCostMs(0L);
         row.setCreateTime(LocalDateTime.now());
         row.setUpdateTime(LocalDateTime.now());
-        row.setDeleted(0);
         dqRuleResultMapper.insert(row);
         recalculateRun(instance.getId());
     }
@@ -586,8 +577,7 @@ public class DqRunService {
     /** 上报场景的运行实例复用：同批次 + 同表 + 当天创建且未结束 */
     private DqRunInstance findReusableRun(String batchNo, String databaseName, String tableName) {
         LambdaQueryWrapper<DqRunInstance> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqRunInstance::getDeleted, 0)
-                .eq(DqRunInstance::getBatchNo, batchNo)
+        wrapper.eq(DqRunInstance::getBatchNo, batchNo)
                 .eq(DqRunInstance::getStatus, QualityRunStatus.RUNNING.getCode())
                 .ge(DqRunInstance::getStartTime, LocalDate.now().atStartOfDay());
         if (databaseName != null && !databaseName.isBlank()) {
@@ -605,8 +595,7 @@ public class DqRunService {
     /** 按已有结果重算运行实例的聚合计数与状态 */
     private void recalculateRun(Long runId) {
         List<DqRuleResult> rows = dqRuleResultMapper.selectList(new LambdaQueryWrapper<DqRuleResult>()
-                .eq(DqRuleResult::getRunId, runId)
-                .eq(DqRuleResult::getDeleted, 0));
+                .eq(DqRuleResult::getRunId, runId));
         int pass = 0;
         int warn = 0;
         int error = 0;
@@ -686,8 +675,7 @@ public class DqRunService {
     /** 供大盘复用：按时间窗取运行实例 */
     List<DqRunInstance> listRunsBetween(LocalDateTime from, LocalDateTime to, int limit) {
         LambdaQueryWrapper<DqRunInstance> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqRunInstance::getDeleted, 0)
-                .ge(DqRunInstance::getStartTime, from)
+        wrapper.ge(DqRunInstance::getStartTime, from)
                 .lt(DqRunInstance::getStartTime, to)
                 .orderByDesc(DqRunInstance::getId);
         return dqRunInstanceMapper.selectList(wrapper.last("LIMIT " + limit));
@@ -699,7 +687,6 @@ public class DqRunService {
             return List.of();
         }
         return dqRuleResultMapper.selectList(new LambdaQueryWrapper<DqRuleResult>()
-                .eq(DqRuleResult::getDeleted, 0)
                 .in(DqRuleResult::getRunId, runIds)
                 .ne(DqRuleResult::getStatus, QualityCheckStatus.PASS.getCode()));
     }

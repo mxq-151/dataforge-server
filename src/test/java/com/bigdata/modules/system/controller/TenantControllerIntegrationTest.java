@@ -93,7 +93,6 @@ class TenantControllerIntegrationTest {
         user.setRealName("Test User " + username);
         user.setStatus(1);
         user.setIsAdmin(0);
-        user.setDeleted(0);
         sysUserMapper.insert(user);
         return user;
     }
@@ -103,7 +102,6 @@ class TenantControllerIntegrationTest {
         role.setRoleName(roleName);
         role.setRoleCode(roleCode);
         role.setStatus(1);
-        role.setDeleted(0);
         sysRoleMapper.insert(role);
         return role;
     }
@@ -288,7 +286,7 @@ class TenantControllerIntegrationTest {
             assertEquals(200, result.getCode(), "删除租户应成功");
 
             SysTenant deleted = sysTenantService.getTenantById(created.getId());
-            assertNull(deleted, "删除后租户不应存在（逻辑删除）");
+            assertNull(deleted, "删除后租户不应存在");
         }
     }
 

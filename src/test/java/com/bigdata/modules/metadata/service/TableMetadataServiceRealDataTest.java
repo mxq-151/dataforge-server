@@ -64,7 +64,6 @@ class TableMetadataServiceRealDataTest {
         table.setTableType("MANAGED_TABLE");
         table.setTableComment(comment);
         table.setSyncTime(new Date());
-        table.setDeleted(0);
         return table;
     }
 

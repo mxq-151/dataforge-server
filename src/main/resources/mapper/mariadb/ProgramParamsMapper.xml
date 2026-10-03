@@ -7,10 +7,10 @@
     <insert id="upsert" databaseId="mariadb">
         INSERT INTO dev_program_params
           (project_id, file_path, engine, datasources, jar_dependency_catalogs,
-           run_params, compute_resources, remark, create_time, update_time, deleted)
+           run_params, compute_resources, remark, create_time, update_time)
         VALUES
           (#{entity.projectId}, #{entity.filePath}, #{entity.engine}, #{entity.datasources}, #{entity.jarDependencyCatalogs},
-           #{entity.runParams}, #{entity.computeResources}, #{entity.remark}, NOW(), NOW(), 0)
+           #{entity.runParams}, #{entity.computeResources}, #{entity.remark}, NOW(), NOW())
         ON DUPLICATE KEY UPDATE
           engine = #{entity.engine},
           datasources = #{entity.datasources},

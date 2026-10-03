@@ -84,7 +84,6 @@ class DataAccessPermissionRealDataTest {
         user.setPassword("encoded_password");
         user.setRealName("Test User " + username);
         user.setStatus(1);
-        user.setDeleted(0);
         sysUserMapper.insert(user);
         System.out.println("Created test user: id=" + user.getId() + ", username=" + username);
         return user;
@@ -97,7 +96,6 @@ class DataAccessPermissionRealDataTest {
         tenant.setStatus(1);
         tenant.setOwnerId(ownerId);
         tenant.setPassword("tenant_password");
-        tenant.setDeleted(0);
         sysTenantMapper.insert(tenant);
         System.out.println("Created test tenant: id=" + tenant.getId() + ", name=" + tenantName);
         return tenant;
@@ -117,7 +115,6 @@ class DataAccessPermissionRealDataTest {
         role.setRoleName(roleName);
         role.setRoleCode(roleCode);
         role.setStatus(1);
-        role.setDeleted(0);
         sysRoleMapper.insert(role);
         System.out.println("Created test role: id=" + role.getId() + ", name=" + roleName + ", code=" + roleCode);
         return role;
@@ -150,7 +147,6 @@ class DataAccessPermissionRealDataTest {
         permission.setCanExport(canExport);
         permission.setRowFilterSql(rowFilterSql);
         permission.setDataMaskingRule(dataMaskingRule);
-        permission.setDeleted(0);
         sysTablePermissionMapper.insert(permission);
         System.out.println("Created table permission: id=" + permission.getId() +
                 ", name=" + permissionName + ", db=" + databaseName +
@@ -176,7 +172,6 @@ class DataAccessPermissionRealDataTest {
         permission.setFilePath(filePath);
         permission.setPermissionType(permissionType);
         permission.setRecursive(recursive);
-        permission.setDeleted(0);
         sysFilePermissionMapper.insert(permission);
         System.out.println("Created file permission: id=" + permission.getId() +
                 ", path=" + filePath + ", type=" + permissionType +

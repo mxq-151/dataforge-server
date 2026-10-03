@@ -51,7 +51,6 @@ public class DqTaskService {
 
     public Page<QualityTaskVO> page(int current, int size, String keyword, String triggerType, Boolean enabled) {
         LambdaQueryWrapper<DqTask> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqTask::getDeleted, 0);
         if (keyword != null && !keyword.isBlank()) {
             String kw = keyword.trim();
             wrapper.and(w -> w.like(DqTask::getTaskName, kw)
@@ -77,7 +76,7 @@ public class DqTaskService {
             throw new BusinessException("任务 ID 不能为空");
         }
         DqTask task = dqTaskMapper.selectById(id);
-        if (task == null || Integer.valueOf(1).equals(task.getDeleted())) {
+        if (task == null) {
             throw new BusinessException("质检任务不存在: " + id);
         }
         return task;
@@ -91,7 +90,6 @@ public class DqTaskService {
     public Long create(QualityTaskSaveDTO dto) {
         DqTask task = new DqTask();
         applyDto(task, dto, true);
-        task.setDeleted(0);
         dqTaskMapper.insert(task);
         replaceRuleBindings(task.getId(), dto.getRuleIds());
         return task.getId();
@@ -112,17 +110,11 @@ public class DqTaskService {
 
     @Transactional
     public void delete(Long id) {
-        DqTask existing = getById(id);
-        existing.setDeleted(1);
-        dqTaskMapper.updateById(existing);
-        // 关联关系一并逻辑删除：留着会让「规则是否被任务引用」的判断出错
-        List<DqTaskRuleRel> rels = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
-                .eq(DqTaskRuleRel::getTaskId, id)
-                .eq(DqTaskRuleRel::getDeleted, 0));
-        for (DqTaskRuleRel rel : rels) {
-            rel.setDeleted(1);
-            dqTaskRuleRelMapper.updateById(rel);
-        }
+        getById(id);
+        dqTaskMapper.deleteById(id);
+        // 关联关系一并物理删除：留着会让「规则是否被任务引用」的判断出错
+        dqTaskRuleRelMapper.delete(new LambdaQueryWrapper<DqTaskRuleRel>()
+                .eq(DqTaskRuleRel::getTaskId, id));
     }
 
     /** 启停任务：停用后调度侧不再触发，但历史运行记录保留 */
@@ -155,7 +147,6 @@ public class DqTaskService {
     public List<DqRule> resolveRules(Long taskId) {
         List<DqTaskRuleRel> rels = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
                 .eq(DqTaskRuleRel::getTaskId, taskId)
-                .eq(DqTaskRuleRel::getDeleted, 0)
                 .orderByAsc(DqTaskRuleRel::getId));
         List<Long> ruleIds = rels.stream().map(DqTaskRuleRel::getRuleId).collect(Collectors.toList());
         return dqRuleService.listByIds(ruleIds).stream()
@@ -173,14 +164,12 @@ public class DqTaskService {
                 : ruleIds.stream().filter(java.util.Objects::nonNull).collect(Collectors.toCollection(HashSet::new));
 
         List<DqTaskRuleRel> current = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
-                .eq(DqTaskRuleRel::getTaskId, taskId)
-                .eq(DqTaskRuleRel::getDeleted, 0));
+                .eq(DqTaskRuleRel::getTaskId, taskId));
         Set<Long> existing = current.stream().map(DqTaskRuleRel::getRuleId).collect(Collectors.toSet());
 
         for (DqTaskRuleRel rel : current) {
             if (!target.contains(rel.getRuleId())) {
-                rel.setDeleted(1);
-                dqTaskRuleRelMapper.updateById(rel);
+                dqTaskRuleRelMapper.deleteById(rel.getId());
             }
         }
         for (Long ruleId : target) {
@@ -192,7 +181,6 @@ public class DqTaskService {
             DqTaskRuleRel rel = new DqTaskRuleRel();
             rel.setTaskId(taskId);
             rel.setRuleId(ruleId);
-            rel.setDeleted(0);
             dqTaskRuleRelMapper.insert(rel);
         }
     }

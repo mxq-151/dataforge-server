@@ -43,8 +43,7 @@ public class MetadataAgentController {
             @RequestParam(required = false) String keyword) {
 
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getDeleted, 0)
-               .eq(TableMetadata::getDatabaseName, databaseName);
+        wrapper.eq(TableMetadata::getDatabaseName, databaseName);
 
         if (keyword != null && !keyword.isEmpty()) {
             wrapper.and(w -> w.like(TableMetadata::getTableName, keyword)
@@ -69,8 +68,7 @@ public class MetadataAgentController {
             @RequestParam(required = true) String tableName) {
 
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getDeleted, 0)
-               .eq(TableMetadata::getDatabaseName, databaseName)
+        wrapper.eq(TableMetadata::getDatabaseName, databaseName)
                .eq(TableMetadata::getTableName, tableName);
         TableMetadata table = tableMetadataService.getOne(wrapper, false);
 
@@ -90,8 +88,7 @@ public class MetadataAgentController {
             @RequestParam(defaultValue = "2000") int limit) {
 
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getDeleted, 0)
-               .and(w -> w.like(TableMetadata::getTableName, keyword)
+        wrapper.and(w -> w.like(TableMetadata::getTableName, keyword)
                        .or().like(TableMetadata::getTableComment, keyword));
 
         if (databaseName != null && !databaseName.isEmpty()) {

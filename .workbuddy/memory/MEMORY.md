@@ -25,7 +25,7 @@
 ## 代码风格 / 持久层
 
 - **无 Lombok**，getter/setter 手写（`Boolean` 包装类型用 `getIsXxx`/`setIsXxx`）。
-- **无全局 `@TableLogic`**：查询需手动 `.eq(Xxx::getDeleted, 0)`。
+- **无逻辑删除**：全表已移除 `deleted` 列与相关字段，删除一律物理删除（`deleteById`），查询无需再加 `deleted` 过滤。
 - 分页用 MyBatis-Plus `Page`，返回体字段为 `records`/`total`（前端依赖）。
 - 方言族收敛在各自模块的 `*Dialect`（如 `DqDialect`：MYSQL/POSTGRESQL/HIVE），
   引用符 / 转字符串 / LIMIT 差异不散落到业务代码。

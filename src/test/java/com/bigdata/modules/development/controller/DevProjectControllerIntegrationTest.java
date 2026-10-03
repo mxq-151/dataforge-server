@@ -108,7 +108,6 @@ class DevProjectControllerIntegrationTest {
         project.setOwnerId(1L);
         project.setOwnerName("测试负责人");
         project.setStatus(1);
-        project.setDeleted(0);
         devProjectMapper.insert(project);
         return project.getId();
     }
@@ -251,12 +250,8 @@ class DevProjectControllerIntegrationTest {
             System.out.println("  删除项目ID: " + id);
 
             DevProject afterDelete = devProjectMapper.selectById(id);
-            if (afterDelete != null) {
-                assertEquals(1, afterDelete.getDeleted(), "逻辑删除后deleted应为1");
-                System.out.println("  验证: 逻辑删除成功(deleted=1) ✓");
-            } else {
-                System.out.println("  验证: 物理删除成功(记录不存在) ✓");
-            }
+            assertNull(afterDelete, "删除后记录应已被物理删除");
+            System.out.println("  验证: 物理删除成功(记录不存在) ✓");
         }
     }
 
@@ -369,7 +364,6 @@ class DevProjectControllerIntegrationTest {
             role.setRoleName("测试角色-有项目权限_" + System.currentTimeMillis());
             role.setRoleCode("TEST_ROLE_HAS_PERM_" + System.currentTimeMillis());
             role.setStatus(1);
-            role.setDeleted(0);
             sysRoleMapper.insert(role);
 
             grantProjectPermissionToRole(role.getId(), projectId,
@@ -825,14 +819,12 @@ class DevProjectControllerIntegrationTest {
                 active.setProjectName("ActiveProj_" + i);
                 active.setProjectCode("AP_" + i);
                 active.setStatus(1);
-                active.setDeleted(0);
                 devProjectMapper.insert(active);
 
                 DevProject inactive = new DevProject();
                 inactive.setProjectName("InactiveProj_" + i);
                 inactive.setProjectCode("IP_" + i);
                 inactive.setStatus(0);
-                inactive.setDeleted(0);
                 devProjectMapper.insert(inactive);
             }
 
@@ -861,21 +853,18 @@ class DevProjectControllerIntegrationTest {
             target.setProjectName(uniqueName);
             target.setProjectCode(uniqueCode);
             target.setStatus(1);
-            target.setDeleted(0);
             devProjectMapper.insert(target);
 
             DevProject other1 = new DevProject();
             other1.setProjectName("CombinedSearch_Other");
             other1.setProjectCode("OTHER_" + java.util.UUID.randomUUID().toString().replace("-", ""));
             other1.setStatus(1);
-            other1.setDeleted(0);
             devProjectMapper.insert(other1);
 
             DevProject other2 = new DevProject();
             other2.setProjectName("Other_Proj");
             other2.setProjectCode(uniqueCode2);
             other2.setStatus(0);
-            other2.setDeleted(0);
             devProjectMapper.insert(other2);
 
             Result<Page<DevProjectVO>> result = devProjectController.getList(1, 10,

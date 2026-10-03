@@ -103,7 +103,6 @@ public class TableStorageSizeRefreshService {
                 wrapper.eq(TableMetadata::getDatasourceId, config.getId())
                         .eq(TableMetadata::getDatabaseName, databaseName)
                         .eq(TableMetadata::getTableName, entry.getKey())
-                        .eq(TableMetadata::getDeleted, 0)
                         .set(TableMetadata::getSizeBytes, size);
                 updated += tableMetadataMapper.update(null, wrapper);
             }

@@ -191,7 +191,6 @@ public class AssetCatalogService {
     /** 实时回退：直接读 table_metadata 并即时解析表名（快照不可用时使用） */
     private List<TreeRow> liveTreeRows(Long datasourceId, String databaseName, String keyword) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getDeleted, 0);
         if (datasourceId != null) {
             wrapper.eq(TableMetadata::getDatasourceId, datasourceId);
         }
@@ -424,8 +423,7 @@ public class AssetCatalogService {
 
     private List<AssetSearchHitVO> searchTablesLive(String keyword, String layerCode, String domainCode) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getDeleted, 0)
-                .and(w -> w.like(TableMetadata::getTableName, keyword)
+        wrapper.and(w -> w.like(TableMetadata::getTableName, keyword)
                         .or().like(TableMetadata::getTableComment, keyword));
         List<TableMetadata> matched = tableMetadataMapper.selectList(wrapper);
         if (matched.size() > SEARCH_SCAN_CAP) {
@@ -563,7 +561,6 @@ public class AssetCatalogService {
         }
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(TableMetadata::getTableName)
-                .eq(TableMetadata::getDeleted, 0)
                 .like(TableMetadata::getTableName, keyword.trim())
                 .orderByAsc(TableMetadata::getTableName);
         List<TableMetadata> matched = tableMetadataMapper.selectList(wrapper);
@@ -692,8 +689,7 @@ public class AssetCatalogService {
 
     private List<AssetTagVO> tagsOf(Long tableId) {
         LambdaQueryWrapper<AssetTagRel> relWrapper = new LambdaQueryWrapper<>();
-        relWrapper.eq(AssetTagRel::getDeleted, 0)
-                .eq(AssetTagRel::getAssetType, "table")
+        relWrapper.eq(AssetTagRel::getAssetType, "table")
                 .eq(AssetTagRel::getAssetId, tableId);
         List<AssetTagRel> rels = assetTagRelMapper.selectList(relWrapper);
         if (rels.isEmpty()) {
@@ -707,9 +703,6 @@ public class AssetCatalogService {
         }
         List<AssetTagVO> result = new ArrayList<>();
         for (AssetTag tag : assetTagMapper.selectBatchIds(tagIds)) {
-            if (tag.getDeleted() != null && tag.getDeleted() == 1) {
-                continue;
-            }
             AssetTagVO vo = new AssetTagVO();
             vo.setId(tag.getId());
             vo.setTagCode(tag.getTagCode());
@@ -792,8 +785,7 @@ public class AssetCatalogService {
         TableMetadata table = requireVisibleTable(tableId);
 
         LambdaQueryWrapper<DqRule> ruleWrapper = new LambdaQueryWrapper<>();
-        ruleWrapper.eq(DqRule::getDeleted, 0)
-                .eq(DqRule::getDatabaseName, table.getDatabaseName())
+        ruleWrapper.eq(DqRule::getDatabaseName, table.getDatabaseName())
                 .eq(DqRule::getTableName, table.getTableName());
         List<DqRule> rules = dqRuleMapper.selectList(ruleWrapper);
         // 数据源已绑定的规则再按数据源筛一次，避免同名库表串味
@@ -829,8 +821,7 @@ public class AssetCatalogService {
         vo.setLastRunTime(formatTime(lastRun.getEndTime() != null ? lastRun.getEndTime() : lastRun.getStartTime()));
 
         LambdaQueryWrapper<DqRuleResult> resultWrapper = new LambdaQueryWrapper<>();
-        resultWrapper.eq(DqRuleResult::getDeleted, 0)
-                .eq(DqRuleResult::getRunId, lastRun.getId());
+        resultWrapper.eq(DqRuleResult::getRunId, lastRun.getId());
         List<DqRuleResult> results = dqRuleResultMapper.selectList(resultWrapper);
 
         int errorCount = 0;
@@ -1050,7 +1041,7 @@ public class AssetCatalogService {
             throw new BusinessException("tableId 不能为空");
         }
         TableMetadata table = tableMetadataMapper.selectById(tableId);
-        if (table == null || (table.getDeleted() != null && table.getDeleted() == 1)) {
+        if (table == null) {
             throw new BusinessException(404, "资产不存在");
         }
         permissionSupport.checkSelectable(table);

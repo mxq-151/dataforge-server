@@ -89,7 +89,6 @@ class PgSyntaxValidationRealDataTest {
         config.setUsername(PG_USER);
         config.setPassword(aesUtils.encryptStored(PG_PASSWORD));
         config.setConnectionStatus(1);
-        config.setDeleted(0);
         datasourceConfigMapper.insert(config);
         assertNotNull(config.getId(), "数据源配置应写入成功");
         return config;

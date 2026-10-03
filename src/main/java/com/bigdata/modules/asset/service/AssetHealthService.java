@@ -162,8 +162,6 @@ public class AssetHealthService {
      * column_metadata 是平台最大的元数据表，字段行数量是表数量的几十倍。</p>
      */
     private Map<Long, Integer> loadColumnGap(List<Long> tableIds) {
-        // 注意：column_metadata 没有 deleted 列（物理同步表，增删由同步任务处理），
-        // 因此这里不能加 deleted 条件，否则 SQL 直接报未知列。
         LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(ColumnMetadata::getTableMetadataId, ColumnMetadata::getColumnComment)
                 .in(ColumnMetadata::getTableMetadataId, tableIds);
@@ -186,7 +184,6 @@ public class AssetHealthService {
         LambdaQueryWrapper<AssetDoc> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(AssetDoc::getTableMetadataId)
                 .in(AssetDoc::getTableMetadataId, tableIds)
-                .eq(AssetDoc::getDeleted, 0)
                 .isNotNull(AssetDoc::getContent)
                 .ne(AssetDoc::getContent, "");
         Set<Long> result = new HashSet<>();
@@ -201,8 +198,7 @@ public class AssetHealthService {
     private Set<Long> loadTablesWithTag(List<Long> tableIds) {
         LambdaQueryWrapper<AssetTagRel> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(AssetTagRel::getTableMetadataId)
-                .in(AssetTagRel::getTableMetadataId, tableIds)
-                .eq(AssetTagRel::getDeleted, 0);
+                .in(AssetTagRel::getTableMetadataId, tableIds);
         Set<Long> result = new HashSet<>();
         for (AssetTagRel rel : assetTagRelMapper.selectList(wrapper)) {
             if (rel.getTableMetadataId() != null) {
@@ -222,8 +218,7 @@ public class AssetHealthService {
     private Map<Long, Integer> countEnabledRules(List<TableMetadata> tables) {
         LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(DqRule::getId, DqRule::getDatasourceId, DqRule::getDatasourceName,
-                        DqRule::getDatabaseName, DqRule::getTableName, DqRule::getEnabled)
-                .eq(DqRule::getDeleted, 0);
+                        DqRule::getDatabaseName, DqRule::getTableName, DqRule::getEnabled);
         List<DqRule> rules = dqRuleMapper.selectList(wrapper);
         if (rules.isEmpty()) {
             return Map.of();

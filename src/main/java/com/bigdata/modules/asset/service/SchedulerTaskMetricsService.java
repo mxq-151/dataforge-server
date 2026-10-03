@@ -320,7 +320,6 @@ public class SchedulerTaskMetricsService {
 
     private List<SchedulerTaskRunDaily> window(LocalDate from, LocalDate to) {
         return taskRunDailyMapper.selectList(new LambdaQueryWrapper<SchedulerTaskRunDaily>()
-                .eq(SchedulerTaskRunDaily::getDeleted, 0)
                 .ge(SchedulerTaskRunDaily::getStatDate, from)
                 .le(SchedulerTaskRunDaily::getStatDate, to));
     }
@@ -363,7 +362,6 @@ public class SchedulerTaskMetricsService {
             entity.setSuccessCount(successCount);
             entity.setFailedCount(failedCount);
             entity.setTotalDurationSeconds(totalDurationSeconds);
-            entity.setDeleted(0);
             return entity;
         }
     }

@@ -84,7 +84,7 @@ public class AssetProducerService {
             throw new BusinessException("tableId 不能为空");
         }
         TableMetadata table = tableMetadataMapper.selectById(tableId);
-        if (table == null || (table.getDeleted() != null && table.getDeleted() == 1)) {
+        if (table == null) {
             throw new BusinessException(404, "资产不存在");
         }
         permissionSupport.checkSelectable(table);

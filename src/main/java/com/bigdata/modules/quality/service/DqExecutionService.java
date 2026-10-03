@@ -236,7 +236,6 @@ public class DqExecutionService {
 
         LambdaQueryWrapper<DqRuleResult> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(DqRuleResult::getRuleId, rule.getId())
-                .eq(DqRuleResult::getDeleted, 0)
                 .isNotNull(DqRuleResult::getMetricValue)
                 .ne(DqRuleResult::getMetricValue, "");
         wrapper.orderByDesc(DqRuleResult::getId);

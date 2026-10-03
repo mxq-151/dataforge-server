@@ -61,7 +61,6 @@ public class DqRuleService {
     public Page<QualityRuleVO> page(int current, int size, Long datasourceId, String databaseName,
                                     String tableName, String columnName, String ruleType, Boolean enabled) {
         LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqRule::getDeleted, 0);
         if (datasourceId != null) {
             wrapper.eq(DqRule::getDatasourceId, datasourceId);
         }
@@ -93,7 +92,7 @@ public class DqRuleService {
             throw new BusinessException("规则 ID 不能为空");
         }
         DqRule rule = dqRuleMapper.selectById(id);
-        if (rule == null || Integer.valueOf(1).equals(rule.getDeleted())) {
+        if (rule == null) {
             throw new BusinessException("监控规则不存在: " + id);
         }
         return rule;
@@ -106,7 +105,6 @@ public class DqRuleService {
         }
         List<DqRule> rules = dqRuleMapper.selectBatchIds(ids.stream().distinct().collect(Collectors.toList()));
         Map<Long, DqRule> byId = rules.stream()
-                .filter(r -> !Integer.valueOf(1).equals(r.getDeleted()))
                 .collect(Collectors.toMap(DqRule::getId, r -> r, (a, b) -> a));
         List<DqRule> ordered = new ArrayList<>();
         for (Long id : ids) {
@@ -122,7 +120,6 @@ public class DqRuleService {
     public List<QualityRuleVO> listByTask(Long taskId) {
         List<DqTaskRuleRel> rels = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
                 .eq(DqTaskRuleRel::getTaskId, taskId)
-                .eq(DqTaskRuleRel::getDeleted, 0)
                 .orderByAsc(DqTaskRuleRel::getId));
         List<Long> ruleIds = rels.stream().map(DqTaskRuleRel::getRuleId).collect(Collectors.toList());
         return listByIds(ruleIds).stream().map(DqRuleService::toVO).collect(Collectors.toList());
@@ -135,7 +132,6 @@ public class DqRuleService {
     public Long create(QualityRuleSaveDTO dto) {
         DqRule rule = new DqRule();
         applyDto(rule, dto, true);
-        rule.setDeleted(0);
         validateRenderable(rule);
         dqRuleMapper.insert(rule);
         return rule.getId();
@@ -155,14 +151,12 @@ public class DqRuleService {
     public void delete(Long id) {
         DqRule existing = getById(id);
         long bound = dqTaskRuleRelMapper.selectCount(new LambdaQueryWrapper<DqTaskRuleRel>()
-                .eq(DqTaskRuleRel::getRuleId, id)
-                .eq(DqTaskRuleRel::getDeleted, 0));
+                .eq(DqTaskRuleRel::getRuleId, id));
         if (bound > 0) {
             throw new BusinessException("该规则已被 " + bound + " 个质检任务引用，"
                     + "请先从任务中移除再删除");
         }
-        existing.setDeleted(1);
-        dqRuleMapper.updateById(existing);
+        dqRuleMapper.deleteById(existing.getId());
     }
 
     /**
@@ -182,7 +176,7 @@ public class DqRuleService {
             throw new BusinessException("请至少选择一个目标表");
         }
         DqRuleTemplate template = dqRuleTemplateMapper.selectById(dto.getTemplateId());
-        if (template == null || Integer.valueOf(1).equals(template.getDeleted())) {
+        if (template == null) {
             throw new BusinessException("规则模板不存在: " + dto.getTemplateId());
         }
         QualityRuleType ruleType = QualityRuleType.fromCode(template.getRuleType());
@@ -234,7 +228,6 @@ public class DqRuleService {
             rule.setDisposeMode(normalizeDisposeMode(defaults.getDisposeMode()));
             rule.setOwnerName(defaults.getOwnerName());
             rule.setEnabled(Boolean.FALSE.equals(defaults.getEnabled()) ? 0 : 1);
-            rule.setDeleted(0);
 
             validateRenderable(rule);
             dqRuleMapper.insert(rule);
@@ -388,7 +381,7 @@ public class DqRuleService {
     private void bindTemplate(DqRule rule, QualityRuleSaveDTO dto, QualityRuleType ruleType) {
         if (dto.getTemplateId() != null) {
             DqRuleTemplate template = dqRuleTemplateMapper.selectById(dto.getTemplateId());
-            if (template == null || Integer.valueOf(1).equals(template.getDeleted())) {
+            if (template == null) {
                 throw new BusinessException("规则模板不存在: " + dto.getTemplateId());
             }
             if (!ruleType.getCode().equals(template.getRuleType())) {
@@ -414,7 +407,6 @@ public class DqRuleService {
         return dqRuleTemplateMapper.selectOne(new LambdaQueryWrapper<DqRuleTemplate>()
                 .eq(DqRuleTemplate::getTemplateCode, templateCode)
                 .eq(DqRuleTemplate::getTemplateKind, QualityTemplateKind.BUILTIN.getCode())
-                .eq(DqRuleTemplate::getDeleted, 0)
                 .last("LIMIT 1"));
     }
 
@@ -435,8 +427,7 @@ public class DqRuleService {
 
     private boolean exists(QualityBatchTargetDTO target, String columnName, String ruleType) {
         LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqRule::getDeleted, 0)
-                .eq(DqRule::getRuleType, ruleType)
+        wrapper.eq(DqRule::getRuleType, ruleType)
                 .eq(DqRule::getTableName, target.getTableName());
         if (target.getDatabaseName() != null && !target.getDatabaseName().isBlank()) {
             wrapper.eq(DqRule::getDatabaseName, target.getDatabaseName());

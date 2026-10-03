@@ -90,7 +90,6 @@ class AuthControllerIntegrationTest {
         user.setRealName("Test User " + username);
         user.setStatus(1);
         user.setIsAdmin(isAdmin);
-        user.setDeleted(0);
         sysUserMapper.insert(user);
         return user;
     }
@@ -102,7 +101,6 @@ class AuthControllerIntegrationTest {
         tenant.setStatus(1);
         tenant.setOwnerId(ownerId);
         tenant.setPassword("tenant_password");
-        tenant.setDeleted(0);
         sysTenantMapper.insert(tenant);
         return tenant;
     }
@@ -120,7 +118,6 @@ class AuthControllerIntegrationTest {
         role.setRoleName(roleName);
         role.setRoleCode(roleCode);
         role.setStatus(1);
-        role.setDeleted(0);
         sysRoleMapper.insert(role);
         return role;
     }
@@ -139,7 +136,6 @@ class AuthControllerIntegrationTest {
         perm.setMenuName("Menu " + menuCode);
         perm.setParentId(0L);
         perm.setSortOrder(1);
-        perm.setDeleted(0);
         sysMenuPermissionMapper.insert(perm);
         return perm;
     }
@@ -157,7 +153,6 @@ class AuthControllerIntegrationTest {
         project.setProjectCode(code);
         project.setOwnerId(1L);
         project.setStatus(1);
-        project.setDeleted(0);
         devProjectMapper.insert(project);
         return project;
     }
@@ -396,7 +391,6 @@ class AuthControllerIntegrationTest {
             disabledUser.setRealName("Disabled User");
             disabledUser.setStatus(0);
             disabledUser.setIsAdmin(0);
-            disabledUser.setDeleted(0);
             sysUserMapper.insert(disabledUser);
 
             LoginDTO loginDTO = new LoginDTO();

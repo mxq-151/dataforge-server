@@ -139,14 +139,12 @@ public class DqOverviewService {
             return null;
         }
         List<DqTask> tasks = dqTaskMapper.selectList(new LambdaQueryWrapper<DqTask>()
-                .eq(DqTask::getDeleted, 0)
                 .eq(DqTask::getProjectCode, projectCode.trim()));
         if (tasks.isEmpty()) {
             return Set.of();
         }
         List<Long> taskIds = tasks.stream().map(DqTask::getId).collect(Collectors.toList());
         return dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
-                        .eq(DqTaskRuleRel::getDeleted, 0)
                         .in(DqTaskRuleRel::getTaskId, taskIds))
                 .stream()
                 .map(DqTaskRuleRel::getRuleId)
@@ -155,7 +153,6 @@ public class DqOverviewService {
 
     private List<DqRule> loadRules(Set<Long> scopedRuleIds) {
         LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(DqRule::getDeleted, 0);
         if (scopedRuleIds != null) {
             if (scopedRuleIds.isEmpty()) {
                 return List.of();
@@ -181,13 +178,11 @@ public class DqOverviewService {
     /**
      * 「应配置规则的表数」= 已纳管元数据的表数（去重 库.表）。
      *
-     * <p>见类注释：真正的「核心表」口径需要调度系统的产出任务视图，当前以元数据纳管范围替代。
-     * 只取未逻辑删除的元数据，避免把已下线表算进分母。</p>
+     * <p>见类注释：真正的「核心表」口径需要调度系统的产出任务视图，当前以元数据纳管范围替代。</p>
      */
     private int countManagedTables() {
         List<TableMetadata> tables = tableMetadataMapper.selectList(new LambdaQueryWrapper<TableMetadata>()
-                .select(TableMetadata::getDatabaseName, TableMetadata::getTableName)
-                .eq(TableMetadata::getDeleted, 0));
+                .select(TableMetadata::getDatabaseName, TableMetadata::getTableName));
         return (int) tables.stream()
                 .map(t -> DqBatchSupport.tableKey(t.getDatabaseName(), t.getTableName()))
                 .filter(key -> !key.isEmpty())
@@ -314,7 +309,6 @@ public class DqOverviewService {
         }
         List<TableMetadata> tables = tableMetadataMapper.selectList(new LambdaQueryWrapper<TableMetadata>()
                 .select(TableMetadata::getTableName, TableMetadata::getBusinessOwner, TableMetadata::getTechOwner)
-                .eq(TableMetadata::getDeleted, 0)
                 .in(TableMetadata::getTableName, tableNames));
         Map<String, String> owners = new LinkedHashMap<>();
         for (TableMetadata table : tables) {

@@ -71,7 +71,6 @@ public class MetadataAnnotationGapService {
         int effectiveLimit = limit == null || limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
 
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(TableMetadata::getDeleted, 0);
         if (datasourceId != null) {
             wrapper.eq(TableMetadata::getDatasourceId, datasourceId);
         }

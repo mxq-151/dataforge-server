@@ -104,7 +104,6 @@ public class AssetCatalogSnapshotService {
     public LocalDate latestStatDate() {
         LambdaQueryWrapper<AssetCatalogDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(AssetCatalogDaily::getStatDate)
-                .eq(AssetCatalogDaily::getDeleted, 0)
                 .orderByDesc(AssetCatalogDaily::getStatDate);
         Page<AssetCatalogDaily> page = new Page<>(1, 1, false);
         List<AssetCatalogDaily> rows = assetCatalogDailyMapper.selectPage(page, wrapper).getRecords();
@@ -124,7 +123,6 @@ public class AssetCatalogSnapshotService {
     public List<LocalDate> listStatDates() {
         LambdaQueryWrapper<AssetCatalogDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(AssetCatalogDaily::getStatDate)
-                .eq(AssetCatalogDaily::getDeleted, 0)
                 .groupBy(AssetCatalogDaily::getStatDate)
                 .orderByAsc(AssetCatalogDaily::getStatDate);
         List<LocalDate> dates = new ArrayList<>();
@@ -145,8 +143,7 @@ public class AssetCatalogSnapshotService {
     public List<AssetCatalogDaily> load(LocalDate statDate, Long datasourceId,
                                         String databaseName, String keyword) {
         LambdaQueryWrapper<AssetCatalogDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetCatalogDaily::getDeleted, 0)
-                .eq(AssetCatalogDaily::getStatDate, statDate);
+        wrapper.eq(AssetCatalogDaily::getStatDate, statDate);
         if (datasourceId != null) {
             wrapper.eq(AssetCatalogDaily::getDatasourceId, datasourceId);
         }
@@ -176,7 +173,7 @@ public class AssetCatalogSnapshotService {
     @Transactional
     public SnapshotResult snapshot(LocalDate statDate) {
         List<TableMetadata> tables = tableMetadataMapper.selectList(
-                new LambdaQueryWrapper<TableMetadata>().eq(TableMetadata::getDeleted, 0));
+                new LambdaQueryWrapper<TableMetadata>());
 
         deleteByStatDate(statDate);
         if (tables.isEmpty()) {
@@ -280,7 +277,6 @@ public class AssetCatalogSnapshotService {
         row.setReadCount30d(table.getReadCnt30d());
         row.setBookmarkCount(table.getBookmarkCnt());
         row.setLastAccessTime(table.getLastAccessTime());
-        row.setDeleted(0);
         return row;
     }
 
@@ -290,7 +286,6 @@ public class AssetCatalogSnapshotService {
 
     /** 每张表的字段数 */
     private Map<Long, Integer> loadColumnCounts() {
-        // column_metadata 无 deleted 列（物理同步表），不能加逻辑删除条件
         List<ColumnMetadata> rows = columnMetadataMapper.selectList(
                 new LambdaQueryWrapper<ColumnMetadata>().select(ColumnMetadata::getTableMetadataId));
         Map<Long, Integer> counts = new HashMap<>();
@@ -307,7 +302,6 @@ public class AssetCatalogSnapshotService {
         List<AssetTagRel> rows = assetTagRelMapper.selectList(
                 new LambdaQueryWrapper<AssetTagRel>()
                         .select(AssetTagRel::getTableMetadataId)
-                        .eq(AssetTagRel::getDeleted, 0)
                         .eq(AssetTagRel::getAssetType, "table"));
         Map<Long, Integer> counts = new HashMap<>();
         for (AssetTagRel row : rows) {
@@ -323,7 +317,6 @@ public class AssetCatalogSnapshotService {
         List<AssetDoc> rows = assetDocMapper.selectList(
                 new LambdaQueryWrapper<AssetDoc>()
                         .select(AssetDoc::getTableMetadataId)
-                        .eq(AssetDoc::getDeleted, 0)
                         .isNotNull(AssetDoc::getContent)
                         .ne(AssetDoc::getContent, ""));
         Set<Long> result = new HashSet<>();

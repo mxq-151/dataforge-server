@@ -25,7 +25,6 @@ CREATE TABLE IF NOT EXISTS asset_category (
   remark VARCHAR(500),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_category_code ON asset_category (category_code);
@@ -43,7 +42,6 @@ CREATE TABLE IF NOT EXISTS asset_bookmark (
   table_metadata_id BIGINT,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_bookmark ON asset_bookmark (user_id, asset_type, asset_id);
@@ -88,7 +86,6 @@ CREATE TABLE IF NOT EXISTS asset_doc (
   update_by VARCHAR(100),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_doc_table ON asset_doc (table_metadata_id);
@@ -104,7 +101,6 @@ CREATE TABLE IF NOT EXISTS asset_doc_history (
   update_by VARCHAR(100),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_asset_doc_history_table ON asset_doc_history (table_metadata_id);
@@ -120,7 +116,6 @@ CREATE TABLE IF NOT EXISTS asset_tag (
   enabled TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_tag_code ON asset_tag (tag_code);
@@ -136,7 +131,6 @@ CREATE TABLE IF NOT EXISTS asset_tag_rel (
   table_metadata_id BIGINT,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_tag_rel ON asset_tag_rel (tag_id, asset_type, asset_id);
@@ -157,7 +151,6 @@ CREATE TABLE IF NOT EXISTS asset_usage_daily (
   relate_count INT NOT NULL DEFAULT 0,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_usage_daily ON asset_usage_daily (asset_type, asset_id, stat_date);
@@ -204,7 +197,6 @@ CREATE TABLE IF NOT EXISTS asset_catalog_daily (
   last_access_time TIMESTAMP,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_asset_catalog_daily ON asset_catalog_daily (stat_date, table_metadata_id);
@@ -234,7 +226,6 @@ CREATE TABLE IF NOT EXISTS scheduler_task_run_daily (
   total_duration_seconds BIGINT NOT NULL DEFAULT 0,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_scheduler_task_run_daily ON scheduler_task_run_daily (stat_date, project_code, workflow_name, node_name, task_type);
@@ -291,7 +282,6 @@ CREATE TABLE IF NOT EXISTS data_quality_check_result (
   rule_name VARCHAR(200),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dqc_datasource_id ON data_quality_check_result (datasource_id);
@@ -321,7 +311,6 @@ CREATE TABLE IF NOT EXISTS datasource_config (
   create_by BIGINT,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_datasource_config_type ON datasource_config (datasource_type);
@@ -374,7 +363,6 @@ CREATE TABLE IF NOT EXISTS dev_jar_dependency (
   auto_choose TINYINT NOT NULL DEFAULT 0,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dev_jar_dependency_source ON dev_jar_dependency (source);
@@ -393,7 +381,6 @@ CREATE TABLE IF NOT EXISTS dev_program_params (
   remark VARCHAR(500),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (project_id, file_path)
 );
 COMMENT ON TABLE dev_program_params IS '程序运行参数表';
@@ -414,7 +401,6 @@ CREATE TABLE IF NOT EXISTS dev_project (
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_by BIGINT,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_project_code ON dev_project (project_code);
@@ -476,7 +462,6 @@ CREATE TABLE IF NOT EXISTS dq_rule_template (
   enabled TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_dq_template_code ON dq_rule_template (template_code);
@@ -514,7 +499,6 @@ CREATE TABLE IF NOT EXISTS dq_rule (
   enabled TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dq_rule_table ON dq_rule (database_name, table_name);
@@ -551,7 +535,6 @@ CREATE TABLE IF NOT EXISTS dq_run_instance (
   failed_count INT NOT NULL DEFAULT 0,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dq_run_task ON dq_run_instance (task_id);
@@ -582,7 +565,6 @@ CREATE TABLE IF NOT EXISTS dq_rule_result (
   cost_ms BIGINT,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dq_result_run ON dq_rule_result (run_id);
@@ -615,7 +597,6 @@ CREATE TABLE IF NOT EXISTS dq_alert_log (
   send_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dq_alert_log_run ON dq_alert_log (run_id);
@@ -635,7 +616,6 @@ CREATE TABLE IF NOT EXISTS dq_alert_subscription (
   enabled TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dq_alert_sub_task ON dq_alert_subscription (task_id);
@@ -661,7 +641,6 @@ CREATE TABLE IF NOT EXISTS dq_task (
   enabled TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_dq_task_table ON dq_task (database_name, table_name);
@@ -677,7 +656,6 @@ CREATE TABLE IF NOT EXISTS dq_task_rule_rel (
   rule_id BIGINT NOT NULL,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_dq_task_rule ON dq_task_rule_rel (task_id, rule_id);
@@ -738,7 +716,6 @@ CREATE TABLE IF NOT EXISTS knowledge_document (
   description VARCHAR(500),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_document_doc_type ON knowledge_document (doc_type);
@@ -796,7 +773,6 @@ CREATE TABLE IF NOT EXISTS storage_config (
   status TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 COMMENT ON TABLE storage_config IS '存储配置表';
@@ -812,7 +788,6 @@ CREATE TABLE IF NOT EXISTS sys_file_permission (
   description VARCHAR(500),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_sys_file_permission_storage_config_id ON sys_file_permission (storage_config_id);
@@ -832,7 +807,6 @@ CREATE TABLE IF NOT EXISTS sys_menu_permission (
   status TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_menu_code ON sys_menu_permission (menu_code);
@@ -849,7 +823,6 @@ CREATE TABLE IF NOT EXISTS sys_role (
   status TINYINT NOT NULL DEFAULT 1,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_role_code ON sys_role (role_code);
@@ -923,7 +896,6 @@ CREATE TABLE IF NOT EXISTS sys_table_permission (
   description VARCHAR(500),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE INDEX IF NOT EXISTS idx_sys_table_permission_scope ON sys_table_permission (permission_scope);
@@ -967,7 +939,6 @@ CREATE TABLE IF NOT EXISTS sys_tenant (
   password VARCHAR(200),
   create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  deleted INT DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_tenant_code ON sys_tenant (tenant_code);
@@ -1014,7 +985,6 @@ CREATE TABLE IF NOT EXISTS sys_user (
   last_login_time TIMESTAMP,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uk_username ON sys_user (username);
@@ -1057,7 +1027,6 @@ CREATE TABLE IF NOT EXISTS table_metadata (
   create_by BIGINT,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  deleted TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
   CONSTRAINT chk_table_metadata_visibility CHECK (visibility IN ('public','internal','restricted'))
 );
@@ -1084,11 +1053,11 @@ COMMENT ON COLUMN table_metadata.last_access_time IS '最近访问时间(埋点�
 --    测试数据（test 用户/角色/菜单/租户/数据源/授权）见 testdata/
 -- ------------------------------------------------------------------
 
-INSERT INTO sys_user (id, username, password, real_name, email, phone, status, is_admin, last_login_time, create_time, update_time, deleted) VALUES
-(1,'admin','357f3724ff339b2a1602c390d59498fd','超级管理员','admin@example.com','13800000000',1,1,'2026-07-13 15:53:37','2026-05-07 09:08:00','2026-06-04 14:48:05',0);
+INSERT INTO sys_user (id, username, password, real_name, email, phone, status, is_admin, last_login_time, create_time, update_time) VALUES
+(1,'admin','357f3724ff339b2a1602c390d59498fd','超级管理员','admin@example.com','13800000000',1,1,'2026-07-13 15:53:37','2026-05-07 09:08:00','2026-06-04 14:48:05');
 
-INSERT INTO sys_role (id, role_name, role_code, role_type, description, status, create_time, update_time, deleted) VALUES
-(1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03',0);
+INSERT INTO sys_role (id, role_name, role_code, role_type, description, status, create_time, update_time) VALUES
+(1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03');
 
 -- ------------------------------------------------------------------
 -- 平台级参考数据（非测试数据，任何部署都需要，故放在本脚本而非 testdata）

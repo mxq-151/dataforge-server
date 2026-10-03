@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS `asset_category` (
   `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_asset_category_code` (`category_code`),
   KEY `idx_asset_category_kind` (`category_kind`),
@@ -42,7 +41,6 @@ CREATE TABLE IF NOT EXISTS `asset_bookmark` (
   `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_asset_bookmark` (`user_id`,`asset_type`,`asset_id`),
   KEY `idx_asset_bookmark_user` (`user_id`),
@@ -83,7 +81,6 @@ CREATE TABLE IF NOT EXISTS `asset_doc` (
   `update_by` varchar(100) DEFAULT NULL COMMENT '最后修改人',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_asset_doc_table` (`table_metadata_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产使用说明表(markdown，版本历史在 asset_doc_history)';
@@ -97,7 +94,6 @@ CREATE TABLE IF NOT EXISTS `asset_doc_history` (
   `update_by` varchar(100) DEFAULT NULL COMMENT '修改人',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_asset_doc_history_table` (`table_metadata_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产使用说明版本历史表';
@@ -112,7 +108,6 @@ CREATE TABLE IF NOT EXISTS `asset_tag` (
   `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_asset_tag_code` (`tag_code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产标签定义表';
@@ -126,7 +121,6 @@ CREATE TABLE IF NOT EXISTS `asset_tag_rel` (
   `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_asset_tag_rel` (`tag_id`,`asset_type`,`asset_id`),
   KEY `idx_asset_tag_rel_asset` (`asset_type`,`asset_id`),
@@ -146,7 +140,6 @@ CREATE TABLE IF NOT EXISTS `asset_usage_daily` (
   `relate_count` int NOT NULL DEFAULT 0 COMMENT '被关联数(引用该资产的规则/指标等)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_asset_usage_daily` (`asset_type`,`asset_id`,`stat_date`),
   KEY `idx_asset_usage_table` (`table_metadata_id`),
@@ -190,7 +183,6 @@ CREATE TABLE IF NOT EXISTS `asset_catalog_daily` (
   `last_access_time` datetime DEFAULT NULL COMMENT '最近访问时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_asset_catalog_daily` (`stat_date`,`table_metadata_id`),
   KEY `idx_asset_catalog_daily_layer` (`stat_date`,`layer_code`),
@@ -215,7 +207,6 @@ CREATE TABLE IF NOT EXISTS `scheduler_task_run_daily` (
   `total_duration_seconds` bigint NOT NULL DEFAULT 0 COMMENT '累计运行时长(秒)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_scheduler_task_run_daily` (`stat_date`,`project_code`,`workflow_name`,`node_name`,`task_type`),
   KEY `idx_scheduler_task_run_date` (`stat_date`),
@@ -265,7 +256,6 @@ CREATE TABLE IF NOT EXISTS `data_quality_check_result` (
   `rule_name` varchar(200) DEFAULT NULL COMMENT '规则名',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_dqc_datasource_id` (`datasource_id`),
   KEY `idx_dqc_table` (`database_name`,`table_name`),
@@ -291,7 +281,6 @@ CREATE TABLE IF NOT EXISTS `datasource_config` (
   `create_by` bigint DEFAULT NULL COMMENT '创建人',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_datasource_type` (`datasource_type`),
   KEY `idx_datasource_storage_engine` (`storage_engine`),
@@ -342,7 +331,6 @@ CREATE TABLE IF NOT EXISTS `dev_jar_dependency` (
   `auto_choose` tinyint NOT NULL DEFAULT '0' COMMENT '是否自动选择(0-否 1-是)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_source` (`source`),
   KEY `idx_scope` (`scope`)
@@ -360,7 +348,6 @@ CREATE TABLE IF NOT EXISTS `dev_program_params` (
   `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`project_id`,`file_path`)
 ) ENGINE=InnoDB COMMENT='程序运行参数表';
 
@@ -380,7 +367,6 @@ CREATE TABLE IF NOT EXISTS `dev_project` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` bigint DEFAULT NULL COMMENT '更新人ID',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_project_code` (`project_code`),
   KEY `idx_owner_id` (`owner_id`),
@@ -440,7 +426,6 @@ CREATE TABLE IF NOT EXISTS `dq_rule_template` (
   `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_dq_template_code` (`template_code`),
   KEY `idx_dq_template_rule_type` (`rule_type`)
@@ -475,7 +460,6 @@ CREATE TABLE IF NOT EXISTS `dq_rule` (
   `enabled` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_dq_rule_table` (`database_name`,`table_name`),
   KEY `idx_dq_rule_type` (`rule_type`),
@@ -505,7 +489,6 @@ CREATE TABLE IF NOT EXISTS `dq_run_instance` (
   `failed_count` int NOT NULL DEFAULT '0' COMMENT 'SQL 未跑通的规则数',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_dq_run_task` (`task_id`),
   KEY `idx_dq_run_batch` (`batch_no`),
@@ -532,7 +515,6 @@ CREATE TABLE IF NOT EXISTS `dq_rule_result` (
   `cost_ms` bigint DEFAULT NULL COMMENT '耗时(毫秒)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_dq_result_run` (`run_id`),
   KEY `idx_dq_result_rule` (`rule_id`),
@@ -560,7 +542,6 @@ CREATE TABLE IF NOT EXISTS `dq_alert_log` (
   `send_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_dq_alert_log_run` (`run_id`),
   KEY `idx_dq_alert_log_task` (`task_id`),
@@ -577,7 +558,6 @@ CREATE TABLE IF NOT EXISTS `dq_alert_subscription` (
   `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_dq_alert_sub_task` (`task_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)';
@@ -601,7 +581,6 @@ CREATE TABLE IF NOT EXISTS `dq_task` (
   `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_dq_task_table` (`database_name`,`table_name`),
   KEY `idx_dq_task_trigger` (`trigger_type`)
@@ -614,7 +593,6 @@ CREATE TABLE IF NOT EXISTS `dq_task_rule_rel` (
   `rule_id` bigint NOT NULL COMMENT '监控规则ID',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT 0 COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_dq_task_rule` (`task_id`,`rule_id`),
   KEY `idx_dq_task_rule_rule` (`rule_id`)
@@ -671,7 +649,6 @@ CREATE TABLE IF NOT EXISTS `knowledge_document` (
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_doc_type` (`doc_type`),
   KEY `idx_status` (`status`),
@@ -729,7 +706,6 @@ CREATE TABLE IF NOT EXISTS `storage_config` (
   `status` tinyint NOT NULL DEFAULT '1' COMMENT '状态(0-禁用 1-正常)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='存储配置表';
 
@@ -744,7 +720,6 @@ CREATE TABLE IF NOT EXISTS `sys_file_permission` (
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_storage_config_id` (`storage_config_id`),
   KEY `idx_file_path` (`file_path`(255))
@@ -764,7 +739,6 @@ CREATE TABLE IF NOT EXISTS `sys_menu_permission` (
   `status` tinyint NOT NULL DEFAULT '1' COMMENT '状态(0-禁用 1-启用)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_menu_code` (`menu_code`),
   KEY `idx_parent_id` (`parent_id`)
@@ -780,7 +754,6 @@ CREATE TABLE IF NOT EXISTS `sys_role` (
   `status` tinyint NOT NULL DEFAULT '1' COMMENT '状态(0-禁用 1-启用)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_role_code` (`role_code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='角色表';
@@ -849,7 +822,6 @@ CREATE TABLE IF NOT EXISTS `sys_table_permission` (
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   KEY `idx_permission_scope` (`permission_scope`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='库表CRUD权限表';
@@ -890,7 +862,6 @@ CREATE TABLE IF NOT EXISTS `sys_tenant` (
   `password` varchar(200) DEFAULT NULL COMMENT '租户密码(AES加密)',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` int DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_tenant_code` (`tenant_code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='租户表';
@@ -934,7 +905,6 @@ CREATE TABLE IF NOT EXISTS `sys_user` (
   `last_login_time` datetime DEFAULT NULL COMMENT '最后登录时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_username` (`username`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='用户表';
@@ -976,7 +946,6 @@ CREATE TABLE IF NOT EXISTS `table_metadata` (
   `create_by` bigint DEFAULT NULL COMMENT '创建人',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  `deleted` tinyint NOT NULL DEFAULT '0' COMMENT '逻辑删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_table_storage` (`storage_engine`,`database_name`,`table_name`),
   KEY `idx_database_name` (`database_name`),
@@ -991,11 +960,11 @@ CREATE TABLE IF NOT EXISTS `table_metadata` (
 --    测试数据（test 用户/角色/菜单/租户/数据源/授权）见 testdata/
 -- ------------------------------------------------------------------
 
-INSERT INTO `sys_user` (`id`,`username`,`password`,`real_name`,`email`,`phone`,`status`,`is_admin`,`last_login_time`,`create_time`,`update_time`,`deleted`) VALUES
-(1,'admin','357f3724ff339b2a1602c390d59498fd','超级管理员','admin@example.com','13800000000',1,1,'2026-07-13 15:53:37','2026-05-07 09:08:00','2026-06-04 14:48:05',0);
+INSERT INTO `sys_user` (`id`,`username`,`password`,`real_name`,`email`,`phone`,`status`,`is_admin`,`last_login_time`,`create_time`,`update_time`) VALUES
+(1,'admin','357f3724ff339b2a1602c390d59498fd','超级管理员','admin@example.com','13800000000',1,1,'2026-07-13 15:53:37','2026-05-07 09:08:00','2026-06-04 14:48:05');
 
-INSERT INTO `sys_role` (`id`,`role_name`,`role_code`,`role_type`,`description`,`status`,`create_time`,`update_time`,`deleted`) VALUES
-(1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03',0);
+INSERT INTO `sys_role` (`id`,`role_name`,`role_code`,`role_type`,`description`,`status`,`create_time`,`update_time`) VALUES
+(1,'超级管理员','SUPER_ADMIN','SUPER_ADMIN','拥有系统所有权限的超级管理员',1,'2026-07-13 15:17:00','2026-07-13 15:54:03');
 
 -- ------------------------------------------------------------------
 -- 平台级参考数据（非测试数据，任何部署都需要，故放在本脚本而非 testdata）

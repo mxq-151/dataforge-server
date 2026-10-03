@@ -231,8 +231,7 @@ public class AssetGovernanceService {
         List<Long> tagIds = new ArrayList<>();
         if (!tagCodes.isEmpty()) {
             LambdaQueryWrapper<AssetTag> tagWrapper = new LambdaQueryWrapper<>();
-            tagWrapper.eq(AssetTag::getDeleted, 0)
-                    .eq(AssetTag::getEnabled, 1)
+            tagWrapper.eq(AssetTag::getEnabled, 1)
                     .in(AssetTag::getTagCode, tagCodes);
             List<AssetTag> tags = assetTagMapper.selectList(tagWrapper);
             if (tags.size() != tagCodes.size()) {
@@ -250,8 +249,7 @@ public class AssetGovernanceService {
         }
 
         LambdaQueryWrapper<AssetTagRel> existingWrapper = new LambdaQueryWrapper<>();
-        existingWrapper.eq(AssetTagRel::getDeleted, 0)
-                .eq(AssetTagRel::getAssetType, "table")
+        existingWrapper.eq(AssetTagRel::getAssetType, "table")
                 .eq(AssetTagRel::getAssetId, tableId);
         List<AssetTagRel> existing = assetTagRelMapper.selectList(existingWrapper);
 
@@ -274,7 +272,6 @@ public class AssetGovernanceService {
                 rel.setAssetType("table");
                 rel.setAssetId(tableId);
                 rel.setTableMetadataId(tableId);
-                rel.setDeleted(0);
                 assetTagRelMapper.insert(rel);
             }
         }
@@ -284,8 +281,7 @@ public class AssetGovernanceService {
     /** 某张表的标签列表 */
     public List<AssetTagRel> tagRelsOfTable(Long tableId) {
         LambdaQueryWrapper<AssetTagRel> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetTagRel::getDeleted, 0)
-                .eq(AssetTagRel::getAssetType, "table")
+        wrapper.eq(AssetTagRel::getAssetType, "table")
                 .eq(AssetTagRel::getAssetId, tableId);
         return assetTagRelMapper.selectList(wrapper);
     }
@@ -331,7 +327,6 @@ public class AssetGovernanceService {
             doc.setContent(content);
             doc.setVersion(1);
             doc.setUpdateBy(operator);
-            doc.setDeleted(0);
             assetDocMapper.insert(doc);
             archive(table.getId(), 1, content, operator);
             log.info("新建资产使用说明: table={}.{}", table.getDatabaseName(), table.getTableName());
@@ -358,8 +353,7 @@ public class AssetGovernanceService {
     public List<AssetDocHistoryVO> listDocHistory(Long tableId) {
         TableMetadata table = requireVisibleTable(tableId);
         LambdaQueryWrapper<AssetDocHistory> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetDocHistory::getDeleted, 0)
-                .eq(AssetDocHistory::getTableMetadataId, table.getId())
+        wrapper.eq(AssetDocHistory::getTableMetadataId, table.getId())
                 .orderByDesc(AssetDocHistory::getVersion);
         List<AssetDocHistoryVO> result = new ArrayList<>();
         for (AssetDocHistory row : assetDocHistoryMapper.selectList(wrapper)) {
@@ -384,14 +378,12 @@ public class AssetGovernanceService {
         history.setVersion(version);
         history.setContent(content);
         history.setUpdateBy(updateBy);
-        history.setDeleted(0);
         assetDocHistoryMapper.insert(history);
     }
 
     private AssetDoc findDoc(Long tableMetadataId) {
         LambdaQueryWrapper<AssetDoc> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetDoc::getDeleted, 0)
-                .eq(AssetDoc::getTableMetadataId, tableMetadataId);
+        wrapper.eq(AssetDoc::getTableMetadataId, tableMetadataId);
         return assetDocMapper.selectOne(wrapper);
     }
 
@@ -432,7 +424,7 @@ public class AssetGovernanceService {
             throw new BusinessException("tableId 不能为空");
         }
         TableMetadata table = tableMetadataMapper.selectById(tableId);
-        if (table == null || (table.getDeleted() != null && table.getDeleted() == 1)) {
+        if (table == null) {
             throw new BusinessException(404, "资产不存在");
         }
         permissionSupport.checkSelectable(table);

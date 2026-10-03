@@ -75,8 +75,7 @@ public class AssetBookmarkService {
         }
 
         LambdaQueryWrapper<AssetBookmark> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetBookmark::getDeleted, 0)
-                .eq(AssetBookmark::getUserId, userId)
+        wrapper.eq(AssetBookmark::getUserId, userId)
                 .orderByDesc(AssetBookmark::getId);
         Page<AssetBookmark> bookmarkPage = assetBookmarkMapper.selectPage(page, wrapper);
 
@@ -92,8 +91,7 @@ public class AssetBookmarkService {
             return false;
         }
         LambdaQueryWrapper<AssetBookmark> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetBookmark::getDeleted, 0)
-                .eq(AssetBookmark::getUserId, userId)
+        wrapper.eq(AssetBookmark::getUserId, userId)
                 .eq(AssetBookmark::getAssetType, assetType)
                 .eq(AssetBookmark::getAssetId, assetId);
         return assetBookmarkMapper.selectCount(wrapper) > 0;
@@ -105,8 +103,7 @@ public class AssetBookmarkService {
             return 0;
         }
         LambdaQueryWrapper<AssetBookmark> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetBookmark::getDeleted, 0)
-                .eq(AssetBookmark::getAssetType, "table")
+        wrapper.eq(AssetBookmark::getAssetType, "table")
                 .eq(AssetBookmark::getAssetId, tableMetadataId);
         Long count = assetBookmarkMapper.selectCount(wrapper);
         return count == null ? 0 : count.intValue();
@@ -151,7 +148,6 @@ public class AssetBookmarkService {
         bookmark.setAssetType(assetType);
         bookmark.setAssetId(assetId);
         bookmark.setTableMetadataId(tableMetadataId);
-        bookmark.setDeleted(0);
         assetBookmarkMapper.insert(bookmark);
 
         if (tableMetadataId != null) {
@@ -173,16 +169,15 @@ public class AssetBookmarkService {
         }
 
         LambdaQueryWrapper<AssetBookmark> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(AssetBookmark::getDeleted, 0)
-                .eq(AssetBookmark::getUserId, userId)
+        wrapper.eq(AssetBookmark::getUserId, userId)
                 .eq(AssetBookmark::getAssetType, type)
                 .eq(AssetBookmark::getAssetId, assetId);
         AssetBookmark existing = assetBookmarkMapper.selectOne(wrapper);
         if (existing == null) {
             return;
         }
-        // 逻辑删除：唯一键 (user_id, asset_type, asset_id) 不区分删除状态，
-        // 因此这里做物理删除，否则用户「取消后重新收藏」会撞唯一键。
+        // 唯一键 (user_id, asset_type, asset_id) 不区分删除状态，
+        // 因此这里必须是物理删除，否则用户「取消后重新收藏」会撞唯一键。
         assetBookmarkMapper.deleteById(existing.getId());
 
         if (existing.getTableMetadataId() != null) {

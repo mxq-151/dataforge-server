@@ -57,7 +57,6 @@ class UserControllerIntegrationTest {
         user.setRealName("Test User " + username);
         user.setStatus(1);
         user.setIsAdmin(isAdmin);
-        user.setDeleted(0);
         sysUserMapper.insert(user);
         return user;
     }
@@ -322,7 +321,6 @@ class UserControllerIntegrationTest {
             disabledUser.setRealName("Disabled User");
             disabledUser.setStatus(0);
             disabledUser.setIsAdmin(0);
-            disabledUser.setDeleted(0);
             sysUserMapper.insert(disabledUser);
 
             setUpSecurityContext(adminUser.getId(), "test_admin_status", Arrays.asList("ROLE_ADMIN"));
@@ -611,7 +609,6 @@ class UserControllerIntegrationTest {
             disabledUser.setRealName("Disabled Target");
             disabledUser.setStatus(0);
             disabledUser.setIsAdmin(0);
-            disabledUser.setDeleted(0);
             sysUserMapper.insert(disabledUser);
 
             setUpSecurityContext(adminUser.getId(), "test_admin_enable", Arrays.asList("ROLE_ADMIN"));
