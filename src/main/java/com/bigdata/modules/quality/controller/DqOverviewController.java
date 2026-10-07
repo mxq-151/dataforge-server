@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.quality.service.DqAlertService;
 import com.bigdata.modules.quality.service.DqOverviewService;
+import com.bigdata.modules.quality.vo.QualityAlertLogVO;
 import com.bigdata.modules.quality.vo.QualityAlertSubscriptionVO;
 import com.bigdata.modules.quality.vo.QualityOverviewVO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,5 +55,22 @@ public class DqOverviewController {
     public Result<Void> saveAlertSubscription(@RequestBody QualityAlertSubscriptionVO vo) {
         dqAlertService.save(vo);
         return Result.success();
+    }
+
+    /**
+     * 站内告警箱：分页查告警记录。
+     *
+     * <p>「站内记录」（INBOX）渠道落 {@code dq_alert_log} 即送达，因此这张表就是可用的告警箱；
+     * Webhook 投递结果（SENT / FAILED + 原因）也落在这里。没有这个入口时，
+     * 告警记录写进去却没有任何界面能看到。</p>
+     */
+    @GetMapping("/alert/log")
+    public Result<Page<QualityAlertLogVO>> listAlertLogs(
+            @RequestParam(defaultValue = "1") int current,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) Long taskId,
+            @RequestParam(required = false) String channel,
+            @RequestParam(required = false) String status) {
+        return Result.success(dqAlertService.pageLogs(current, size, taskId, channel, status));
     }
 }

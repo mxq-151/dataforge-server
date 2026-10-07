@@ -527,7 +527,7 @@ public class AssetInventoryService {
     private Map<Long, ProjectRef> projectByDatasource() {
         Map<Long, ProjectRef> result = new HashMap<>();
         for (DevProject project : devProjectMapper.selectList(
-                new LambdaQueryWrapper<DevProject>()))) {
+                new LambdaQueryWrapper<DevProject>())) {
             if (project.getDefaultDatasourceId() == null) {
                 continue;
             }

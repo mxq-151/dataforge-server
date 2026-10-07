@@ -5,10 +5,12 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.quality.dto.QualityBatchByTemplateDTO;
 import com.bigdata.modules.quality.dto.QualityBatchTargetDTO;
+import com.bigdata.modules.quality.dto.QualityRuleRegisterDTO;
 import com.bigdata.modules.quality.dto.QualityRuleSaveDTO;
 import com.bigdata.modules.quality.dto.QualityTestRunDTO;
 import com.bigdata.modules.quality.entity.DqRule;
 import com.bigdata.modules.quality.entity.DqRuleTemplate;
+import com.bigdata.modules.quality.entity.DqTask;
 import com.bigdata.modules.quality.entity.DqTaskRuleRel;
 import com.bigdata.modules.quality.enums.QualityCompareMode;
 import com.bigdata.modules.quality.enums.QualityDisposeMode;
@@ -16,7 +18,9 @@ import com.bigdata.modules.quality.enums.QualityRuleType;
 import com.bigdata.modules.quality.enums.QualityTemplateKind;
 import com.bigdata.modules.quality.mapper.DqRuleMapper;
 import com.bigdata.modules.quality.mapper.DqRuleTemplateMapper;
+import com.bigdata.modules.quality.mapper.DqTaskMapper;
 import com.bigdata.modules.quality.mapper.DqTaskRuleRelMapper;
+import com.bigdata.modules.quality.vo.QualityRuleRegisterVO;
 import com.bigdata.modules.quality.vo.QualityRuleResultVO;
 import com.bigdata.modules.quality.vo.QualityRuleVO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +56,9 @@ public class DqRuleService {
     private DqTaskRuleRelMapper dqTaskRuleRelMapper;
 
     @Autowired
+    private DqTaskMapper dqTaskMapper;
+
+    @Autowired
     private DqExecutionService dqExecutionService;
 
     // ==================================================================
@@ -59,7 +66,8 @@ public class DqRuleService {
     // ==================================================================
 
     public Page<QualityRuleVO> page(int current, int size, Long datasourceId, String databaseName,
-                                    String tableName, String columnName, String ruleType, Boolean enabled) {
+                                    String tableName, String columnName, String ruleType, Boolean enabled,
+                                    String ruleName) {
         LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
         if (datasourceId != null) {
             wrapper.eq(DqRule::getDatasourceId, datasourceId);
@@ -75,6 +83,10 @@ public class DqRuleService {
         }
         if (ruleType != null && !ruleType.isBlank()) {
             wrapper.eq(DqRule::getRuleType, ruleType.trim());
+        }
+        // 规则名精确匹配：登记前查「这条规则在不在平台」用得上（模糊检索会一次捞回一堆）
+        if (ruleName != null && !ruleName.isBlank()) {
+            wrapper.eq(DqRule::getRuleName, ruleName.trim());
         }
         if (enabled != null) {
             wrapper.eq(DqRule::getEnabled, enabled ? 1 : 0);
@@ -135,6 +147,114 @@ public class DqRuleService {
         validateRenderable(rule);
         dqRuleMapper.insert(rule);
         return rule.getId();
+    }
+
+    /**
+     * 规则登记（幂等）。
+     *
+     * <p>解决的是「关联靠规则名字符串」的根问题：设计文档定名 → 平台登记 → S3 实现 → 回传结果，
+     * 中间任何一环改名都会断链。登记一次拿到 {@code ruleId} 后，后续实现与回传都用 ID 关联，
+     * 名字退化为展示字段。</p>
+     *
+     * <h3>与 create 的区别</h3>
+     * <ul>
+     *   <li>幂等：判定键是「规则名 + 库 + 表」，与 {@code DqRunService.resolveRuleId} 的反查口径
+     *       <b>故意保持一致</b> —— 否则会出现「登记到 A、回传匹配到 B」这种最难查的错配。</li>
+     *   <li>已存在<b>不覆盖</b>：平台里的阈值可能已被人手工调过，登记动作不该把它冲掉。
+     *       需要同步改动请走 {@code PUT /quality/rule} 或界面编辑。</li>
+     *   <li>校验与模板绑定完全复用 create 的路径（7 类规则类型、字段级必须给字段、跨表必须给对照表、
+     *       模板按规则类型自动绑定），不另起一套。</li>
+     * </ul>
+     *
+     * @return 登记回执；dto 缺少判定键（规则名 / 库 / 表）时抛业务异常
+     */
+    public QualityRuleRegisterVO register(QualityRuleRegisterDTO dto) {
+        if (dto == null) {
+            throw new BusinessException("登记内容不能为空");
+        }
+        if (dto.getRuleName() == null || dto.getRuleName().isBlank()) {
+            throw new BusinessException("登记必须提供规则名");
+        }
+        if (dto.getTableName() == null || dto.getTableName().isBlank()) {
+            throw new BusinessException("登记必须提供监控表名");
+        }
+
+        DqRule existing = findByIdentity(dto.getRuleName(), dto.getDatabaseName(), dto.getTableName());
+        DqRule rule;
+        boolean created;
+        if (existing != null) {
+            rule = existing;
+            created = false;
+        } else {
+            rule = new DqRule();
+            applyDto(rule, dto, true);
+            validateRenderable(rule);
+            dqRuleMapper.insert(rule);
+            created = true;
+        }
+
+        Long boundTaskId = bindTask(rule, dto.getTaskId());
+        QualityRuleRegisterVO vo = toRegisterVO(rule, created);
+        vo.setTaskId(boundTaskId);
+        return vo;
+    }
+
+    /**
+     * 把规则挂到质检任务上（幂等）。
+     *
+     * <p>不挂任务的规则在平台里是"孤儿"：不会被调度执行、按项目维度的统计看不到、
+     * 按任务配置的告警订阅也订不到 —— 而且这些都是静默的。所以登记时给个入口顺手挂上。</p>
+     *
+     * @return 实际挂载到的任务 ID；未请求挂载时返回 {@code null}
+     */
+    private Long bindTask(DqRule rule, Long taskId) {
+        if (taskId == null) {
+            return null;
+        }
+        DqTask task = dqTaskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BusinessException("质检任务不存在: " + taskId);
+        }
+        long existing = dqTaskRuleRelMapper.selectCount(new LambdaQueryWrapper<DqTaskRuleRel>()
+                .eq(DqTaskRuleRel::getTaskId, taskId)
+                .eq(DqTaskRuleRel::getRuleId, rule.getId()));
+        if (existing == 0) {
+            DqTaskRuleRel rel = new DqTaskRuleRel();
+            rel.setTaskId(taskId);
+            rel.setRuleId(rule.getId());
+            dqTaskRuleRelMapper.insert(rel);
+        }
+        return taskId;
+    }
+
+    /**
+     * 按「规则名 + 库 + 表」定位规则。
+     *
+     * <p>三段限定的理由与回传反查相同：规则名只在单个设计文档内唯一，跨库表可能重名。
+     * 返回 {@code null} 表示未登记，由调用方决定是创建还是放弃。</p>
+     */
+    private DqRule findByIdentity(String ruleName, String databaseName, String tableName) {
+        LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<DqRule>()
+                .eq(DqRule::getRuleName, ruleName.trim());
+        if (databaseName != null && !databaseName.isBlank()) {
+            wrapper.eq(DqRule::getDatabaseName, databaseName.trim());
+        }
+        if (tableName != null && !tableName.isBlank()) {
+            wrapper.eq(DqRule::getTableName, tableName.trim());
+        }
+        wrapper.orderByDesc(DqRule::getId);
+        List<DqRule> found = dqRuleMapper.selectList(wrapper.last("LIMIT 1"));
+        return found.isEmpty() ? null : found.get(0);
+    }
+
+    private static QualityRuleRegisterVO toRegisterVO(DqRule rule, boolean created) {
+        QualityRuleRegisterVO vo = new QualityRuleRegisterVO();
+        vo.setRuleId(rule.getId());
+        vo.setRuleName(rule.getRuleName());
+        vo.setRuleType(rule.getRuleType());
+        vo.setTemplateCode(rule.getTemplateCode());
+        vo.setCreated(created);
+        return vo;
     }
 
     public void update(QualityRuleSaveDTO dto) {

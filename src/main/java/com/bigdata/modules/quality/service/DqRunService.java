@@ -12,6 +12,7 @@ import com.bigdata.modules.quality.entity.DqRule;
 import com.bigdata.modules.quality.entity.DqRuleResult;
 import com.bigdata.modules.quality.entity.DqRunInstance;
 import com.bigdata.modules.quality.entity.DqTask;
+import com.bigdata.modules.quality.entity.DqTaskRuleRel;
 import com.bigdata.modules.quality.entity.DataQualityCheckResult;
 import com.bigdata.modules.quality.enums.QualityCheckStatus;
 import com.bigdata.modules.quality.enums.QualityDisposeMode;
@@ -24,6 +25,7 @@ import com.bigdata.modules.quality.mapper.DqRuleMapper;
 import com.bigdata.modules.quality.mapper.DqRuleResultMapper;
 import com.bigdata.modules.quality.mapper.DqRunInstanceMapper;
 import com.bigdata.modules.quality.mapper.DqTaskMapper;
+import com.bigdata.modules.quality.mapper.DqTaskRuleRelMapper;
 import com.bigdata.modules.quality.mapper.DataQualityCheckResultMapper;
 import com.bigdata.modules.quality.sql.DqBuiltinTemplates;
 import com.bigdata.modules.quality.sql.DqSqlBuilder;
@@ -114,6 +116,9 @@ public class DqRunService {
     private DqTaskMapper dqTaskMapper;
 
     @Autowired
+    private DqTaskRuleRelMapper dqTaskRuleRelMapper;
+
+    @Autowired
     private DqAlertSubscriptionMapper dqAlertSubscriptionMapper;
 
     @Autowired
@@ -121,6 +126,9 @@ public class DqRunService {
 
     @Autowired
     private DqExecutionService dqExecutionService;
+
+    @Autowired
+    private DqAlertSender dqAlertSender;
 
     @Autowired
     private DataAccessPermissionService permissionService;
@@ -437,24 +445,65 @@ public class DqRunService {
                         continue;
                     }
                     for (String channel : splitCsv(subscription.getChannels())) {
-                        DqAlertLog alert = new DqAlertLog();
-                        alert.setRunId(runId);
-                        alert.setTaskId(task.getId());
-                        alert.setRuleId(result.getRuleId());
-                        alert.setRuleName(result.getRuleName());
-                        alert.setChannel(channel);
-                        alert.setReceiver(joinCsv(splitCsv(subscription.getReceivers())));
-                        alert.setStatus("PENDING");
-                        alert.setFailReason("告警通道尚未接入，已登记待发");
-                        alert.setSendTime(LocalDateTime.now());
-                        dqAlertLogMapper.insert(alert);
+                        dqAlertLogMapper.insert(buildAlert(task, runId, result, subscription, channel));
                     }
                 }
             }
         } catch (Exception e) {
             // 告警登记失败不影响校验结果本身的留痕
-            log.error("登记告警待发记录失败: runId={}", runId, e);
+            log.error("登记告警记录失败: runId={}", runId, e);
         }
+    }
+
+    /**
+     * 组装并投递一条告警记录。
+     *
+     * <p>{@code dq_alert_log.status} 是三档投递状态，界面按此展示：</p>
+     * <ul>
+     *   <li>{@code SENT} 已送达：站内记录落表即送达；Webhook 投递成功也是；</li>
+     *   <li>{@code FAILED} 投递失败：{@code failReason} 写明原因，可重投；</li>
+     *   <li>{@code PENDING} 待发：渠道未接入或未配置（邮件缺 SMTP、Webhook 缺地址）。</li>
+     * </ul>
+     *
+     * <p>{@code sendTime} 只在真正送达时写 —— 待发的记录带一个发送时间会误导排查。</p>
+     */
+    private DqAlertLog buildAlert(DqTask task, Long runId, DqRuleResult result,
+                                  DqAlertSubscription subscription, String channel) {
+        DqAlertLog alert = new DqAlertLog();
+        alert.setRunId(runId);
+        alert.setTaskId(task.getId());
+        alert.setRuleId(result.getRuleId());
+        alert.setRuleName(result.getRuleName());
+        alert.setChannel(channel);
+        alert.setReceiver(joinCsv(splitCsv(subscription.getReceivers())));
+
+        String normalized = channel == null ? "" : channel.trim().toUpperCase();
+        switch (normalized) {
+            case DqAlertSender.CHANNEL_INBOX -> {
+                alert.setStatus(DqAlertSender.STATUS_SENT);
+                alert.setSendTime(LocalDateTime.now());
+            }
+            case DqAlertSender.CHANNEL_WEBHOOK -> {
+                String failure = dqAlertSender.sendWebhook(alert, result.getStatus());
+                if (failure == null) {
+                    alert.setStatus(DqAlertSender.STATUS_SENT);
+                    alert.setSendTime(LocalDateTime.now());
+                } else {
+                    alert.setStatus(DqAlertSender.STATUS_FAILED);
+                    alert.setFailReason(failure);
+                }
+            }
+            case DqAlertSender.CHANNEL_EMAIL -> {
+                alert.setStatus(DqAlertSender.STATUS_PENDING);
+                // 见 DqAlertSender 类注释：平台没有 SMTP 配置，不做半成品
+                alert.setFailReason("邮件通道未配置，已登记待发（第一期实际投递的是站内记录与 Webhook）");
+            }
+            default -> {
+                alert.setStatus(DqAlertSender.STATUS_PENDING);
+                alert.setFailReason("未知告警渠道编码「" + channel + "」，未投递");
+            }
+        }
+        return alert;
     }
 
     private static boolean notifyMatched(String notifyOn, String status) {
@@ -534,11 +583,21 @@ public class DqRunService {
         String batchNo = dto.getBatchNo() == null || dto.getBatchNo().isBlank()
                 ? DqBatchSupport.todayBatchNo() : dto.getBatchNo().trim();
 
+        // 先解析规则与任务：它们决定这次回传归到哪条规则、哪个任务，也决定新建实例时的归属
+        Long ruleId = resolveRuleId(dto);
+        DqTask boundTask = resolveTask(ruleId);
+
+        // 表级读权限：回传是**写入**行为，越权写结果会污染平台数据。
+        // fail-close —— 与资产目录的树/检索同一条安全原则：宁可拒绝落库，也不放行。
+        assertTableReadable(dto);
+
         DqRunInstance instance = findReusableRun(batchNo, dto.getDatabaseName(), dto.getTableName());
         if (instance == null) {
             instance = new DqRunInstance();
             instance.setBatchNo(batchNo);
-            instance.setTaskName(dto.getRuleName());
+            // 能定位到任务就用任务名与 taskId；定位不到退回规则名，至少让运行记录里认得出是谁报的
+            instance.setTaskId(boundTask == null ? null : boundTask.getId());
+            instance.setTaskName(boundTask == null ? dto.getRuleName() : boundTask.getTaskName());
             instance.setTriggerType(QualityTriggerType.MANUAL.getCode());
             instance.setTargetDatasourceId(dto.getDatasourceId());
             instance.setTargetDatabaseName(dto.getDatabaseName());
@@ -558,6 +617,7 @@ public class DqRunService {
                 ? QualityCheckStatus.PASS : QualityCheckStatus.ERROR;
         DqRuleResult row = new DqRuleResult();
         row.setRunId(instance.getId());
+        row.setRuleId(ruleId);
         row.setRuleName(dto.getRuleName());
         row.setRuleType(dto.getRuleType());
         row.setCheckObject(dto.getCheckObject());
@@ -567,11 +627,89 @@ public class DqRunService {
         row.setStatus(status.getCode());
         row.setSeverity(Boolean.TRUE.equals(dto.getPassed()) ? null : status.getCode());
         row.setErrorMsg(dto.getFailDetail());
+        row.setExecSql(dto.getExecSql());
         row.setCostMs(0L);
         row.setCreateTime(LocalDateTime.now());
         row.setUpdateTime(LocalDateTime.now());
         dqRuleResultMapper.insert(row);
         recalculateRun(instance.getId());
+
+        // 有任务归属才登记告警：订阅是按任务配的，没有任务就无从匹配。
+        // 程序回传路径此前完全不登记告警（只有平台执行路径会），这里补齐。
+        if (boundTask != null) {
+            registerAlerts(boundTask, instance.getId(), List.of(row));
+        }
+    }
+
+    /**
+     * 由规则反查唯一绑定的质检任务。
+     *
+     * <p>一条规则可以同时挂在多个任务上。这时"这次回传该归到哪个任务"没有正确答案 ——
+     * 宁可留空也不猜：猜错会让告警发给错的人、任务维度统计错位，而留空的代价只是运行记录里
+     * 少一层归属（{@code taskName} 退化为规则名，仍可辨认）。</p>
+     */
+    private DqTask resolveTask(Long ruleId) {
+        if (ruleId == null) {
+            return null;
+        }
+        List<DqTaskRuleRel> rels = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
+                .eq(DqTaskRuleRel::getRuleId, ruleId));
+        if (rels.size() != 1 || rels.get(0).getTaskId() == null) {
+            return null;
+        }
+        return dqTaskMapper.selectById(rels.get(0).getTaskId());
+    }
+
+    /**
+     * 校验当前用户对回传目标表有读权限。
+     *
+     * <p>缺表名时不校验（无从判定目标）；其余情况一律 fail-close：
+     * 校验 SQL 是"读"，回传结果是"写"，能写一条自己读不到的表的结果就等于可以伪造它。</p>
+     */
+    private void assertTableReadable(QualityRunReportDTO dto) {
+        if (dto.getTableName() == null || dto.getTableName().isBlank()) {
+            return;
+        }
+        if (hasTableReadAccess(dto.getDatasourceName(), dto.getDatabaseName(), dto.getTableName().trim())) {
+            return;
+        }
+        String target = (dto.getDatabaseName() == null || dto.getDatabaseName().isBlank())
+                ? dto.getTableName().trim()
+                : dto.getDatabaseName().trim() + "." + dto.getTableName().trim();
+        throw new BusinessException("当前用户无权读取表 " + target + "，已拒绝登记其校验结果");
+    }
+
+    /**
+     * 解析本次回传对应的规则 ID。
+     *
+     * <p>回传路径原先只落 rule_name 字符串，一旦改名（设计文档改了、平台里没跟着改）
+     * 就与平台规则断链；而「行数波动 / 行数环比」这类规则的历史基线是按 rule_id 取的，
+     * 断链后这些规则永远取不到程序回传的基线。这里把关联补上：</p>
+     * <ul>
+     *   <li>显式传了 {@code ruleId} 直接用（S3 登记过规则时走这条）；</li>
+     *   <li>否则按「规则名 + 库 + 表」三段反查 —— 三段限定是为了避免跨库同名规则误配；</li>
+     *   <li>查不到返回 {@code null} 且<strong>不报错</strong>：规则还没登记时回传仍应成功，
+     *       回传失败不得改变校验任务本身的成败判定。</li>
+     * </ul>
+     */
+    private Long resolveRuleId(QualityRunReportDTO dto) {
+        if (dto.getRuleId() != null) {
+            return dto.getRuleId();
+        }
+        if (dto.getRuleName() == null || dto.getRuleName().isBlank()) {
+            return null;
+        }
+        LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<DqRule>()
+                .eq(DqRule::getRuleName, dto.getRuleName().trim());
+        if (dto.getDatabaseName() != null && !dto.getDatabaseName().isBlank()) {
+            wrapper.eq(DqRule::getDatabaseName, dto.getDatabaseName().trim());
+        }
+        if (dto.getTableName() != null && !dto.getTableName().isBlank()) {
+            wrapper.eq(DqRule::getTableName, dto.getTableName().trim());
+        }
+        wrapper.orderByDesc(DqRule::getId);
+        List<DqRule> found = dqRuleMapper.selectList(wrapper.last("LIMIT 1"));
+        return found.isEmpty() ? null : found.get(0).getId();
     }
 
     /** 上报场景的运行实例复用：同批次 + 同表 + 当天创建且未结束 */

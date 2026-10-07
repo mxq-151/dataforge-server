@@ -77,6 +77,21 @@ public class DqTaskController {
         return Result.success(dqTaskService.run(id));
     }
 
+    /**
+     * 调度触发（供 DolphinScheduler 节点回调）。
+     *
+     * <p>调度工作流里把质检任务当普通节点调用即可：节点串上 {@code scheduleInstanceId}
+     * 与业务批次，运行记录就能跳回对应调度实例、结果落在正确批次上。</p>
+     *
+     * <p>只接受配置为「调度触发」的任务，手动触发的任务调这里会被明确拒绝。</p>
+     */
+    @PostMapping("/{id}/run-by-schedule")
+    public Result<Long> runBySchedule(@PathVariable Long id,
+                                      @RequestParam(required = false) Long scheduleInstanceId,
+                                      @RequestParam(required = false) String batchNo) {
+        return Result.success(dqTaskService.runBySchedule(id, scheduleInstanceId, batchNo));
+    }
+
     @PostMapping("/{id}/enable")
     public Result<Void> setEnabled(@PathVariable Long id, @RequestParam boolean enabled) {
         dqTaskService.setEnabled(id, enabled);

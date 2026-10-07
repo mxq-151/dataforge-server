@@ -143,6 +143,34 @@ public class DqTaskService {
         return dqRunService.startRun(task, rules, QualityTriggerType.MANUAL, null, null);
     }
 
+    /**
+     * 调度触发一次质检任务（供 DolphinScheduler 节点回调）。
+     *
+     * <p>与 {@link #run(Long)} 的区别只在触发来源：这里记 SCHEDULE，并带上调度实例号与业务批次，
+     * 使运行记录能跳回对应的调度实例、结果能落在正确的批次上。</p>
+     *
+     * <p><b>只接受 triggerType=SCHEDULE 的任务。</b>任务上这个字段就是用来区分"谁来触发"的；
+     * 配置为手动触发的任务被调度悄悄驱动，等于这个配置形同虚设。这里报错而不是静默放行，
+     * 报错信息会指出该改哪里。</p>
+     */
+    public Long runBySchedule(Long taskId, Long scheduleInstanceId, String batchNo) {
+        DqTask task = getById(taskId);
+        if (task.getEnabled() != null && task.getEnabled() != TASK_STATUS_ENABLED) {
+            throw new BusinessException("任务「" + task.getTaskName() + "」已停用，请先启用后再执行");
+        }
+        String triggerType = task.getTriggerType() == null ? "" : task.getTriggerType().trim();
+        if (!QualityTriggerType.SCHEDULE.getCode().equalsIgnoreCase(triggerType)) {
+            throw new BusinessException("任务「" + task.getTaskName()
+                    + "」配置为手动触发；调度触发请先在任务上改为「调度触发」");
+        }
+        List<DqRule> rules = resolveRules(taskId);
+        if (rules.isEmpty()) {
+            throw new BusinessException("任务「" + task.getTaskName() + "」下没有可执行的规则，请先挂载监控规则");
+        }
+        return dqRunService.startRun(task, rules, QualityTriggerType.SCHEDULE,
+                scheduleInstanceId, batchNo);
+    }
+
     /** 解析任务挂载的规则（仅启用中的规则参与执行） */
     public List<DqRule> resolveRules(Long taskId) {
         List<DqTaskRuleRel> rels = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
