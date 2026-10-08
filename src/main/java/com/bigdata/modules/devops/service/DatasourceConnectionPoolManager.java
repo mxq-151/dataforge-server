@@ -342,18 +342,15 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         DatasourceType type = config.getDatasourceType();
 
         Long currentUserId = SecurityUtils.getCurrentUserId();
-        boolean isAdmin = SecurityUtils.isAdmin();
+        SysTenant tenant = currentUserId != null ? sysTenantService.getTenantByUserId(currentUserId) : null;
+        String tenantCode = tenant != null && tenant.getTenantCode() != null ? tenant.getTenantCode() : "";
 
-        String tenantCode = "";
-        if (currentUserId != null) {
-            SysTenant tenant = sysTenantService.getTenantByUserId(currentUserId);
-            if (tenant != null) {
-                tenantCode = tenant.getTenantCode();
-            }
-        }
-
-        if (isAdmin) {
-            hc.setPoolName("ds-" + config.getId() + "-" + SecurityUtils.getCurrentUsername());
+        // 无登录用户（定时任务/后台线程）或解析不到租户时，回退为数据源自身账号：
+        // 否则会以空用户名建池，PostgreSQL 会持续拒绝连接（no PostgreSQL user name specified in
+        // startup packet），而该池一旦按 datasourceId 缓存，后续所有连接（含管理员手动同步）
+        // 都会卡满 connectionTimeout(30s) 后失败。
+        if (SecurityUtils.isAdmin() || tenantCode.isEmpty()) {
+            hc.setPoolName("ds-" + config.getId() + "-" + config.getUsername());
             hc.setUsername(config.getUsername());
             // 数据库取出的密码已加密需要解密；测试连接传入的是明文不需要解密
             String password = decryptConfigPassword ? config.getPlainPassword(aesUtils) : config.getPassword();
@@ -361,13 +358,10 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         } else {
             // 租户密码始终从数据库取（已加密），需要解密
             String tenantPassword = "";
-            if (currentUserId != null) {
-                SysTenant tenant = sysTenantService.getTenantByUserId(currentUserId);
-                if (tenant != null && tenant.getPassword() != null) {
-                    tenantPassword = aesUtils.decryptStored(tenant.getPassword());
-                }
+            if (tenant.getPassword() != null) {
+                tenantPassword = aesUtils.decryptStored(tenant.getPassword());
             }
-            log.info("create connect for {}",tenantCode);
+            log.info("create connect for {}", tenantCode);
             hc.setPoolName("ds-" + config.getId() + "-" + tenantCode);
             hc.setUsername(tenantCode);
             hc.setPassword(tenantPassword);

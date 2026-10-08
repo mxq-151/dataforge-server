@@ -9,12 +9,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * JDBC类型执行策略的抽象基类。
@@ -257,7 +261,13 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
             boolean postgres = isPostgres(datasourceConfig);
             String catalog = postgres ? null : databaseName;
             String schemaPattern = postgres ? databaseName : null;
-            try (ResultSet rs = metaData.getTables(catalog, schemaPattern, "%", new String[]{"TABLE", "VIEW"})) {
+            // PostgreSQL 的分区父表(relkind='p')在 JDBC 里是独立的 "PARTITIONED TABLE" 类型：
+            // 不显式请求时只会返回 *_default 这类分区子表，而表/列注释都挂在父表上，
+            // 导致同步后库表列表里全是无注释的分区壳表。
+            String[] tableTypes = postgres
+                    ? new String[]{"TABLE", "VIEW", "PARTITIONED TABLE"}
+                    : new String[]{"TABLE", "VIEW"};
+            try (ResultSet rs = metaData.getTables(catalog, schemaPattern, "%", tableTypes)) {
                 while (rs.next()) {
                     TableMetadata tableMeta = new TableMetadata();
                     tableMeta.setTableName(rs.getString("TABLE_NAME"));
@@ -266,6 +276,10 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
                     tableMeta.setDatabaseName(databaseName);
                     tables.add(tableMeta);
                 }
+            }
+            if (postgres) {
+                // 分区子表不进元数据：只保留分区父表
+                removePostgresPartitionChildren(connection, databaseName, tables);
             }
             // 系统表口径补齐：存储大小/建表修改时间/分区列/压缩算法（按真实引擎分支，失败仅告警）
             new JdbcTableStatsCollector(getLog()).fill(
@@ -276,6 +290,40 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
             closeQuietly(connection);
         }
         return tables;
+    }
+
+    /**
+     * 剔除 PostgreSQL 的分区子表（{@code pg_class.relispartition = true}）。
+     * <p>分区子表（含 {@code *_default} 默认分区）只是物理存储单元：注释、分区口径与
+     * 结构定义都挂在分区父表上，数据探索/资产目录只应展示父表，否则同一张逻辑表会出现
+     * 两份、且分区壳表没有任何注释。查询失败时保留原表清单，避免误删元数据。</p>
+     */
+    private void removePostgresPartitionChildren(Connection connection, String schemaName, List<TableMetadata> tables) {
+        if (tables.isEmpty()) {
+            return;
+        }
+        Set<String> children = new HashSet<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                        + "WHERE n.nspname = ? AND c.relispartition")) {
+            ps.setString(1, schemaName);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String name = rs.getString(1);
+                    if (name != null) {
+                        children.add(name.toLowerCase(Locale.ROOT));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            getLog().warn("查询PostgreSQL分区子表失败[schema={}]: {}", schemaName, e.getMessage());
+            return;
+        }
+        if (children.isEmpty()) {
+            return;
+        }
+        tables.removeIf(t -> t.getTableName() != null
+                && children.contains(t.getTableName().toLowerCase(Locale.ROOT)));
     }
 
     /**

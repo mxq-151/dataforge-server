@@ -1009,7 +1009,7 @@ CREATE TABLE IF NOT EXISTS table_metadata (
   table_comment VARCHAR(1000),
   table_create_time TIMESTAMP,
   last_modify_time TIMESTAMP,
-  partition_columns JSONB,
+  partition_columns TEXT,
   storage_format VARCHAR(200),
   compression VARCHAR(50),
   location VARCHAR(500),
