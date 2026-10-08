@@ -5,6 +5,8 @@
 # 同时构建 linux/amd64 与 linux/arm64,产物 --push 到 REGISTRY。
 # 多架构镜像无法 --load 到本地 Docker,必须提供仓库前缀。
 #
+#   * dataforge-server 一律在**宿主机**编译(mvn package -> build/dist/dataforge-server.jar),
+#     镜像内不再跑 Maven,因此两种模式都要求本机有可用的 mvn 与 JDK 17+。
 #   * 默认增量更新 dataforge-server 的 jar; FULL=1 全量重建基础镜像。
 #   * 首次多平台增量前,请先用 FULL=1 + REGISTRY 打好并推送基础镜像。
 #

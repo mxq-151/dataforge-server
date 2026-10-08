@@ -4,8 +4,9 @@
 #
 # 只面向单平台(默认本机架构),产物 --load 到本地 Docker,适合日常迭代。
 #
-#   * 默认仅增量更新 dataforge-server 的 jar(宿主机 mvn 重编译 ->
-#     基于已有基础镜像覆盖新 jar),秒级完成。
+#   * dataforge-server 一律在**宿主机**编译(mvn package -> build/dist/dataforge-server.jar),
+#     镜像内不再跑 Maven,因此两种模式都要求本机有可用的 mvn 与 JDK 17+。
+#   * 默认仅增量更新 jar(宿主机重编译 -> 基于已有基础镜像覆盖新 jar),秒级完成。
 #   * FULL=1 时全量重建基础镜像(Marquez + Spark + DolphinScheduler
 #     + PostgreSQL + dataforge-server),首次或基础变更时执行。
 #
@@ -19,6 +20,7 @@
 #                                                                     # (支持 HADOOP/HBASE/JUICEFS/
 #                                                                     #  PARQUET/ORC_VERSION,未设
 #                                                                     #  置的组件用 pom 默认版本)
+#   SPARK_LISTENER_DIR=/path/to/spark-listener ./build.sh             # 指定写入合规监听器源码目录
 #
 # 全平台(多架构, --push 到仓库)构建请用 ./build-all.sh;
 # 本篇只做单平台 --load 到本地。

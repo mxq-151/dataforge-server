@@ -3,6 +3,16 @@
 # 包含: dataforge-server + JDK17 + PostgreSQL14 + Spark3.5.9(local)
 #       + DolphinScheduler3.4.1(standalone)
 #       + Marquez0.51.1(源码自建 api + web)
+#       + Spark 写入合规监听器 spark-write-compliance(core + spark-3.5, 全局装载)
+#
+# dataforge-server 的 jar 不在镜像内编译: 由 build/build.sh 在宿主机用本机 mvn 打包后
+# 落到 build/dist/dataforge-server.jar, 本 Dockerfile 只负责 COPY 进来。
+# 这样免去容器内预热 ~/.m2、构建上下文不必再送 src/pom、编译错误直接可见、可离线构建。
+#
+# 直接 docker build 前需自行准备(建议统一用 build/build.sh 或 build/build-all.sh 驱动):
+#   build/dist/dataforge-server.jar      宿主机 mvn package 产物
+#   build/dist/spark-listeners/*.jar     宿主机构建的写入合规监听器
+#   build/dist/<其余发行包>               见 build-lib.sh ensure_dist
 #
 # 构建(需要代理时):
 #   docker build --network=host \
@@ -11,52 +21,7 @@
 #     -t dataforge-allinone:1.0 .
 # ============================================================
 
-# ---------- Stage 1: 构建 dataforge-server ----------
-FROM maven:3.9-eclipse-temurin-17 AS app-builder
-ARG BUILD_HTTP_PROXY=
-ARG BUILD_HTTPS_PROXY=
-ENV http_proxy=${BUILD_HTTP_PROXY} \
-    https_proxy=${BUILD_HTTPS_PROXY} \
-    HTTP_PROXY=${BUILD_HTTP_PROXY} \
-    HTTPS_PROXY=${BUILD_HTTPS_PROXY} \
-    no_proxy=127.0.0.1,localhost \
-    NO_PROXY=127.0.0.1,localhost
-WORKDIR /build
-# 大数据组件版本覆盖(可选;留空则使用 pom.xml 中的默认版本)
-ARG HADOOP_VERSION=
-ARG HBASE_VERSION=
-ARG JUICEFS_VERSION=
-ARG PARQUET_VERSION=
-ARG ORC_VERSION=
-# 构建根=本目录(context=dataforge-server);只复制 maven 构建所需,
-# 避免把 dist/(数百MB发行包) 等多余文件带入构建 stage
-COPY pom.xml ./
-COPY src ./src
-# /root/.m2 以 BuildKit 缓存挂载:源码(COPY src)一改本层缓存即失效重跑 mvn,
-# 无此挂载时容器内 ~/.m2 为空,必须从零重下全部依赖(数 GB),
-# 而本机出网带宽实测仅 ~0.2MB/s,会导致耗时数小时。
-# m2repo 上下文由 build.sh 传入(=宿主 ~/.m2/repository):每次先清空缓存再整体拷入
-# 预热,确保容器内仓库与宿主一致,mvn 无需联网重下宿主机已有的包。
-# 不能"仅当缓存为空才拷贝":被中断的构建会在 cache mount 留下残缺仓库,
-# 此时跳过拷贝会让 mvn 去慢链路(实测 ~0.2MB/s)重下宿主本已存在的构件,
-# 下载一旦被截断(premature end of content-length)整个构建即失败。
-RUN --mount=type=bind,from=m2repo,source=.,target=/seed-m2 \
-    --mount=type=cache,target=/root/.m2 \
-    set -e; \
-    echo "==> 预热 Maven 本地仓库(复用宿主已下载的依赖)"; \
-    rm -rf /root/.m2/repository; \
-    mkdir -p /root/.m2/repository; \
-    cp -a /seed-m2/. /root/.m2/repository/; \
-    MVN_VERSION_ARGS=""; \
-    if [ -n "$HADOOP_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dhadoop.version=$HADOOP_VERSION"; fi; \
-    if [ -n "$HBASE_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dhbase.version=$HBASE_VERSION"; fi; \
-    if [ -n "$JUICEFS_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Djuicefs.version=$JUICEFS_VERSION"; fi; \
-    if [ -n "$PARQUET_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dparquet.version=$PARQUET_VERSION"; fi; \
-    if [ -n "$ORC_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dorc.version=$ORC_VERSION"; fi; \
-    echo "mvn package$MVN_VERSION_ARGS"; \
-    mvn -q -DskipTests $MVN_VERSION_ARGS -f pom.xml package
-
-# ---------- Stage 2: Marquez API 0.51.1(源码构建,不依赖官方镜像) ----------
+# ---------- Stage 1: Marquez API 0.51.1(源码构建,不依赖官方镜像) ----------
 FROM gradle:8.7-jdk17 AS marquez-builder
 ARG BUILD_HTTP_PROXY=
 ARG BUILD_HTTPS_PROXY=
@@ -79,7 +44,7 @@ WORKDIR /opt/marquez-src
 RUN --mount=type=cache,target=/root/.gradle \
     gradle --no-daemon -q :api:shadowJar -x test
 
-# ---------- Stage 3: Marquez Web(源码构建,不依赖官方镜像) ----------
+# ---------- Stage 2: Marquez Web(源码构建,不依赖官方镜像) ----------
 FROM node:18-bullseye AS marquez-web-builder
 ARG BUILD_HTTP_PROXY=
 ARG BUILD_HTTPS_PROXY=
@@ -101,7 +66,7 @@ RUN --mount=type=cache,target=/root/.npm \
  && npm ci --no-audit --no-fund \
  && NODE_OPTIONS=--max-old-space-size=2048 npm run build
 
-# ---------- Stage 4: 运行时镜像 ----------
+# ---------- Stage 3: 运行时镜像 ----------
 FROM eclipse-temurin:17-jammy
 
 # 构建期代理(配合 --network=host 使用;最终会被清空,不写入运行时)
@@ -142,14 +107,24 @@ COPY build/dist/spark-3.5.9-bin-hadoop3.tgz /tmp/spark.tgz
 RUN tar xzf /tmp/spark.tgz -C /opt \
  && mv /opt/spark-3.5.9-bin-hadoop3 /opt/spark \
  && rm -f /tmp/spark.tgz \
- && test -x /opt/spark/bin/spark-class \
- # local 模式默认配置(含 OpenLineage 数据血缘,上报容器内 Marquez http://localhost:5000)
- && printf 'spark.master local[*]\nspark.sql.warehouse.dir file:///opt/dataforge/warehouse\nspark.extraListeners io.openlineage.spark.agent.OpenLineageSparkListener\nspark.openlineage.transport.url http://localhost:5000\nspark.openlineage.transport.type http\nspark.openlineage.namespace dataforge\n' \
-       > /opt/spark/conf/spark-defaults.conf
+ && test -x /opt/spark/bin/spark-class
+
+# local 模式默认配置: spark.master / warehouse / OpenLineage 数据血缘(上报容器内 Marquez)
+# + 写入合规监听器(spark.sql.extensions / queryExecutionListeners / spark.write.compliance.*)。
+# 单独放成仓库文件而非内联 printf，便于随增量构建(./build.sh)一起刷新，也可直接 diff 审阅。
+COPY build/conf/spark-defaults.conf /opt/spark/conf/spark-defaults.conf
 
 # 数据血缘 Agent(OpenLineage 1.8.0),fat jar 自包含依赖,放入 spark jars 目录使其对
 # dataforge-server/DolphinScheduler 发起的 spark 任务全局生效
 COPY build/dist/openlineage-spark-1.8.0.jar /opt/spark/jars/openlineage-spark.jar
+
+# ---------- Spark 写入合规监听器(spark-write-compliance) ----------
+# jar 由 build/build-lib.sh 的 ensure_spark_listener() 从 spark-listener 工程构建后落到
+# build/dist/spark-listeners/(core 纯 Java 引擎 + spark-3.5 适配层)。
+# 放进 SPARK_HOME/jars 而非仅 --jars: spark.sql.extensions / spark.sql.queryExecutionListeners
+# 是 Spark 自己按类名反射装载的，类必须对驱动端类加载器可见，
+# 否则 Spark 只会打一条 "Cannot use ... to configure session extensions" 告警并静默跳过。
+COPY build/dist/spark-listeners/*.jar /opt/spark/jars/
 
 # ---------- DolphinScheduler 3.4.1 (standalone) ----------
 # 发行包已预下载到本地 build/dist/(见 build.sh ensure_dist),构建不再联网下载
@@ -212,7 +187,8 @@ RUN rm -f /etc/nginx/sites-enabled/default
 COPY build/conf/marquez-web-nginx.conf /etc/nginx/conf.d/marquez-web.conf
 
 # ---------- dataforge-server ----------
-COPY --from=app-builder /build/target/dataforge-server-1.0.0-SNAPSHOT.jar /opt/dataforge/dataforge-server.jar
+# jar 由宿主机 mvn 打好后落在 build/dist/(见 build/build.sh build_server_jar),此处只做拷贝
+COPY build/dist/dataforge-server.jar /opt/dataforge/dataforge-server.jar
 COPY build/dist/postgresql-42.7.12.jar /opt/dataforge/jars/postgresql-42.7.12.jar
 COPY src/main/resources/sql/init/dataforge-postgresql.sql /opt/dataforge/sql/dataforge-postgresql.sql
 COPY src/main/resources/sql/testdata/dataforge-testdata-postgresql.sql /opt/dataforge/sql/testdata/dataforge-testdata-postgresql.sql
