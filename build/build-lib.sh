@@ -15,6 +15,8 @@
 #   IMAGE_NAME / IMAGE_TAG / IMAGE_VER  镜像命名
 #   PROXY      全量构建的宿主机代理地址;不设置 / off / none 走直连
 #   SKIP_TESTS  mvn 打包是否跳过单测(默认 true)
+#   M2_SEED_DIR 全量构建注入的宿主 Maven 仓库种子目录(默认 ~/.m2/repository);
+#               供 app-builder 阶段预热容器内缓存,避免重下数 GB 依赖
 #
 # 大数据组件版本动态覆盖(可选;未设置的组件沿用 pom.xml 默认版本):
 #   HADOOP_VERSION / HBASE_VERSION / JUICEFS_VERSION / PARQUET_VERSION / ORC_VERSION
@@ -184,6 +186,18 @@ build_full() {
   # Dockerfile: build/Dockerfile; 构建上下文 = 项目根 $SERVER_DIR(需 src / pom 供 app-builder 阶段)
   local args=(-t "$FULL_TAG" --platform "$PLATFORMS" $(load_push) \
     --provenance=false --sbom=false -f "$BUILD_DIR/Dockerfile")
+
+  # m2repo: 把宿主已下载的 Maven 仓库作为构造上下文注入,供 app-builder 预热
+  # 容器内的 /root/.m2 缓存(否则容器内是空仓库,在慢链路上要重下数 GB)。
+  # 宿主没有该目录时用一个空目录,行为退化为在线下载。
+  local m2_seed="${M2_SEED_DIR:-$HOME/.m2/repository}"
+  if [ -d "$m2_seed" ]; then
+    echo "==> 复用宿主 Maven 仓库作为依赖种子: $m2_seed"
+  else
+    echo "==> 未找到宿主 Maven 仓库($m2_seed),依赖走在线下载"
+    m2_seed="$(mktemp -d)"
+  fi
+  args+=(--build-context "m2repo=$m2_seed")
 
   # 大数据组件版本覆盖透传给 app-builder(未设置的组件由 Dockerfile 沿用 pom 默认)
   local env_name

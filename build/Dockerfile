@@ -32,7 +32,21 @@ ARG ORC_VERSION=
 # 避免把 dist/(数百MB发行包) 等多余文件带入构建 stage
 COPY pom.xml ./
 COPY src ./src
-RUN set -e; \
+# /root/.m2 以 BuildKit 缓存挂载:源码(COPY src)一改本层缓存即失效重跑 mvn,
+# 无此挂载时容器内 ~/.m2 为空,必须从零重下全部依赖(数 GB),
+# 而本机出网带宽实测仅 ~0.2MB/s,会导致耗时数小时。
+# m2repo 上下文由 build.sh 传入(=宿主 ~/.m2/repository):每次先清空缓存再整体拷入
+# 预热,确保容器内仓库与宿主一致,mvn 无需联网重下宿主机已有的包。
+# 不能"仅当缓存为空才拷贝":被中断的构建会在 cache mount 留下残缺仓库,
+# 此时跳过拷贝会让 mvn 去慢链路(实测 ~0.2MB/s)重下宿主本已存在的构件,
+# 下载一旦被截断(premature end of content-length)整个构建即失败。
+RUN --mount=type=bind,from=m2repo,source=.,target=/seed-m2 \
+    --mount=type=cache,target=/root/.m2 \
+    set -e; \
+    echo "==> 预热 Maven 本地仓库(复用宿主已下载的依赖)"; \
+    rm -rf /root/.m2/repository; \
+    mkdir -p /root/.m2/repository; \
+    cp -a /seed-m2/. /root/.m2/repository/; \
     MVN_VERSION_ARGS=""; \
     if [ -n "$HADOOP_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dhadoop.version=$HADOOP_VERSION"; fi; \
     if [ -n "$HBASE_VERSION" ]; then MVN_VERSION_ARGS="$MVN_VERSION_ARGS -Dhbase.version=$HBASE_VERSION"; fi; \
@@ -58,7 +72,12 @@ RUN mkdir -p /opt/marquez-src \
  && tar xzf /tmp/marquez.tar.gz -C /opt/marquez-src --strip-components=1 \
  && rm -f /tmp/marquez.tar.gz
 WORKDIR /opt/marquez-src
-RUN ./gradlew --no-daemon -q :api:shadowJar -x test
+# 直接用 base 镜像自带的 Gradle(base=gradle:8.7-jdk17,版本与 wrapper 要求的
+# gradle-8.7-bin.zip 一致),不走 ./gradlew:本机出网极慢(~0.2MB/s),wrapper 的
+# networkTimeout=10000 会在下载发行包时直接用超时中断构建。
+# /root/.gradle 缓存挂载:缓存依赖与发行包,避免层失效后重下
+RUN --mount=type=cache,target=/root/.gradle \
+    gradle --no-daemon -q :api:shadowJar -x test
 
 # ---------- Stage 3: Marquez Web(源码构建,不依赖官方镜像) ----------
 FROM node:18-bullseye AS marquez-web-builder
@@ -76,7 +95,9 @@ WORKDIR /opt/marquez-src/web
 #   1) 关闭生产 sourcemap（devtool: false）——省去大块 map 的生成/驻留内存
 #   2) minimize: false —— 不跑 terser，避免默认按 CPU 核数 fork 多个压缩 worker 进程
 #   3) NODE_OPTIONS 限制 V8 堆上限，避免堆无节制膨胀
-RUN node -e 'const fs=require("fs");let s=fs.readFileSync("webpack.prod.js","utf8");s=s.replace(/devtool: '\''source-map'\''/,"devtool: false");s=s.replace("const webpackProd = {","const webpackProd = {\n  optimization: { minimize: false },");fs.writeFileSync("webpack.prod.js",s);' \
+# /root/.npm 缓存挂载:缓存 npm 包,避免层失效后重下 node_modules(同上)
+RUN --mount=type=cache,target=/root/.npm \
+    node -e 'const fs=require("fs");let s=fs.readFileSync("webpack.prod.js","utf8");s=s.replace(/devtool: '\''source-map'\''/,"devtool: false");s=s.replace("const webpackProd = {","const webpackProd = {\n  optimization: { minimize: false },");fs.writeFileSync("webpack.prod.js",s);' \
  && npm ci --no-audit --no-fund \
  && NODE_OPTIONS=--max-old-space-size=2048 npm run build
 

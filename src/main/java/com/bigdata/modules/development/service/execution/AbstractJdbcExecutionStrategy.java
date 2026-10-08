@@ -229,9 +229,13 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
         try {
             connection = datasourceConfigService.getConnection(datasourceConfig.getId(), null);
             DatabaseMetaData metaData = connection.getMetaData();
-            try (ResultSet rs = metaData.getCatalogs()) {
+            // PostgreSQL 中 databaseName 语义为 schema：列出当前库下的 schema，
+            // 才能与 listColumns/listTables 的 schema 口径保持一致（否则会列出其他库并误删元数据）
+            boolean postgres = isPostgres(datasourceConfig);
+            try (ResultSet rs = postgres ? metaData.getSchemas() : metaData.getCatalogs()) {
+                String column = postgres ? "TABLE_SCHEM" : "TABLE_CAT";
                 while (rs.next()) {
-                    databases.add(rs.getString("TABLE_CAT"));
+                    databases.add(rs.getString(column));
                 }
             }
         } catch (Exception e) {
@@ -249,7 +253,11 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
         try {
             connection = datasourceConfigService.getConnection(datasourceConfig.getId(), databaseName);
             DatabaseMetaData metaData = connection.getMetaData();
-            try (ResultSet rs = metaData.getTables(databaseName, null, "%", new String[]{"TABLE", "VIEW"})) {
+            // PostgreSQL 的 databaseName 是 schema，需放在 schemaPattern 位置而非 catalog
+            boolean postgres = isPostgres(datasourceConfig);
+            String catalog = postgres ? null : databaseName;
+            String schemaPattern = postgres ? databaseName : null;
+            try (ResultSet rs = metaData.getTables(catalog, schemaPattern, "%", new String[]{"TABLE", "VIEW"})) {
                 while (rs.next()) {
                     TableMetadata tableMeta = new TableMetadata();
                     tableMeta.setTableName(rs.getString("TABLE_NAME"));
@@ -296,8 +304,12 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
         try {
             connection = datasourceConfigService.getConnection(datasourceConfig.getId(), databaseName);
             DatabaseMetaData metaData = connection.getMetaData();
+            // PostgreSQL 的 databaseName 是 schema，需放在 schemaPattern 位置而非 catalog
+            boolean postgres = isPostgres(datasourceConfig);
+            String catalog = postgres ? null : databaseName;
+            String schemaPattern = postgres ? databaseName : null;
             int position = 1;
-            try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, "%")) {
+            try (ResultSet rs = metaData.getColumns(catalog, schemaPattern, tableName, "%")) {
                 while (rs.next()) {
                     ColumnMetadataVO col = new ColumnMetadataVO();
                     col.setColumnName(rs.getString("COLUMN_NAME"));
@@ -313,7 +325,7 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
                 }
             }
             // 补充主键信息
-            try (ResultSet pkRs = metaData.getPrimaryKeys(databaseName, null, tableName)) {
+            try (ResultSet pkRs = metaData.getPrimaryKeys(catalog, schemaPattern, tableName)) {
                 while (pkRs.next()) {
                     String pkColName = pkRs.getString("COLUMN_NAME");
                     for (ColumnMetadataVO col : columns) {
@@ -330,5 +342,14 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
             closeQuietly(connection);
         }
         return columns;
+    }
+
+    /**
+     * 判断数据源真实引擎是否为 PostgreSQL。
+     * <p>执行策略是共用的 JDBC 策略（PG 走 DorisExecutionStrategy），
+     * 因此必须按数据源真实类型判断，不能按策略类型判断。</p>
+     */
+    protected boolean isPostgres(DatasourceConfig datasourceConfig) {
+        return datasourceConfig != null && datasourceConfig.getDatasourceType() == DatasourceType.POSTGRESQL;
     }
 }

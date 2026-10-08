@@ -107,7 +107,6 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
 
         switch (type) {
             case MYSQL:
-            case POSTGRESQL:
             case DORIS:
             case STARROCKS:
                 // 查找 "://" 后的第一个 "/"，这才是 host:port 与数据库之间的分隔符，
@@ -125,6 +124,13 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
                     }
                 }
                 break;
+            case POSTGRESQL:
+                // PostgreSQL 的 databaseName 语义为 schema（见 JdbcTableStatsCollector 使用 nspname），
+                // 不能像 MySQL 那样替换 URL 中的 database：ods_xxx 是 schema 而非库，
+                // 替换后会连接到不存在的库，HikariCP 持续重试直至 connectionTimeout(30s) 后才报
+                // "Connection is not available"，导致建表等 DDL 卡 30 秒。
+                // 因此保持原 database 不变，仅用 currentSchema 指定 schema。
+                return withCurrentSchema(normalizedUrl, databaseName);
             case CLICKHOUSE:
                 if (normalizedUrl.contains("jdbc:clickhouse://")) {
                     String hostPart = normalizedUrl.replace("jdbc:clickhouse://", "");
@@ -143,6 +149,41 @@ public class DatasourceConnectionPoolManager implements DisposableBean {
         return normalizedUrl;
     }
 
+    /**
+     * 保持 PostgreSQL JDBC URL 中的 database 不变，把 currentSchema 设置为指定 schema。
+     * <p>PostgreSQL 中一个 database 下有多个 schema，dataforge 的 databaseName 表示 schema，
+     * 因此只能在 URL 上覆盖 currentSchema，而不能替换 database。</p>
+     *
+     * @return 覆盖 currentSchema 后的 URL；schema 为空时原样返回
+     */
+    private static String withCurrentSchema(String url, String schema) {
+        if (url == null || url.isEmpty() || schema == null || schema.isEmpty()) {
+            return url;
+        }
+        int queryStart = url.indexOf('?');
+        String base = queryStart >= 0 ? url.substring(0, queryStart) : url;
+        String query = queryStart >= 0 ? url.substring(queryStart + 1) : "";
+
+        StringBuilder params = new StringBuilder();
+        boolean replaced = false;
+        for (String pair : query.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            if (pair.regionMatches(true, 0, "currentSchema=", 0, "currentSchema=".length())) {
+                params.append("currentSchema=").append(schema);
+                replaced = true;
+            } else {
+                params.append(pair);
+            }
+            params.append('&');
+        }
+        if (!replaced) {
+            params.append("currentSchema=").append(schema).append('&');
+        }
+        params.setLength(params.length() - 1);
+        return base + "?" + params;
+    }
 
     private HikariDataSource createPoolFromConfig(DatasourceConfig config, String poolName) {
         HikariConfig hc = buildHikariConfig(config, true);
