@@ -83,13 +83,6 @@ scheduler:
     token: ''
     default-project-code: '1'
 
-# 质检告警投递。
-# 界面上的渠道编码是既成契约（AlertTab.tsx::CHANNEL_OPTIONS）：INBOX / EMAIL / WEBHOOK。
-#   - INBOX（站内记录）：落 dq_alert_log 即送达，无需配置，站内告警箱可直接查看；
-#   - WEBHOOK：由本配置驱动。为空表示未接入 —— 告警记录保持 PENDING 并写明「未配置」，
-#     不假装发送成功。企业微信 / 钉钉的群机器人都是 Webhook，填机器人地址即可；
-#   - EMAIL：需要 SMTP 配置，平台当前没有，因此保持 PENDING 并写明原因（不做半成品）。
-alert:
-  webhook:
-    url: ''
+# 质检告警投递配置（alert.webhook.url）已随「告警订阅」页签与告警链路一并删除
+# （2026-10-09）：DqAlertSender / dq_alert_log / dq_alert_subscription 均不再存在。
 

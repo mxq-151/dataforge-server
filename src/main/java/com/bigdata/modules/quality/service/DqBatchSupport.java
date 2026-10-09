@@ -1,18 +1,17 @@
 package com.bigdata.modules.quality.service;
 
-import com.bigdata.modules.quality.enums.QualityCheckStatus;
-
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.List;
 
 /**
- * 质检模块的批次与状态换算辅助。
+ * 质检模块的批次辅助。
  *
  * <p>批次号（{@code batchNo}）在全模块用两种形态出现：契约里的字符串（如 {@code 20260917}）
- * 与分区表达式里的 {@link LocalDate}。换算只在这里做一次，避免各处各写一套解析，
- * 出现「大盘按 A 口径、运行记录按 B 口径」的错位。</p>
+ * 与分区表达式里的 {@link LocalDate}。换算只在这里做一次，避免各处各写一套解析。</p>
+ *
+ * <p>原先还有「任务级状态判定」与「状态计数」两个方法 —— 它们只服务于运行实例聚合，
+ * 随运行记录链路一并移除。</p>
  */
 public final class DqBatchSupport {
 
@@ -49,7 +48,7 @@ public final class DqBatchSupport {
         }
     }
 
-    /** 生成今天的批次号（yyyyMMdd），供手动触发与结果上报兜底 */
+    /** 生成今天的批次号（yyyyMMdd），供结果回传兜底 */
     public static String todayBatchNo() {
         return LocalDate.now().format(BATCH_NO);
     }
@@ -60,30 +59,5 @@ public final class DqBatchSupport {
             return tableName == null ? "" : tableName;
         }
         return databaseName + "." + tableName;
-    }
-
-    /**
-     * 任务级状态判定。
-     *
-     * <p>规则：只要有「校验失败（SQL 没跑通）」就是 FAILED —— 这类问题必须有人看，
-     * 不能因为其它规则通过就整体算成功。全部跑通但有红色异常时，
-     * 仅在处置方式为「阻断下游」时判 FAILED，否则算 SUCCESS（异常已由计数体现）。</p>
-     */
-    public static String resolveRunStatus(boolean anyFailed, boolean anyError, boolean blockOnError) {
-        if (anyFailed) {
-            return "FAILED";
-        }
-        if (anyError && blockOnError) {
-            return "FAILED";
-        }
-        return "SUCCESS";
-    }
-
-    /** 统计某个状态在结果集合里出现的次数 */
-    public static int count(List<QualityCheckStatus> statuses, QualityCheckStatus target) {
-        if (statuses == null) {
-            return 0;
-        }
-        return (int) statuses.stream().filter(s -> s == target).count();
     }
 }

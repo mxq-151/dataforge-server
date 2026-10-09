@@ -29,6 +29,13 @@ export SPRING_DATASOURCE_URL="jdbc:postgresql://${PG_HOST}:${PG_PORT}/${DS_DB}"
 export SPRING_DATASOURCE_USERNAME="$PG_USER"
 export SPRING_DATASOURCE_PASSWORD="$PG_PASSWORD"
 export SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.postgresql.Driver
+# 同时启用 postgresql profile: 官方默认 profile 是 h2,其 Quartz
+# driverDelegateClass=StdJDBCDelegate 用 ResultSet.getBlob() 读 bytea 列的 JOB_DATA,
+# 而 pgjdbc 的 getBlob 把值当 large object OID 解析,会抛
+# "Bad value for type long : \x",导致调度"下线"(deleteJob)失败。
+# postgresql profile 会换成 PostgreSQLDelegate(改用 ResultSet.getBytes() 读 bytea)。
+# 数据源仍以上面的 SPRING_DATASOURCE_* 环境变量为准(优先级高于 profile yaml)。
+export SPRING_PROFILES_ACTIVE=postgresql
 
 echo "[ds] starting dolphinscheduler standalone server (sql: postgresql://${PG_HOST}:${PG_PORT}/${DS_DB}) ..."
 cd "$DOLPHINSCHEDULER_HOME" || exit 1

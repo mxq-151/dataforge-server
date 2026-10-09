@@ -3,7 +3,7 @@ package com.bigdata.modules.quality.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.test.ContractMockMvcSupport;
-import com.bigdata.modules.quality.dto.QualityRuleRegisterDTO;
+import com.bigdata.modules.quality.dto.QualityRuleSaveDTO;
 import com.bigdata.modules.quality.service.DqRuleService;
 import com.bigdata.modules.quality.vo.QualityRuleRegisterVO;
 import com.bigdata.modules.quality.vo.QualityRuleVO;
@@ -196,7 +196,7 @@ class DqRuleApiContractTest {
         @DisplayName("前端与 S3 程序已接通的 8 个调用全部命中，无 404 / 405")
         void allFrontendCallsAreMapped() throws Exception {
             stubPage();
-            when(dqRuleService.register(any(QualityRuleRegisterDTO.class))).thenReturn(new QualityRuleRegisterVO());
+            when(dqRuleService.register(any(QualityRuleSaveDTO.class))).thenReturn(new QualityRuleRegisterVO());
 
             List<MockHttpServletRequestBuilder> calls = frontendCalls();
             assertEquals(8, calls.size(),
@@ -247,7 +247,7 @@ class DqRuleApiContractTest {
             vo.setRuleType("PRIMARY_KEY_UNIQUE");
             vo.setTemplateCode("PRIMARY_KEY_UNIQUE");
             vo.setCreated(false);
-            when(dqRuleService.register(any(QualityRuleRegisterDTO.class))).thenReturn(vo);
+            when(dqRuleService.register(any(QualityRuleSaveDTO.class))).thenReturn(vo);
 
             JsonNode data = dataOf(post("/quality/rule/register").contentType(MediaType.APPLICATION_JSON)
                     .content("{\"ruleName\":\"R_AD_001 事件主键唯一\",\"ruleType\":\"PRIMARY_KEY_UNIQUE\","
@@ -271,7 +271,7 @@ class DqRuleApiContractTest {
         @Test
         @DisplayName("登记字段按 camelCase 绑定，库表字段名不得静默丢失")
         void registerBindsRuleIdentity() throws Exception {
-            when(dqRuleService.register(any(QualityRuleRegisterDTO.class))).thenReturn(new QualityRuleRegisterVO());
+            when(dqRuleService.register(any(QualityRuleSaveDTO.class))).thenReturn(new QualityRuleRegisterVO());
 
             call(post("/quality/rule/register").contentType(MediaType.APPLICATION_JSON)
                     .content("{\"ruleName\":\"R_AD_001 事件主键唯一\",\"ruleType\":\"PRIMARY_KEY_UNIQUE\","
@@ -280,9 +280,9 @@ class DqRuleApiContractTest {
                             + "\"expectedValue\":\"重复=0\",\"warnThreshold\":\"重复<=1\","
                             + "\"disposeMode\":\"BLOCK\",\"ownerName\":\"zhangsan\"}"));
 
-            ArgumentCaptor<QualityRuleRegisterDTO> captor = ArgumentCaptor.forClass(QualityRuleRegisterDTO.class);
+            ArgumentCaptor<QualityRuleSaveDTO> captor = ArgumentCaptor.forClass(QualityRuleSaveDTO.class);
             verify(dqRuleService).register(captor.capture());
-            QualityRuleRegisterDTO dto = captor.getValue();
+            QualityRuleSaveDTO dto = captor.getValue();
 
             assertEquals("R_AD_001 事件主键唯一", dto.getRuleName());
             assertEquals("PRIMARY_KEY_UNIQUE", dto.getRuleType());
@@ -310,7 +310,7 @@ class DqRuleApiContractTest {
         @Test
         @DisplayName("业务异常走 HTTP 200 + body.code（前端 request 靠 body.code 判错）")
         void businessExceptionKeepsHttp200() throws Exception {
-            when(dqRuleService.register(any(QualityRuleRegisterDTO.class)))
+            when(dqRuleService.register(any(QualityRuleSaveDTO.class)))
                     .thenThrow(new BusinessException(400, "登记必须提供规则名"));
 
             JsonNode body = call(post("/quality/rule/register").contentType(MediaType.APPLICATION_JSON)

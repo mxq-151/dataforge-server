@@ -1,6 +1,5 @@
 package com.bigdata.modules.quality.vo;
 
-import com.bigdata.modules.quality.vo.QualityPassRatePointVO;
 import com.bigdata.modules.quality.vo.QualityProblemTableVO;
 import java.util.List;
 
@@ -8,6 +7,11 @@ import java.util.List;
  * QualityOverviewVO
  *
  * <p>字段名与前端 src/types/quality.ts 的接口逐字对应。</p>
+ *
+ * <p>已移除的两个字段：{@code passRateTrend}（按运行实例聚合的通过率趋势）与
+ * {@code blockCount}（按任务处置策略统计的阻断次数）—— 运行实例与任务两条链路
+ * 已随「运行记录 / 质检任务」页签删除，二者失去数据源。TOP 问题表保留：
+ * 它改由 dq_rule_result（结果留痕）按时间窗直接聚合，不再依赖运行实例。</p>
  *
  * @author dataforge
  */
@@ -28,14 +32,8 @@ public class QualityOverviewVO {
     /** 启用规则数 */
     private Integer enabledRuleCount;
 
-    /** 近 N 日通过率趋势 */
-    private List<QualityPassRatePointVO> passRateTrend;
-
     /** TOP 质量问题表 */
     private List<QualityProblemTableVO> topProblemTables;
-
-    /** 强规则阻断次数 */
-    private Integer blockCount;
 
     public Integer getCoveredTableCount() { return coveredTableCount; }
     public void setCoveredTableCount(Integer coveredTableCount) { this.coveredTableCount = coveredTableCount; }
@@ -47,10 +45,6 @@ public class QualityOverviewVO {
     public void setRuleCount(Integer ruleCount) { this.ruleCount = ruleCount; }
     public Integer getEnabledRuleCount() { return enabledRuleCount; }
     public void setEnabledRuleCount(Integer enabledRuleCount) { this.enabledRuleCount = enabledRuleCount; }
-    public List<QualityPassRatePointVO> getPassRateTrend() { return passRateTrend; }
-    public void setPassRateTrend(List<QualityPassRatePointVO> passRateTrend) { this.passRateTrend = passRateTrend; }
     public List<QualityProblemTableVO> getTopProblemTables() { return topProblemTables; }
     public void setTopProblemTables(List<QualityProblemTableVO> topProblemTables) { this.topProblemTables = topProblemTables; }
-    public Integer getBlockCount() { return blockCount; }
-    public void setBlockCount(Integer blockCount) { this.blockCount = blockCount; }
 }

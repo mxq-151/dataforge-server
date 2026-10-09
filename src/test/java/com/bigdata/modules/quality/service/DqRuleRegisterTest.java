@@ -1,22 +1,17 @@
 package com.bigdata.modules.quality.service;
 
 import com.bigdata.common.exception.BusinessException;
-import com.bigdata.modules.quality.dto.QualityRuleRegisterDTO;
+import com.bigdata.modules.quality.dto.QualityRuleSaveDTO;
 import com.bigdata.modules.quality.entity.DqRule;
 import com.bigdata.modules.quality.entity.DqRuleTemplate;
-import com.bigdata.modules.quality.entity.DqTask;
-import com.bigdata.modules.quality.entity.DqTaskRuleRel;
 import com.bigdata.modules.quality.mapper.DqRuleMapper;
 import com.bigdata.modules.quality.mapper.DqRuleTemplateMapper;
-import com.bigdata.modules.quality.mapper.DqTaskMapper;
-import com.bigdata.modules.quality.mapper.DqTaskRuleRelMapper;
 import com.bigdata.modules.quality.vo.QualityRuleRegisterVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -27,7 +22,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,6 +36,9 @@ import static org.mockito.Mockito.when;
  * <p>登记存在的意义是把关联键从规则名字符串换成 ID，所以本测试锁的第一件事是
  * <b>判定键与回传反查口径一致</b>（规则名 + 库 + 表）；第二件事是<b>已存在不覆盖</b> ——
  * 平台里的阈值可能已被人手工调过，登记动作不该把它冲掉。</p>
+ *
+ * <p>原先还有一组「登记时顺带挂到质检任务（taskId）」的用例 —— 质检任务链路已整体下线，
+ * 该能力连同 dq_task_rule_rel 一并移除，入参也退回到 {@link QualityRuleSaveDTO}。</p>
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -52,10 +49,6 @@ class DqRuleRegisterTest {
     private DqRuleMapper dqRuleMapper;
     @Mock
     private DqRuleTemplateMapper dqRuleTemplateMapper;
-    @Mock
-    private DqTaskRuleRelMapper dqTaskRuleRelMapper;
-    @Mock
-    private DqTaskMapper dqTaskMapper;
     /**
      * 保存前会先编译一次校验 SQL（把配置错误挡在登记这一步）。
      * 这里只要一个非空 mock 即可 —— validateRenderable 只看"编译是否抛异常"，不用其返回值。
@@ -70,8 +63,6 @@ class DqRuleRegisterTest {
         service = new DqRuleService();
         ReflectionTestUtils.setField(service, "dqRuleMapper", dqRuleMapper);
         ReflectionTestUtils.setField(service, "dqRuleTemplateMapper", dqRuleTemplateMapper);
-        ReflectionTestUtils.setField(service, "dqTaskRuleRelMapper", dqTaskRuleRelMapper);
-        ReflectionTestUtils.setField(service, "dqTaskMapper", dqTaskMapper);
         ReflectionTestUtils.setField(service, "dqExecutionService", dqExecutionService);
 
         // insert 时回填主键，模拟自增
@@ -90,8 +81,8 @@ class DqRuleRegisterTest {
     }
 
     /** 未登记状态的入参：字段级规则，给了字段，规则类型合法 */
-    private QualityRuleRegisterDTO newRuleDto() {
-        QualityRuleRegisterDTO dto = new QualityRuleRegisterDTO();
+    private QualityRuleSaveDTO newRuleDto() {
+        QualityRuleSaveDTO dto = new QualityRuleSaveDTO();
         dto.setRuleName("R_AD_001 事件主键唯一");
         dto.setRuleType("PRIMARY_KEY_UNIQUE");
         dto.setDatasourceName("hive-prod");
@@ -143,80 +134,17 @@ class DqRuleRegisterTest {
     }
 
     @Nested
-    @DisplayName("挂载到质检任务")
-    class TaskBinding {
-
-        @Test
-        @DisplayName("带 taskId 时顺手挂载并回执，避免登记完留下「孤儿规则」")
-        void bindsWhenTaskIdGiven() {
-            when(dqRuleMapper.selectList(any())).thenReturn(List.of());
-            DqTask task = new DqTask();
-            task.setId(9L);
-            task.setTaskName("广告域质检");
-            when(dqTaskMapper.selectById(9L)).thenReturn(task);
-            when(dqTaskRuleRelMapper.selectCount(any())).thenReturn(0L);
-
-            QualityRuleRegisterVO vo = service.register(dtoWithTask(9L));
-
-            assertEquals(9L, vo.getTaskId());
-            ArgumentCaptor<DqTaskRuleRel> captor = ArgumentCaptor.forClass(DqTaskRuleRel.class);
-            verify(dqTaskRuleRelMapper).insert(captor.capture());
-            assertEquals(9L, captor.getValue().getTaskId());
-            assertEquals(21L, captor.getValue().getRuleId());
-        }
-
-        @Test
-        @DisplayName("已挂载时不重复插入（幂等）")
-        void doesNotDuplicateBinding() {
-            when(dqRuleMapper.selectList(any())).thenReturn(List.of());
-            DqTask task = new DqTask();
-            task.setId(9L);
-            when(dqTaskMapper.selectById(9L)).thenReturn(task);
-            when(dqTaskRuleRelMapper.selectCount(any())).thenReturn(1L);
-
-            assertEquals(9L, service.register(dtoWithTask(9L)).getTaskId());
-            verify(dqTaskRuleRelMapper, never()).insert(any(DqTaskRuleRel.class));
-        }
-
-        @Test
-        @DisplayName("taskId 不存在时拒绝，避免留下指向空任务的关联")
-        void rejectsUnknownTask() {
-            when(dqRuleMapper.selectList(any())).thenReturn(List.of());
-            when(dqTaskMapper.selectById(999L)).thenReturn(null);
-
-            BusinessException ex = assertThrows(BusinessException.class,
-                    () -> service.register(dtoWithTask(999L)));
-            assertTrue(ex.getMessage().contains("质检任务不存在"));
-        }
-
-        @Test
-        @DisplayName("不给 taskId 时行为不变：只登记、不挂载")
-        void noTaskIdKeepsPlainRegister() {
-            when(dqRuleMapper.selectList(any())).thenReturn(List.of());
-
-            assertNull(service.register(newRuleDto()).getTaskId());
-            verify(dqTaskRuleRelMapper, never()).insert(any(DqTaskRuleRel.class));
-        }
-
-        private QualityRuleRegisterDTO dtoWithTask(Long taskId) {
-            QualityRuleRegisterDTO dto = newRuleDto();
-            dto.setTaskId(taskId);
-            return dto;
-        }
-    }
-
-    @Nested
     @DisplayName("入参校验")
     class Validation {
 
         @Test
         @DisplayName("缺规则名或表名时拒绝 —— 它们是判定键，缺了会登记出孤儿规则")
         void requiresIdentityFields() {
-            QualityRuleRegisterDTO noName = newRuleDto();
+            QualityRuleSaveDTO noName = newRuleDto();
             noName.setRuleName("  ");
             assertThrows(BusinessException.class, () -> service.register(noName));
 
-            QualityRuleRegisterDTO noTable = newRuleDto();
+            QualityRuleSaveDTO noTable = newRuleDto();
             noTable.setTableName(null);
             assertThrows(BusinessException.class, () -> service.register(noTable));
 
@@ -226,7 +154,7 @@ class DqRuleRegisterTest {
         @Test
         @DisplayName("规则类型必须归属 7 类之一（复用 create 的校验，不另起一套）")
         void rejectsUnknownRuleType() {
-            QualityRuleRegisterDTO dto = newRuleDto();
+            QualityRuleSaveDTO dto = newRuleDto();
             dto.setRuleType("CUSTOM_SOMETHING");
             when(dqRuleMapper.selectList(any())).thenReturn(List.of());
 
@@ -238,7 +166,7 @@ class DqRuleRegisterTest {
         @Test
         @DisplayName("字段级规则未指定字段时拒绝")
         void rejectsColumnScopeWithoutColumn() {
-            QualityRuleRegisterDTO dto = newRuleDto();
+            QualityRuleSaveDTO dto = newRuleDto();
             dto.setColumnName(null);
             when(dqRuleMapper.selectList(any())).thenReturn(List.of());
 

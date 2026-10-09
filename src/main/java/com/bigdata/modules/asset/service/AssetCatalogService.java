@@ -36,12 +36,10 @@ import com.bigdata.modules.metadata.mapper.IndicatorMapper;
 import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
 import com.bigdata.modules.quality.entity.DqRule;
 import com.bigdata.modules.quality.entity.DqRuleResult;
-import com.bigdata.modules.quality.entity.DqRunInstance;
 import com.bigdata.modules.quality.enums.DqDialect;
 import com.bigdata.modules.quality.enums.QualityCheckStatus;
 import com.bigdata.modules.quality.mapper.DqRuleMapper;
 import com.bigdata.modules.quality.mapper.DqRuleResultMapper;
-import com.bigdata.modules.quality.mapper.DqRunInstanceMapper;
 import com.bigdata.modules.quality.sql.DqSqlBuilder;
 import com.bigdata.modules.system.entity.SysTablePermission;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -119,9 +117,6 @@ public class AssetCatalogService {
 
     @Autowired
     private DqRuleMapper dqRuleMapper;
-
-    @Autowired
-    private DqRunInstanceMapper dqRunInstanceMapper;
 
     @Autowired
     private DqRuleResultMapper dqRuleResultMapper;
@@ -808,31 +803,32 @@ public class AssetCatalogService {
         }
         vo.setEnabledRuleCount(enabled);
 
-        DqRunInstance lastRun = lastRunOf(table);
-        if (lastRun == null) {
-            vo.setLastRunStatus("");
-            vo.setLastRunTime("");
-            vo.setErrorCount(0);
-            vo.setFailCount(0);
-            vo.setProblemRuleCount(0);
-            return vo;
+        // 最近一次校验：以「该表规则的结果留痕」为准（dq_rule_result 自包含，平台已无运行实例）
+        if (ruleIds.isEmpty()) {
+            return emptyQualitySummary(vo);
         }
-        vo.setLastRunStatus(nullToDefault(lastRun.getStatus(), ""));
-        vo.setLastRunTime(formatTime(lastRun.getEndTime() != null ? lastRun.getEndTime() : lastRun.getStartTime()));
+        DqRuleResult latest = latestResultOf(ruleIds);
+        if (latest == null || latest.getCreateTime() == null) {
+            return emptyQualitySummary(vo);
+        }
+        vo.setLastRunTime(formatTime(latest.getCreateTime()));
 
-        LambdaQueryWrapper<DqRuleResult> resultWrapper = new LambdaQueryWrapper<>();
-        resultWrapper.eq(DqRuleResult::getRunId, lastRun.getId());
-        List<DqRuleResult> results = dqRuleResultMapper.selectList(resultWrapper);
+        // 同一天的多次回传视为「同一次校验」：回传侧本就按天归集批次
+        LocalDate latestDate = latest.getCreateTime().toLocalDate();
+        List<DqRuleResult> results = dqRuleResultMapper.selectList(new LambdaQueryWrapper<DqRuleResult>()
+                .in(DqRuleResult::getRuleId, ruleIds)
+                .ge(DqRuleResult::getCreateTime, latestDate.atStartOfDay())
+                .lt(DqRuleResult::getCreateTime, latestDate.plusDays(1).atStartOfDay()));
 
         int errorCount = 0;
         int failCount = 0;
         Set<Long> problemRules = new LinkedHashSet<>();
         for (DqRuleResult row : results) {
             String status = row.getStatus() == null ? "" : row.getStatus();
-            if (QualityCheckStatus.ERROR.name().equals(status)) {
+            if (QualityCheckStatus.ERROR.getCode().equals(status)) {
                 errorCount++;
                 problemRules.add(row.getRuleId());
-            } else if (QualityCheckStatus.FAILED.name().equals(status)) {
+            } else if (QualityCheckStatus.FAILED.getCode().equals(status)) {
                 failCount++;
                 problemRules.add(row.getRuleId());
             }
@@ -840,24 +836,38 @@ public class AssetCatalogService {
         vo.setErrorCount(errorCount);
         vo.setFailCount(failCount);
         vo.setProblemRuleCount(problemRules.size());
-        log.debug("资产质量摘要: table={}.{}, 规则数={}, 最近运行={}, error={}, fail={}",
-                table.getDatabaseName(), table.getTableName(), scoped.size(), lastRun.getId(), errorCount, failCount);
+        // 状态沿用原先的两档：有「校验失败（SQL 没跑通）」即 FAILED，否则 SUCCESS；
+        // 红色异常由 errorCount 单独体现，不抬高整体状态（与运行实例时代的判定一致）
+        vo.setLastRunStatus(failCount > 0 ? "FAILED" : "SUCCESS");
+        log.debug("资产质量摘要: table={}.{}, 规则数={}, 最近校验={}, error={}, fail={}",
+                table.getDatabaseName(), table.getTableName(), scoped.size(), vo.getLastRunTime(), errorCount, failCount);
         return vo;
     }
 
-    private DqRunInstance lastRunOf(TableMetadata table) {
-        LambdaQueryWrapper<DqRunInstance> wrapper = new LambdaQueryWrapper<>();
-        if (table.getDatasourceId() != null) {
-            wrapper.eq(DqRunInstance::getTargetDatasourceId, table.getDatasourceId());
-        }
-        wrapper.eq(DqRunInstance::getTargetDatabaseName, table.getDatabaseName())
-                .eq(DqRunInstance::getTargetTableName, table.getTableName())
-                .orderByDesc(DqRunInstance::getId);
-        // 用分页插件生成方言无关的 LIMIT
-        com.baomidou.mybatisplus.extension.plugins.pagination.Page<DqRunInstance> page =
-                dqRunInstanceMapper.selectPage(
-                        new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 1), wrapper);
-        List<DqRunInstance> records = page.getRecords();
+    /** 无规则或无校验结果时的空摘要 */
+    private static AssetQualitySummaryVO emptyQualitySummary(AssetQualitySummaryVO vo) {
+        vo.setLastRunStatus("");
+        vo.setLastRunTime("");
+        vo.setErrorCount(0);
+        vo.setFailCount(0);
+        vo.setProblemRuleCount(0);
+        return vo;
+    }
+
+    /**
+     * 该表规则最近一条校验结果。
+     *
+     * <p>用分页插件取「排最前的一条」而不是 {@code last("LIMIT 1")}：后者在 PG/H2 上会写出
+     * 方言相关 SQL（见 {@code DqSqlBuilder} 的同类处理）。</p>
+     */
+    private DqRuleResult latestResultOf(Set<Long> ruleIds) {
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<DqRuleResult> page =
+                dqRuleResultMapper.selectPage(
+                        new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 1),
+                        new LambdaQueryWrapper<DqRuleResult>()
+                                .in(DqRuleResult::getRuleId, ruleIds)
+                                .orderByDesc(DqRuleResult::getId));
+        List<DqRuleResult> records = page.getRecords();
         return records.isEmpty() ? null : records.get(0);
     }
 

@@ -5,21 +5,16 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.quality.dto.QualityBatchByTemplateDTO;
 import com.bigdata.modules.quality.dto.QualityBatchTargetDTO;
-import com.bigdata.modules.quality.dto.QualityRuleRegisterDTO;
 import com.bigdata.modules.quality.dto.QualityRuleSaveDTO;
 import com.bigdata.modules.quality.dto.QualityTestRunDTO;
 import com.bigdata.modules.quality.entity.DqRule;
 import com.bigdata.modules.quality.entity.DqRuleTemplate;
-import com.bigdata.modules.quality.entity.DqTask;
-import com.bigdata.modules.quality.entity.DqTaskRuleRel;
 import com.bigdata.modules.quality.enums.QualityCompareMode;
 import com.bigdata.modules.quality.enums.QualityDisposeMode;
 import com.bigdata.modules.quality.enums.QualityRuleType;
 import com.bigdata.modules.quality.enums.QualityTemplateKind;
 import com.bigdata.modules.quality.mapper.DqRuleMapper;
 import com.bigdata.modules.quality.mapper.DqRuleTemplateMapper;
-import com.bigdata.modules.quality.mapper.DqTaskMapper;
-import com.bigdata.modules.quality.mapper.DqTaskRuleRelMapper;
 import com.bigdata.modules.quality.vo.QualityRuleRegisterVO;
 import com.bigdata.modules.quality.vo.QualityRuleResultVO;
 import com.bigdata.modules.quality.vo.QualityRuleVO;
@@ -51,12 +46,6 @@ public class DqRuleService {
 
     @Autowired
     private DqRuleTemplateMapper dqRuleTemplateMapper;
-
-    @Autowired
-    private DqTaskRuleRelMapper dqTaskRuleRelMapper;
-
-    @Autowired
-    private DqTaskMapper dqTaskMapper;
 
     @Autowired
     private DqExecutionService dqExecutionService;
@@ -110,33 +99,6 @@ public class DqRuleService {
         return rule;
     }
 
-    /** 按 id 批量取规则（任务执行用），保持传入顺序 */
-    public List<DqRule> listByIds(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) {
-            return List.of();
-        }
-        List<DqRule> rules = dqRuleMapper.selectBatchIds(ids.stream().distinct().collect(Collectors.toList()));
-        Map<Long, DqRule> byId = rules.stream()
-                .collect(Collectors.toMap(DqRule::getId, r -> r, (a, b) -> a));
-        List<DqRule> ordered = new ArrayList<>();
-        for (Long id : ids) {
-            DqRule rule = byId.get(id);
-            if (rule != null) {
-                ordered.add(rule);
-            }
-        }
-        return ordered;
-    }
-
-    /** 任务挂载的规则（对应 /quality/task/{id}/rules） */
-    public List<QualityRuleVO> listByTask(Long taskId) {
-        List<DqTaskRuleRel> rels = dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
-                .eq(DqTaskRuleRel::getTaskId, taskId)
-                .orderByAsc(DqTaskRuleRel::getId));
-        List<Long> ruleIds = rels.stream().map(DqTaskRuleRel::getRuleId).collect(Collectors.toList());
-        return listByIds(ruleIds).stream().map(DqRuleService::toVO).collect(Collectors.toList());
-    }
-
     // ==================================================================
     // 写操作
     // ==================================================================
@@ -158,7 +120,7 @@ public class DqRuleService {
      *
      * <h3>与 create 的区别</h3>
      * <ul>
-     *   <li>幂等：判定键是「规则名 + 库 + 表」，与 {@code DqRunService.resolveRuleId} 的反查口径
+     *   <li>幂等：判定键是「规则名 + 库 + 表」，与 {@link DqResultService} 的结果回传反查口径
      *       <b>故意保持一致</b> —— 否则会出现「登记到 A、回传匹配到 B」这种最难查的错配。</li>
      *   <li>已存在<b>不覆盖</b>：平台里的阈值可能已被人手工调过，登记动作不该把它冲掉。
      *       需要同步改动请走 {@code PUT /quality/rule} 或界面编辑。</li>
@@ -168,7 +130,7 @@ public class DqRuleService {
      *
      * @return 登记回执；dto 缺少判定键（规则名 / 库 / 表）时抛业务异常
      */
-    public QualityRuleRegisterVO register(QualityRuleRegisterDTO dto) {
+    public QualityRuleRegisterVO register(QualityRuleSaveDTO dto) {
         if (dto == null) {
             throw new BusinessException("登记内容不能为空");
         }
@@ -193,38 +155,7 @@ public class DqRuleService {
             created = true;
         }
 
-        Long boundTaskId = bindTask(rule, dto.getTaskId());
-        QualityRuleRegisterVO vo = toRegisterVO(rule, created);
-        vo.setTaskId(boundTaskId);
-        return vo;
-    }
-
-    /**
-     * 把规则挂到质检任务上（幂等）。
-     *
-     * <p>不挂任务的规则在平台里是"孤儿"：不会被调度执行、按项目维度的统计看不到、
-     * 按任务配置的告警订阅也订不到 —— 而且这些都是静默的。所以登记时给个入口顺手挂上。</p>
-     *
-     * @return 实际挂载到的任务 ID；未请求挂载时返回 {@code null}
-     */
-    private Long bindTask(DqRule rule, Long taskId) {
-        if (taskId == null) {
-            return null;
-        }
-        DqTask task = dqTaskMapper.selectById(taskId);
-        if (task == null) {
-            throw new BusinessException("质检任务不存在: " + taskId);
-        }
-        long existing = dqTaskRuleRelMapper.selectCount(new LambdaQueryWrapper<DqTaskRuleRel>()
-                .eq(DqTaskRuleRel::getTaskId, taskId)
-                .eq(DqTaskRuleRel::getRuleId, rule.getId()));
-        if (existing == 0) {
-            DqTaskRuleRel rel = new DqTaskRuleRel();
-            rel.setTaskId(taskId);
-            rel.setRuleId(rule.getId());
-            dqTaskRuleRelMapper.insert(rel);
-        }
-        return taskId;
+        return toRegisterVO(rule, created);
     }
 
     /**
@@ -270,12 +201,6 @@ public class DqRuleService {
     @Transactional
     public void delete(Long id) {
         DqRule existing = getById(id);
-        long bound = dqTaskRuleRelMapper.selectCount(new LambdaQueryWrapper<DqTaskRuleRel>()
-                .eq(DqTaskRuleRel::getRuleId, id));
-        if (bound > 0) {
-            throw new BusinessException("该规则已被 " + bound + " 个质检任务引用，"
-                    + "请先从任务中移除再删除");
-        }
         dqRuleMapper.deleteById(existing.getId());
     }
 

@@ -1,22 +1,16 @@
 package com.bigdata.modules.quality.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
 import com.bigdata.modules.quality.entity.DqRule;
 import com.bigdata.modules.quality.entity.DqRuleResult;
-import com.bigdata.modules.quality.entity.DqRunInstance;
-import com.bigdata.modules.quality.entity.DqTask;
-import com.bigdata.modules.quality.entity.DqTaskRuleRel;
 import com.bigdata.modules.quality.enums.QualityCheckStatus;
-import com.bigdata.modules.quality.enums.QualityDisposeMode;
-import com.bigdata.modules.quality.enums.QualityRunStatus;
 import com.bigdata.modules.quality.mapper.DqRuleMapper;
-import com.bigdata.modules.quality.mapper.DqTaskMapper;
-import com.bigdata.modules.quality.mapper.DqTaskRuleRelMapper;
+import com.bigdata.modules.quality.mapper.DqRuleResultMapper;
 import com.bigdata.modules.quality.vo.QualityOverviewVO;
-import com.bigdata.modules.quality.vo.QualityPassRatePointVO;
 import com.bigdata.modules.quality.vo.QualityProblemTableVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -24,13 +18,10 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -39,14 +30,14 @@ import java.util.stream.Collectors;
  * <h3>两个必须说清楚的统计口径</h3>
  * <ol>
  *   <li><b>规则覆盖率的分母</b>：契约写的是「应配置规则的核心表数（有产出任务的关键表）」。
- *       但服务端目前没有接入调度系统的产出任务视图，无法判定「哪张表有关键产出」。
+ *       但服务端没有接入调度系统的产出任务视图，无法判定「哪张表有关键产出」。
  *       这里改用「已纳管元数据的表」作为分母 —— 口径是「纳管的表里有多少配了规则」，
  *       而不是「有关键产出的表里有多少配了规则」。这个差异必须是显式的：
  *       若把分母悄悄换成一个小集合，覆盖率会虚高成一个看起来很好看的数字。</li>
- *   <li><b>通过率的聚合层级</b>：按运行实例聚合（passCount / 总条数），而不是按结果行聚合。
- *       原因是一次运行的规则条数会影响按行聚合的权重，而「每天有多少次运行达标」
- *       才是运维真正看的东西；同时按运行实例聚合只需扫一张小表，
- *       按结果行聚合在日积月累后会扫爆 dq_rule_result。</li>
+ *   <li><b>TOP 问题表的数据源</b>：改为直接聚合 {@code dq_rule_result}（结果留痕）在统计窗口内
+ *       未通过的结果行。运行实例链路（dq_run_instance）已删除，原先「按运行实例聚合通过率」
+ *       的口径随之消失 —— 因此本服务不再输出通过率趋势与阻断次数：它们要么没有数据源，
+ *       要么（阻断次数）依赖任务级处置策略。保留一个恒为 0 的指标比不展示更糟。</li>
  * </ol>
  */
 @Service
@@ -55,8 +46,8 @@ public class DqOverviewService {
     /** 默认统计窗口（天，含今天） */
     private static final int DEFAULT_WINDOW_DAYS = 7;
 
-    /** 大盘列表最多扫描的运行实例数：防止统计接口把库拖垮 */
-    private static final int MAX_RUNS_SCAN = 5000;
+    /** 大盘最多扫描的校验结果行数：防止统计接口把库拖垮 */
+    private static final int MAX_RESULTS_SCAN = 5000;
 
     /** TOP 问题表返回条数 */
     private static final int TOP_PROBLEM_LIMIT = 10;
@@ -65,18 +56,12 @@ public class DqOverviewService {
     private DqRuleMapper dqRuleMapper;
 
     @Autowired
-    private DqTaskMapper dqTaskMapper;
-
-    @Autowired
-    private DqTaskRuleRelMapper dqTaskRuleRelMapper;
+    private DqRuleResultMapper dqRuleResultMapper;
 
     @Autowired
     private TableMetadataMapper tableMetadataMapper;
 
-    @Autowired
-    private DqRunService dqRunService;
-
-    public QualityOverviewVO getOverview(LocalDate startDate, LocalDate endDate, String projectCode) {
+    public QualityOverviewVO getOverview(LocalDate startDate, LocalDate endDate) {
         LocalDate to = endDate == null ? LocalDate.now() : endDate;
         LocalDate from = startDate == null ? to.minusDays(DEFAULT_WINDOW_DAYS - 1L) : startDate;
         if (from.isAfter(to)) {
@@ -85,9 +70,8 @@ public class DqOverviewService {
 
         QualityOverviewVO vo = new QualityOverviewVO();
 
-        // ── 规则侧：限定到项目范围内的规则集合 ────────────────────────────
-        Set<Long> scopedRuleIds = scopedRuleIds(projectCode);
-        List<DqRule> rules = loadRules(scopedRuleIds);
+        // ── 规则侧：全量规则与覆盖率 ────────────────────────────────────
+        List<DqRule> rules = dqRuleMapper.selectList(new LambdaQueryWrapper<>());
         List<DqRule> enabledRules = rules.stream()
                 .filter(r -> r.getEnabled() == null || r.getEnabled() == 1)
                 .collect(Collectors.toList());
@@ -104,76 +88,14 @@ public class DqOverviewService {
         vo.setTargetTableCount(countManagedTables());
         vo.setRuleCoverage(ratio(coveredTables, vo.getTargetTableCount()));
 
-        // ── 运行侧：窗口内按天聚合通过率 ────────────────────────────────
-        LocalDateTime windowFrom = from.atStartOfDay();
-        LocalDateTime windowTo = to.plusDays(1).atStartOfDay();
-        List<DqRunInstance> runs = dqRunService.listRunsBetween(windowFrom, windowTo, MAX_RUNS_SCAN)
-                .stream()
-                .filter(run -> scopedRunMatches(run, projectCode, scopedRuleIds))
-                .collect(Collectors.toList());
-
-        vo.setPassRateTrend(buildTrend(runs, from, to));
-        vo.setBlockCount(countBlocks(runs));
-
-        List<DqRuleResult> unpassed = dqRunService.listUnpassedResults(
-                runs.stream().map(DqRunInstance::getId).collect(Collectors.toList()));
-        vo.setTopProblemTables(buildTopProblemTables(unpassed));
+        // ── 结果侧：窗口内未通过的结果 → TOP 问题表 ─────────────────────
+        vo.setTopProblemTables(buildTopProblemTables(loadUnpassedResults(from, to)));
         return vo;
     }
 
     // ==================================================================
     // 规则范围
     // ==================================================================
-
-    /**
-     * 计算项目范围下的规则 id 集合。
-     *
-     * <p>dq_rule 本身不挂项目，项目归属只能通过「被哪个项目的质检任务引用」得到。
-     * 因此传了 projectCode 时，只统计该项目任务实际引用的规则 ——
-     * 未被任何任务引用的规则属于「配了但没跑」，不应计入某个项目的覆盖率。</p>
-     *
-     * @return 规则 id 集合；未指定 projectCode 时返回 {@code null} 表示不限定
-     */
-    private Set<Long> scopedRuleIds(String projectCode) {
-        if (projectCode == null || projectCode.isBlank()) {
-            return null;
-        }
-        List<DqTask> tasks = dqTaskMapper.selectList(new LambdaQueryWrapper<DqTask>()
-                .eq(DqTask::getProjectCode, projectCode.trim()));
-        if (tasks.isEmpty()) {
-            return Set.of();
-        }
-        List<Long> taskIds = tasks.stream().map(DqTask::getId).collect(Collectors.toList());
-        return dqTaskRuleRelMapper.selectList(new LambdaQueryWrapper<DqTaskRuleRel>()
-                        .in(DqTaskRuleRel::getTaskId, taskIds))
-                .stream()
-                .map(DqTaskRuleRel::getRuleId)
-                .collect(Collectors.toSet());
-    }
-
-    private List<DqRule> loadRules(Set<Long> scopedRuleIds) {
-        LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
-        if (scopedRuleIds != null) {
-            if (scopedRuleIds.isEmpty()) {
-                return List.of();
-            }
-            wrapper.in(DqRule::getId, scopedRuleIds);
-        }
-        return dqRuleMapper.selectList(wrapper);
-    }
-
-    /** 项目范围下，运行实例必须属于该项目任务引用的规则 */
-    private boolean scopedRunMatches(DqRunInstance run, String projectCode, Set<Long> scopedRuleIds) {
-        if (projectCode == null || projectCode.isBlank() || scopedRuleIds == null) {
-            return true;
-        }
-        if (run.getTaskId() == null) {
-            // 结果上报类运行没有任务归属；项目口径下不纳入统计
-            return false;
-        }
-        DqTask task = dqTaskMapper.selectById(run.getTaskId());
-        return task != null && projectCode.trim().equals(task.getProjectCode());
-    }
 
     /**
      * 「应配置规则的表数」= 已纳管元数据的表数（去重 库.表）。
@@ -191,60 +113,23 @@ public class DqOverviewService {
     }
 
     // ==================================================================
-    // 趋势与 TOP 问题表
+    // TOP 问题表
     // ==================================================================
 
-    /** 按自然日补零的通过率趋势：没有运行的日期也要有点，否则折线图会把空档连成直线 */
-    private List<QualityPassRatePointVO> buildTrend(List<DqRunInstance> runs, LocalDate from, LocalDate to) {
-        Map<LocalDate, long[]> byDate = new LinkedHashMap<>();
-        for (LocalDate cursor = from; !cursor.isAfter(to); cursor = cursor.plusDays(1)) {
-            byDate.put(cursor, new long[]{0, 0, 0});
-        }
-        for (DqRunInstance run : runs) {
-            if (run.getStartTime() == null) {
-                continue;
-            }
-            long[] bucket = byDate.get(run.getStartTime().toLocalDate());
-            if (bucket == null) {
-                continue;
-            }
-            bucket[0] += nullSafe(run.getPassCount());
-            bucket[1] += nullSafe(run.getWarnCount()) + nullSafe(run.getErrorCount()) + nullSafe(run.getFailedCount());
-        }
-        List<QualityPassRatePointVO> points = new ArrayList<>();
-        for (Map.Entry<LocalDate, long[]> entry : byDate.entrySet()) {
-            long pass = entry.getValue()[0];
-            long fail = entry.getValue()[1];
-            QualityPassRatePointVO point = new QualityPassRatePointVO();
-            point.setStatDate(entry.getKey().toString());
-            point.setFailCount((int) fail);
-            point.setPassRate(ratio(pass, pass + fail));
-            points.add(point);
-        }
-        return points;
-    }
-
-    /** 强规则阻断次数：处置策略为「阻断下游」的任务，其失败运行次数 */
-    private int countBlocks(List<DqRunInstance> runs) {
-        List<Long> taskIds = runs.stream()
-                .map(DqRunInstance::getTaskId)
-                .filter(java.util.Objects::nonNull)
-                .distinct()
-                .collect(Collectors.toList());
-        if (taskIds.isEmpty()) {
-            return 0;
-        }
-        Map<Long, String> policies = dqRunService.mapTaskPolicies(taskIds);
-        int blocks = 0;
-        for (DqRunInstance run : runs) {
-            if (!QualityRunStatus.FAILED.getCode().equalsIgnoreCase(run.getStatus()) || run.getTaskId() == null) {
-                continue;
-            }
-            if (QualityDisposeMode.BLOCK.getCode().equalsIgnoreCase(policies.get(run.getTaskId()))) {
-                blocks++;
-            }
-        }
-        return blocks;
+    /**
+     * 取统计窗口内未通过的校验结果。
+     *
+     * <p>用分页插件而不是 {@code last("LIMIT n")} 限制扫描量：后者在 PG/H2 上会写出方言相关 SQL
+     * （见 DqExecutionService 里的同类处理）。</p>
+     */
+    private List<DqRuleResult> loadUnpassedResults(LocalDate from, LocalDate to) {
+        LambdaQueryWrapper<DqRuleResult> wrapper = new LambdaQueryWrapper<>();
+        wrapper.ge(DqRuleResult::getCreateTime, from.atStartOfDay())
+                .lt(DqRuleResult::getCreateTime, to.plusDays(1).atStartOfDay())
+                .ne(DqRuleResult::getStatus, QualityCheckStatus.PASS.getCode())
+                .orderByDesc(DqRuleResult::getId);
+        Page<DqRuleResult> page = dqRuleResultMapper.selectPage(new Page<>(1, MAX_RESULTS_SCAN), wrapper);
+        return page.getRecords();
     }
 
     /**
@@ -258,7 +143,7 @@ public class DqOverviewService {
         if (unpassed.isEmpty()) {
             return List.of();
         }
-        Map<Long, DqRule> rules = dqRunService.mapRules(unpassed.stream()
+        Map<Long, DqRule> rules = mapRules(unpassed.stream()
                 .map(DqRuleResult::getRuleId)
                 .filter(java.util.Objects::nonNull)
                 .distinct()
@@ -302,6 +187,19 @@ public class DqOverviewService {
                 .collect(Collectors.toList());
     }
 
+    /** 按 id 批量取规则，用于把结果映射回「库.表」与负责人 */
+    private Map<Long, DqRule> mapRules(List<Long> ruleIds) {
+        if (ruleIds == null || ruleIds.isEmpty()) {
+            return Map.of();
+        }
+        List<DqRule> rules = dqRuleMapper.selectBatchIds(ruleIds);
+        Map<Long, DqRule> byId = new LinkedHashMap<>();
+        for (DqRule rule : rules) {
+            byId.put(rule.getId(), rule);
+        }
+        return byId;
+    }
+
     /** 按表名批量取元数据负责人，作为规则未填负责人时的兜底 */
     private Map<String, String> ownerFallback(List<String> tableNames) {
         if (tableNames.isEmpty()) {
@@ -325,7 +223,7 @@ public class DqOverviewService {
     // 辅助
     // ==================================================================
 
-    /** 比例，保留 4 位小数（契约里 ruleCoverage / passRate 都是 0~1 的小数） */
+    /** 比例，保留 4 位小数（契约里 ruleCoverage 是 0~1 的小数） */
     private static double ratio(long numerator, long denominator) {
         if (denominator <= 0) {
             return 0.0d;
@@ -333,9 +231,5 @@ public class DqOverviewService {
         return BigDecimal.valueOf(numerator)
                 .divide(BigDecimal.valueOf(denominator), 4, RoundingMode.HALF_UP)
                 .doubleValue();
-    }
-
-    private static long nullSafe(Integer value) {
-        return value == null ? 0L : value;
     }
 }

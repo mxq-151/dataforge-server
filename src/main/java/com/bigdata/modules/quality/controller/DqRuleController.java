@@ -3,7 +3,6 @@ package com.bigdata.modules.quality.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.quality.dto.QualityBatchByTemplateDTO;
-import com.bigdata.modules.quality.dto.QualityRuleRegisterDTO;
 import com.bigdata.modules.quality.dto.QualityRuleSaveDTO;
 import com.bigdata.modules.quality.dto.QualityTestRunDTO;
 import com.bigdata.modules.quality.service.DqRuleService;
@@ -67,7 +66,7 @@ public class DqRuleController {
      * 令牌随环境变量注入，不走匿名放行。</p>
      */
     @PostMapping("/register")
-    public Result<QualityRuleRegisterVO> register(@RequestBody QualityRuleRegisterDTO dto) {
+    public Result<QualityRuleRegisterVO> register(@RequestBody QualityRuleSaveDTO dto) {
         return Result.success(dqRuleService.register(dto));
     }
 
@@ -83,7 +82,7 @@ public class DqRuleController {
         return Result.success();
     }
 
-    /** 规则试跑：不落运行实例，只回结果，用于保存前验证阈值是否合理 */
+    /** 规则试跑：不落校验结果，只回结果，用于保存前验证阈值是否合理 */
     @PostMapping("/test-run")
     public Result<QualityRuleResultVO> testRun(@RequestBody QualityTestRunDTO dto) {
         return Result.success(dqRuleService.testRun(dto));

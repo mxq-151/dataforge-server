@@ -467,40 +467,13 @@ CREATE TABLE IF NOT EXISTS `dq_rule` (
   KEY `idx_dq_rule_datasource` (`datasource_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量监控规则表';
 
--- 运行实例表：一次质检任务执行(或一次调度批次)的汇总
-CREATE TABLE IF NOT EXISTS `dq_run_instance` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `task_id` bigint DEFAULT NULL COMMENT '质检任务ID',
-  `task_name` varchar(200) DEFAULT NULL COMMENT '任务名(冗余)',
-  `batch_no` varchar(64) NOT NULL COMMENT '批次号',
-  `trigger_type` varchar(16) NOT NULL DEFAULT 'MANUAL' COMMENT '触发方式(SCHEDULE=调度触发 MANUAL=手动触发)',
-  `schedule_instance_id` bigint DEFAULT NULL COMMENT '调度触发时对应的调度实例号，用于跳转调度实例详情',
-  `target_datasource_id` bigint DEFAULT NULL COMMENT '目标数据源ID',
-  `target_database_name` varchar(100) DEFAULT NULL COMMENT '目标库名',
-  `target_table_name` varchar(200) DEFAULT NULL COMMENT '目标表名',
-  `start_time` datetime DEFAULT NULL COMMENT '开始时间',
-  `end_time` datetime DEFAULT NULL COMMENT '结束时间',
-  `status` varchar(16) NOT NULL DEFAULT 'RUNNING' COMMENT '运行状态(RUNNING/SUCCESS/FAILED)',
-  `check_record_count` bigint NOT NULL DEFAULT '0' COMMENT '检查记录数',
-  `fail_record_count` bigint NOT NULL DEFAULT '0' COMMENT '未通过记录数',
-  `pass_count` int NOT NULL DEFAULT '0' COMMENT '通过规则数',
-  `warn_count` int NOT NULL DEFAULT '0' COMMENT '橙色异常规则数',
-  `error_count` int NOT NULL DEFAULT '0' COMMENT '红色异常规则数',
-  `failed_count` int NOT NULL DEFAULT '0' COMMENT 'SQL 未跑通的规则数',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_dq_run_task` (`task_id`),
-  KEY `idx_dq_run_batch` (`batch_no`),
-  KEY `idx_dq_run_table` (`target_database_name`,`target_table_name`),
-  KEY `idx_dq_run_status` (`status`),
-  KEY `idx_dq_run_start_time` (`start_time`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量运行实例表';
-
--- 规则级校验结果表：对应提示词「校验输出须可定位：规则名/校验对象/阈值/实际值/是否通过」
+-- 规则级校验结果表（结果留痕）：对应提示词「校验输出须可定位：规则名/校验对象/阈值/实际值/是否通过」
+--   每条结果自包含（批次、计数、实际执行的 SQL 都在），不依赖任何外部实例即可追溯；
+--   它是「行数波动 / 行数环比」试跑基线与资产目录质量摘要的唯一数据源。
+--   ⚠ 历史曾有的 run_id 列已随运行实例表（dq_run_instance）一并移除。
 CREATE TABLE IF NOT EXISTS `dq_rule_result` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `run_id` bigint NOT NULL COMMENT '运行实例ID',
+  `batch_no` varchar(64) DEFAULT NULL COMMENT '业务批次(如 20260917)',
   `rule_id` bigint DEFAULT NULL COMMENT '规则ID',
   `rule_name` varchar(200) NOT NULL COMMENT '规则名(结果自包含，规则被删后仍可追溯)',
   `rule_type` varchar(64) NOT NULL COMMENT '规则类型(7类之一)',
@@ -510,93 +483,26 @@ CREATE TABLE IF NOT EXISTS `dq_rule_result` (
   `metric_value` varchar(64) DEFAULT NULL COMMENT '原始度量值(行数类=当期行数 跨表比对=主表值,对照值)；仅存百分比无法回推历史基线',
   `status` varchar(16) NOT NULL DEFAULT 'PASS' COMMENT '校验状态(PASS=通过 WARN=橙色异常 ERROR=红色异常 FAILED=校验失败)',
   `severity` varchar(16) DEFAULT NULL COMMENT '严重级别',
+  `check_record_count` bigint NOT NULL DEFAULT '0' COMMENT '检查记录数(回传侧口径)',
+  `fail_record_count` bigint NOT NULL DEFAULT '0' COMMENT '未通过记录数(回传侧口径)',
   `exec_sql` text COMMENT '实际执行的校验SQL',
   `error_msg` varchar(1000) DEFAULT NULL COMMENT '错误信息',
   `cost_ms` bigint DEFAULT NULL COMMENT '耗时(毫秒)',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
-  KEY `idx_dq_result_run` (`run_id`),
   KEY `idx_dq_result_rule` (`rule_id`),
-  KEY `idx_dq_result_status` (`status`)
+  KEY `idx_dq_result_status` (`status`),
+  KEY `idx_dq_result_batch` (`batch_no`),
+  KEY `idx_dq_result_time` (`create_time`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量规则级校验结果表';
 
-
 -- ==================================================================
--- 数据质量模块（第二批 / 第三批）：质检任务、任务与规则关联、告警订阅与发送记录
---   阻断下游不做「平台反向置调度节点失败」：质检任务作为 DAG 节点，
---   校验不通过即非零退出，下游自然不执行。告警第一期只落发送记录。
+-- 数据质量模块：质检任务 / 运行实例 / 告警订阅三张链路已下线（2026-10-09）
+--   原先的 dq_run_instance、dq_alert_log、dq_alert_subscription、
+--   dq_task、dq_task_rule_rel 五张表连同其前后端代码一并移除；
+--   规则级结果保留在 dq_rule_result 中作为「结果留痕」。
 -- ==================================================================
-
--- 数据质量告警发送记录表
-CREATE TABLE IF NOT EXISTS `dq_alert_log` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `run_id` bigint DEFAULT NULL COMMENT '运行实例ID',
-  `task_id` bigint DEFAULT NULL COMMENT '质检任务ID',
-  `rule_id` bigint DEFAULT NULL COMMENT '规则ID',
-  `rule_name` varchar(200) DEFAULT NULL COMMENT '规则名(结果自包含，规则被删后仍可追溯)',
-  `channel` varchar(32) NOT NULL COMMENT '告警渠道(site=站内 webhook=回调 email=邮件)',
-  `receiver` varchar(200) DEFAULT NULL COMMENT '接收人',
-  `status` varchar(16) NOT NULL DEFAULT 'SUCCESS' COMMENT '发送状态(SUCCESS/FAILED)',
-  `fail_reason` varchar(500) DEFAULT NULL COMMENT '失败原因',
-  `send_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发送时间',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_dq_alert_log_run` (`run_id`),
-  KEY `idx_dq_alert_log_task` (`task_id`),
-  KEY `idx_dq_alert_log_time` (`send_time`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量告警发送记录表';
-
--- 数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)
-CREATE TABLE IF NOT EXISTS `dq_alert_subscription` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `task_id` bigint NOT NULL COMMENT '质检任务ID',
-  `notify_on` varchar(64) NOT NULL DEFAULT 'ERROR,FAILED' COMMENT '触发告警的结果状态集合(逗号分隔)',
-  `channels` varchar(255) DEFAULT NULL COMMENT '渠道集合(逗号分隔)',
-  `receivers` varchar(500) DEFAULT NULL COMMENT '接收人集合(逗号分隔)',
-  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_dq_alert_sub_task` (`task_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)';
-
--- 数据质量质检任务表(规则集的执行计划)
-CREATE TABLE IF NOT EXISTS `dq_task` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `task_name` varchar(200) NOT NULL COMMENT '任务名称',
-  `owner_name` varchar(100) DEFAULT NULL COMMENT '任务负责人',
-  `description` varchar(500) DEFAULT NULL COMMENT '任务说明',
-  `datasource_id` bigint DEFAULT NULL COMMENT '数据源ID',
-  `datasource_name` varchar(100) DEFAULT NULL COMMENT '数据源名称',
-  `database_name` varchar(100) DEFAULT NULL COMMENT '库名',
-  `table_name` varchar(200) DEFAULT NULL COMMENT '表名',
-  `trigger_type` varchar(16) NOT NULL DEFAULT 'MANUAL' COMMENT '触发方式(SCHEDULE=调度触发 MANUAL=手动触发)',
-  `project_code` varchar(200) DEFAULT NULL COMMENT '调度项目编码',
-  `workflow_code` bigint DEFAULT NULL COMMENT '调度工作流编码',
-  `workflow_name` varchar(200) DEFAULT NULL COMMENT '调度工作流名称',
-  `node_name` varchar(200) DEFAULT NULL COMMENT '调度节点名',
-  `dispose_policy` varchar(8) NOT NULL DEFAULT 'ALERT' COMMENT '任务级处置策略(BLOCK=阻断下游 ALERT=告警)',
-  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '是否启用',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_dq_task_table` (`database_name`,`table_name`),
-  KEY `idx_dq_task_trigger` (`trigger_type`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量质检任务表(规则集的执行计划)';
-
--- 数据质量质检任务与规则的关联表
-CREATE TABLE IF NOT EXISTS `dq_task_rule_rel` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `task_id` bigint NOT NULL COMMENT '质检任务ID',
-  `rule_id` bigint NOT NULL COMMENT '监控规则ID',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_dq_task_rule` (`task_id`,`rule_id`),
-  KEY `idx_dq_task_rule_rule` (`rule_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量质检任务与规则的关联表';
 
 -- 指标定义主表
 CREATE TABLE IF NOT EXISTS `indicators` (

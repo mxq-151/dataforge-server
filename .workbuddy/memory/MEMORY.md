@@ -35,8 +35,10 @@
 - 分页用 MyBatis-Plus `Page`，返回体字段为 `records`/`total`（前端依赖）。
 - 方言族收敛在各自模块的 `*Dialect`（如 `DqDialect`：MYSQL/POSTGRESQL/HIVE），
   引用符 / 转字符串 / LIMIT 差异不散落到业务代码。
-- 建表与增量脚本：`src/main/resources/sql/init/`（4 方言全量）+ `sql/migrate/`（增量，须幂等，
-  且 PG 与 MySQL 各一份，MySQL 用存储过程做 `ADD COLUMN IF NOT EXISTS` 等价物）。
+- 建表脚本：`src/main/resources/sql/init/`（4 方言全量）+ `sql/testdata/`（种子：菜单/角色/授权/演示库）。
+  **2026-10-09 起已无迁移脚本**：`sql/migrate/` 目录与 `df_gen_mysql_migrate.py` 生成器整体删除，
+  项目在开发阶段 —— 新库直接建、开发库直接重建，**init 是 schema 的唯一来源**。
+  顺带解决了历史包袱：migrate 里残留的 `deleted` 列（早前"全表移除 deleted"时没跟着改）已随之消失。
 
 ## 数据访问权限
 

@@ -2,13 +2,17 @@ package com.bigdata.modules.quality.dto;
 
 
 /**
- * QualityRunReportDTO
+ * QualityResultReportDTO
  *
- * <p>字段名与前端 src/api/quality.ts 的入参类型逐字对应。</p>
+ * <p>规则级校验结果回传入参（S3 侧校验程序调用，非界面）。字段名与前端
+ * {@code src/api/quality.ts} 的 {@code reportResult} 入参类型逐字对应。</p>
+ *
+ * <p>字段集合刻意保持不变：每条规则的校验结果自包含（批次、计数、明细都在），
+ * 因此「结果留痕」不依赖任何运行实例，回传侧无需因为平台内部结构变化而改代码。</p>
  *
  * @author dataforge
  */
-public class QualityRunReportDTO {
+public class QualityResultReportDTO {
 
     /** 数据源 ID */
     private Long datasourceId;

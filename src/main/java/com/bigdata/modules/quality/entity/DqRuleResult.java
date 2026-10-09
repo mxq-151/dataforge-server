@@ -6,13 +6,17 @@ import com.bigdata.common.entity.BaseEntity;
 /**
  * dq_rule_result
  *
+ * <p>规则级校验结果<b>留痕</b>。每条结果自包含（规则名、批次、阈值、实际值、计数、执行 SQL），
+ * 因此不依赖任何外部实例即可定位与追溯 —— 这也是运行实例表被移除后它仍保留的原因：
+ * 「行数波动 / 行数环比」的试跑基线、资产目录的质量摘要都以它为唯一数据源。</p>
+ *
  * @author dataforge
  */
 @TableName("dq_rule_result")
 public class DqRuleResult extends BaseEntity {
 
-    /** 运行实例 ID */
-    private Long runId;
+    /** 业务批次（如 20260917），与回传入参一致 */
+    private String batchNo;
 
     /** 规则 ID */
     private Long ruleId;
@@ -48,17 +52,23 @@ public class DqRuleResult extends BaseEntity {
     /** 异常等级，仅 WARN/ERROR 时有值 */
     private String severity;
 
+    /** 检查记录数（回传侧口径，程序自报） */
+    private Long checkRecordCount;
+
+    /** 未通过记录数（回传侧口径，程序自报） */
+    private Long failRecordCount;
+
     /** 本次实际执行的校验 SQL */
     private String execSql;
 
-    /** 校验失败原因 */
+    /** 校验失败原因 / 未通过明细 */
     private String errorMsg;
 
     /** 耗时（毫秒） */
     private Long costMs;
 
-    public Long getRunId() { return runId; }
-    public void setRunId(Long runId) { this.runId = runId; }
+    public String getBatchNo() { return batchNo; }
+    public void setBatchNo(String batchNo) { this.batchNo = batchNo; }
     public Long getRuleId() { return ruleId; }
     public void setRuleId(Long ruleId) { this.ruleId = ruleId; }
     public String getRuleName() { return ruleName; }
@@ -77,6 +87,10 @@ public class DqRuleResult extends BaseEntity {
     public void setStatus(String status) { this.status = status; }
     public String getSeverity() { return severity; }
     public void setSeverity(String severity) { this.severity = severity; }
+    public Long getCheckRecordCount() { return checkRecordCount; }
+    public void setCheckRecordCount(Long checkRecordCount) { this.checkRecordCount = checkRecordCount; }
+    public Long getFailRecordCount() { return failRecordCount; }
+    public void setFailRecordCount(Long failRecordCount) { this.failRecordCount = failRecordCount; }
     public String getExecSql() { return execSql; }
     public void setExecSql(String execSql) { this.execSql = execSql; }
     public String getErrorMsg() { return errorMsg; }

@@ -26,9 +26,6 @@ public class QualityRuleRegisterVO {
     /** true=本次新建；false=已存在，直接复用 */
     private Boolean created;
 
-    /** 实际挂载到的质检任务 ID；未请求挂载或未挂载成功时为空 */
-    private Long taskId;
-
     public Long getRuleId() { return ruleId; }
     public void setRuleId(Long ruleId) { this.ruleId = ruleId; }
     public String getRuleName() { return ruleName; }
@@ -39,6 +36,4 @@ public class QualityRuleRegisterVO {
     public void setTemplateCode(String templateCode) { this.templateCode = templateCode; }
     public Boolean getCreated() { return created; }
     public void setCreated(Boolean created) { this.created = created; }
-    public Long getTaskId() { return taskId; }
-    public void setTaskId(Long taskId) { this.taskId = taskId; }
 }

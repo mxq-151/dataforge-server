@@ -517,44 +517,13 @@ COMMENT ON COLUMN dq_rule.owner_name IS '规则负责人';
 COMMENT ON COLUMN dq_rule.warn_threshold IS '橙色(警告)阈值，空表示不设';
 COMMENT ON COLUMN dq_rule.error_threshold IS '红色(异常)阈值，空表示不设';
 
--- 运行实例表：一次质检任务执行(或一次调度批次)的汇总
-CREATE TABLE IF NOT EXISTS dq_run_instance (
-  id BIGSERIAL,
-  task_id BIGINT,
-  task_name VARCHAR(200),
-  batch_no VARCHAR(64) NOT NULL,
-  trigger_type VARCHAR(16) NOT NULL DEFAULT 'MANUAL',
-  schedule_instance_id BIGINT,
-  target_datasource_id BIGINT,
-  target_database_name VARCHAR(100),
-  target_table_name VARCHAR(200),
-  start_time TIMESTAMP,
-  end_time TIMESTAMP,
-  status VARCHAR(16) NOT NULL DEFAULT 'RUNNING',
-  check_record_count BIGINT NOT NULL DEFAULT 0,
-  fail_record_count BIGINT NOT NULL DEFAULT 0,
-  pass_count INTEGER NOT NULL DEFAULT 0,
-  warn_count INTEGER NOT NULL DEFAULT 0,
-  error_count INTEGER NOT NULL DEFAULT 0,
-  failed_count INTEGER NOT NULL DEFAULT 0,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS idx_dq_run_task ON dq_run_instance (task_id);
-CREATE INDEX IF NOT EXISTS idx_dq_run_batch ON dq_run_instance (batch_no);
-CREATE INDEX IF NOT EXISTS idx_dq_run_table ON dq_run_instance (target_database_name, target_table_name);
-CREATE INDEX IF NOT EXISTS idx_dq_run_status ON dq_run_instance (status);
-CREATE INDEX IF NOT EXISTS idx_dq_run_start_time ON dq_run_instance (start_time);
-COMMENT ON TABLE dq_run_instance IS '数据质量运行实例表';
-COMMENT ON COLUMN dq_run_instance.trigger_type IS '触发方式(SCHEDULE=调度触发 MANUAL=手动触发)';
-COMMENT ON COLUMN dq_run_instance.schedule_instance_id IS '调度触发时对应的调度实例号，用于跳转调度实例详情';
-COMMENT ON COLUMN dq_run_instance.failed_count IS 'SQL 未跑通的规则数，与「校验不通过」区分';
-
--- 规则级校验结果表：对应提示词「校验输出须可定位：规则名/校验对象/阈值/实际值/是否通过」
+-- 规则级校验结果表（结果留痕）：对应提示词「校验输出须可定位：规则名/校验对象/阈值/实际值/是否通过」
+--   每条结果自包含（批次、计数、实际执行的 SQL 都在），不依赖任何外部实例即可追溯；
+--   它是「行数波动 / 行数环比」试跑基线与资产目录质量摘要的唯一数据源。
+--   ⚠ 历史曾有的 run_id 列已随运行实例表（dq_run_instance）一并移除。
 CREATE TABLE IF NOT EXISTS dq_rule_result (
   id BIGSERIAL,
-  run_id BIGINT NOT NULL,
+  batch_no VARCHAR(64),
   rule_id BIGINT,
   rule_name VARCHAR(200) NOT NULL,
   rule_type VARCHAR(64) NOT NULL,
@@ -564,6 +533,8 @@ CREATE TABLE IF NOT EXISTS dq_rule_result (
   metric_value VARCHAR(64),
   status VARCHAR(16) NOT NULL DEFAULT 'PASS',
   severity VARCHAR(16),
+  check_record_count BIGINT NOT NULL DEFAULT 0,
+  fail_record_count BIGINT NOT NULL DEFAULT 0,
   exec_sql TEXT,
   error_msg VARCHAR(1000),
   cost_ms BIGINT,
@@ -571,100 +542,26 @@ CREATE TABLE IF NOT EXISTS dq_rule_result (
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id)
 );
-CREATE INDEX IF NOT EXISTS idx_dq_result_run ON dq_rule_result (run_id);
 CREATE INDEX IF NOT EXISTS idx_dq_result_rule ON dq_rule_result (rule_id);
 CREATE INDEX IF NOT EXISTS idx_dq_result_status ON dq_rule_result (status);
+CREATE INDEX IF NOT EXISTS idx_dq_result_batch ON dq_rule_result (batch_no);
+CREATE INDEX IF NOT EXISTS idx_dq_result_time ON dq_rule_result (create_time);
 COMMENT ON TABLE dq_rule_result IS '数据质量规则级校验结果表';
+COMMENT ON COLUMN dq_rule_result.batch_no IS '业务批次(如 20260917)';
 COMMENT ON COLUMN dq_rule_result.rule_name IS '规则名(结果自包含，规则被删后仍可追溯)';
 COMMENT ON COLUMN dq_rule_result.status IS '校验状态(PASS=通过 WARN=橙色异常 ERROR=红色异常 FAILED=校验失败)';
 COMMENT ON COLUMN dq_rule_result.check_object IS '校验对象(表.字段 或 上下游两表)';
 COMMENT ON COLUMN dq_rule_result.metric_value IS '原始度量值(行数类=当期行数 跨表比对=主表值,对照值)；仅存百分比无法回推历史基线';
+COMMENT ON COLUMN dq_rule_result.check_record_count IS '检查记录数(回传侧口径)';
+COMMENT ON COLUMN dq_rule_result.fail_record_count IS '未通过记录数(回传侧口径)';
 
 
 -- ==================================================================
--- 数据质量模块（第二批 / 第三批）：质检任务、任务与规则关联、告警订阅与发送记录
---   阻断下游不做「平台反向置调度节点失败」：质检任务作为 DAG 节点，
---   校验不通过即非零退出，下游自然不执行。告警第一期只落发送记录。
+-- 数据质量模块：质检任务 / 运行实例 / 告警订阅三张链路已下线（2026-10-09）
+--   原先的 dq_run_instance、dq_alert_log、dq_alert_subscription、
+--   dq_task、dq_task_rule_rel 五张表连同其前后端代码一并移除；
+--   规则级结果保留在 dq_rule_result 中作为「结果留痕」。
 -- ==================================================================
-
--- 数据质量告警发送记录表
-CREATE TABLE IF NOT EXISTS dq_alert_log (
-  id BIGSERIAL NOT NULL,
-  run_id BIGINT,
-  task_id BIGINT,
-  rule_id BIGINT,
-  rule_name VARCHAR(200),
-  channel VARCHAR(32) NOT NULL,
-  receiver VARCHAR(200),
-  status VARCHAR(16) NOT NULL DEFAULT 'SUCCESS',
-  fail_reason VARCHAR(500),
-  send_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS idx_dq_alert_log_run ON dq_alert_log (run_id);
-CREATE INDEX IF NOT EXISTS idx_dq_alert_log_task ON dq_alert_log (task_id);
-CREATE INDEX IF NOT EXISTS idx_dq_alert_log_time ON dq_alert_log (send_time);
-COMMENT ON TABLE dq_alert_log IS '数据质量告警发送记录表';
-COMMENT ON COLUMN dq_alert_log.channel IS '告警渠道(site=站内 webhook=回调 email=邮件)，第一期只落记录';
-COMMENT ON COLUMN dq_alert_log.status IS '发送状态(SUCCESS/FAILED)';
-
--- 数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)
-CREATE TABLE IF NOT EXISTS dq_alert_subscription (
-  id BIGSERIAL NOT NULL,
-  task_id BIGINT NOT NULL,
-  notify_on VARCHAR(64) NOT NULL DEFAULT 'ERROR,FAILED',
-  channels VARCHAR(255),
-  receivers VARCHAR(500),
-  enabled SMALLINT NOT NULL DEFAULT 1,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS idx_dq_alert_sub_task ON dq_alert_subscription (task_id);
-COMMENT ON TABLE dq_alert_subscription IS '数据质量告警订阅表(按任务订阅，命中指定结果状态时告警)';
-COMMENT ON COLUMN dq_alert_subscription.notify_on IS '触发告警的结果状态集合，逗号分隔，如 ERROR,FAILED (PASS/WARN/ERROR/FAILED)';
-
--- 数据质量质检任务表(规则集的执行计划)
-CREATE TABLE IF NOT EXISTS dq_task (
-  id BIGSERIAL NOT NULL,
-  task_name VARCHAR(200) NOT NULL,
-  owner_name VARCHAR(100),
-  description VARCHAR(500),
-  datasource_id BIGINT,
-  datasource_name VARCHAR(100),
-  database_name VARCHAR(100),
-  table_name VARCHAR(200),
-  trigger_type VARCHAR(16) NOT NULL DEFAULT 'MANUAL',
-  project_code VARCHAR(200),
-  workflow_code BIGINT,
-  workflow_name VARCHAR(200),
-  node_name VARCHAR(200),
-  dispose_policy VARCHAR(8) NOT NULL DEFAULT 'ALERT',
-  enabled SMALLINT NOT NULL DEFAULT 1,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS idx_dq_task_table ON dq_task (database_name, table_name);
-CREATE INDEX IF NOT EXISTS idx_dq_task_trigger ON dq_task (trigger_type);
-COMMENT ON TABLE dq_task IS '数据质量质检任务表(规则集的执行计划)';
-COMMENT ON COLUMN dq_task.dispose_policy IS '任务级默认处置策略(BLOCK=阻断下游 ALERT=告警)，规则未单独设置时生效';
-COMMENT ON COLUMN dq_task.node_name IS '关联的调度节点名；阻断由该节点非零退出实现，平台不做反向置失败';
-
--- 数据质量质检任务与规则的关联表
-CREATE TABLE IF NOT EXISTS dq_task_rule_rel (
-  id BIGSERIAL NOT NULL,
-  task_id BIGINT NOT NULL,
-  rule_id BIGINT NOT NULL,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  CONSTRAINT uk_dq_task_rule UNIQUE (task_id, rule_id)
-);
-CREATE INDEX IF NOT EXISTS idx_dq_task_rule_rule ON dq_task_rule_rel (rule_id);
-COMMENT ON TABLE dq_task_rule_rel IS '数据质量质检任务与规则的关联表';
 
 -- 指标定义主表
 CREATE TABLE IF NOT EXISTS indicators (
