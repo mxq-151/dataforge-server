@@ -102,7 +102,7 @@ class MetadataAnnotationGapServiceTest {
                 column(3L, "id", "主键", 1)
         ));
 
-        AnnotationGapSummaryVO summary = service.query(1L, null, 100, null);
+        AnnotationGapSummaryVO summary = service.query(1L, null, 100, null, null, null);
 
         assertEquals(3, summary.getTableScanned());
         assertEquals(1, summary.getUnannotatedTableCount(), "只有 ad_events 的表注释缺失");
@@ -134,7 +134,7 @@ class MetadataAnnotationGapServiceTest {
         ));
         when(columnMetadataMapper.selectList(any())).thenReturn(List.of());
 
-        AnnotationGapSummaryVO summary = service.query(1L, null, 2, null);
+        AnnotationGapSummaryVO summary = service.query(1L, null, 2, null, null, null);
 
         assertTrue(summary.getTruncated(), "结果被 limit 截断时 truncated 应为 true");
         assertEquals(2, summary.getTableScanned());
@@ -148,7 +148,7 @@ class MetadataAnnotationGapServiceTest {
                 column(1L, "a", "", 1),
                 column(1L, "b", "有注释", 2)));
 
-        AnnotationGapSummaryVO summary = service.query(1L, null, 100, null);
+        AnnotationGapSummaryVO summary = service.query(1L, null, 100, null, null, null);
 
         assertEquals(1, summary.getUnannotatedTableCount(), "空白表注释应视为缺失");
         assertEquals(1, summary.getUnannotatedColumnCount(), "空白字段注释应视为缺失");
@@ -165,7 +165,7 @@ class MetadataAnnotationGapServiceTest {
         ));
         when(columnMetadataMapper.selectList(any())).thenReturn(List.of());
 
-        AnnotationGapSummaryVO summary = service.query(1L, null, 100, null);
+        AnnotationGapSummaryVO summary = service.query(1L, null, 100, null, null, null);
 
         assertEquals(1, summary.getTables().size(), "无权限的表不应出现在清单里");
         assertEquals("ad_events", summary.getTables().get(0).getTableName());
@@ -175,10 +175,32 @@ class MetadataAnnotationGapServiceTest {
     void doesNotQueryColumnsWhenNoTableMatched() {
         when(tableMetadataMapper.selectList(any())).thenReturn(List.of());
 
-        AnnotationGapSummaryVO summary = service.query(1L, "testdb", 100, null);
+        AnnotationGapSummaryVO summary = service.query(1L, "testdb", 100, null, null, null);
 
         assertEquals(0, summary.getTableScanned());
         assertTrue(summary.getTables().isEmpty());
         assertFalse(summary.getTruncated());
+    }
+
+    @Test
+    void narrowsByLayerAndDomainCode() {
+        when(tableMetadataMapper.selectList(any())).thenReturn(List.of(
+                table(1L, "ods_olist_order_d", null),
+                table(2L, "dws_olist_sales_d", null),
+                table(3L, "dwd_order_detail_d", null),
+                table(4L, "sales_summary", null)
+        ));
+        when(columnMetadataMapper.selectList(any())).thenReturn(List.of());
+
+        AnnotationGapSummaryVO odsOnly = service.query(1L, null, 100, null, null, "ods");
+        assertEquals(1, odsOnly.getTableScanned());
+        assertEquals("ods_olist_order_d", odsOnly.getTables().get(0).getTableName());
+
+        AnnotationGapSummaryVO olistDomain = service.query(1L, null, 100, null, "olist", null);
+        assertEquals(2, olistDomain.getTableScanned());
+
+        AnnotationGapSummaryVO unclassified = service.query(1L, null, 100, null, null, "__unclassified");
+        assertEquals(1, unclassified.getTableScanned());
+        assertEquals("sales_summary", unclassified.getTables().get(0).getTableName());
     }
 }

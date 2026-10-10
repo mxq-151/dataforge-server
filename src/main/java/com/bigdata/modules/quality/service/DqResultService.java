@@ -8,6 +8,7 @@ import com.bigdata.modules.quality.dto.QualityResultReportDTO;
 import com.bigdata.modules.quality.entity.DqRule;
 import com.bigdata.modules.quality.entity.DqRuleResult;
 import com.bigdata.modules.quality.enums.QualityCheckStatus;
+import com.bigdata.modules.quality.enums.QualityRuleType;
 import com.bigdata.modules.quality.mapper.DqRuleMapper;
 import com.bigdata.modules.quality.mapper.DqRuleResultMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,8 +34,10 @@ import java.util.List;
  * <ol>
  *   <li><b>规则存在性不阻塞回传</b>：按「规则名 + 库 + 表」查不到规则时 ruleId 落 null 且不报错 ——
  *       回传失败不得改变校验任务本身的成败判定，这是提示词里的明确约定。</li>
- *   <li><b>表级读权限 fail-close</b>：回传是<b>写入</b>行为，能写一条自己读不到的表的结果
- *       就等于可以伪造它。缺表名时无从判定，不校验。</li>
+ *   <li><b>表级读权限</b>：回传是<b>写入</b>行为，能写一条自己读不到的表的结果就等于可以伪造它，
+     *       因此<b>带登录态</b>的调用仍按表级读权限 fail-close；缺表名时无从判定，不校验。
+     *       无登录态的调用是 S3 侧质检程序的回调（该端点已 permitAll，地址由部署环境注入），
+     *       不再做表级鉴权。</li>
  * </ol>
  */
 @Service
@@ -70,7 +73,9 @@ public class DqResultService {
                 ? DqBatchSupport.todayBatchNo() : dto.getBatchNo().trim());
         row.setRuleId(ruleId);
         row.setRuleName(dto.getRuleName());
-        row.setRuleType(dto.getRuleType());
+        // 规则类型统一落 7 类编码：S3 侧程序回传的是中文类型名（照抄稽核规则清单），
+        // 与登记侧同口径归一，避免两表 rule_type 一个是编码一个是文案。
+        row.setRuleType(normalizeRuleType(dto.getRuleType()));
         row.setCheckObject(dto.getCheckObject());
         row.setThreshold(dto.getThreshold());
         row.setActualValue(dto.getActualValue());
@@ -92,10 +97,14 @@ public class DqResultService {
     /**
      * 校验当前用户对回传目标表有读权限。
      *
-     * <p>缺表名时不校验（无从判定目标）；其余情况一律 fail-close。</p>
+     * <p>缺表名时不校验（无从判定目标）；无登录态时放行（S3 侧质检程序回调，见
+     * {@code SecurityConfig} 对该端点的 permitAll）；其余情况 fail-close。</p>
      */
     private void assertTableReadable(QualityResultReportDTO dto) {
         if (dto.getTableName() == null || dto.getTableName().isBlank()) {
+            return;
+        }
+        if (SecurityUtils.getCurrentUserId() == null) {
             return;
         }
         if (hasTableReadAccess(dto.getDatasourceName(), dto.getDatabaseName(), dto.getTableName().trim())) {
@@ -133,6 +142,20 @@ public class DqResultService {
         wrapper.orderByDesc(DqRule::getId);
         List<DqRule> found = dqRuleMapper.selectList(wrapper.last("LIMIT 1"));
         return found.isEmpty() ? null : found.get(0).getId();
+    }
+
+    /**
+     * 规则类型归一为 7 类编码。
+     *
+     * <p>S3 侧程序回传的是中文类型名，平台界面传的是编码；两者都落到 {@code rule_type} 列，
+     * 不归一会让同一列出现两种写法。解析不出来时原样保留（结果留痕优先，不因类型不识别丢数据）。</p>
+     */
+    private static String normalizeRuleType(String raw) {
+        QualityRuleType type = QualityRuleType.fromCode(raw);
+        if (type == null) {
+            type = QualityRuleType.fromLabel(raw);
+        }
+        return type != null ? type.getCode() : raw;
     }
 
     /** 当前用户是否可读某张表的元数据（fail-close 判断） */

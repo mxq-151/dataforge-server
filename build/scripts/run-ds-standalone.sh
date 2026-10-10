@@ -6,6 +6,10 @@ set -u
 export JAVA_HOME="${JAVA_HOME:-/opt/java/openjdk}"
 export SPARK_HOME="${SPARK_HOME:-/opt/spark}"
 export DOLPHINSCHEDULER_HOME="${DOLPHINSCHEDULER_HOME:-/opt/dolphinscheduler}"
+# DS 进程时区:jvm_args_env.sh 的 -Duser.timezone 取自该变量(构建期已固化为具体时区),
+# 同时供 DS 内部 Spring/Jackson 序列化使用。缺省 Asia/Shanghai,避免容器默认 UTC 造成
+# 依赖任务的业务日期与上游调度日期相差一天。
+export SPRING_JACKSON_TIME_ZONE="${SPRING_JACKSON_TIME_ZONE:-Asia/Shanghai}"
 
 PG_USER="${PG_USER:-postgres}"
 PG_PASSWORD="${PG_PASSWORD:-123456}"

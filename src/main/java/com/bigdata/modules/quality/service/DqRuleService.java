@@ -378,6 +378,11 @@ public class DqRuleService {
         }
         QualityRuleType ruleType = QualityRuleType.fromCode(dto.getRuleType());
         if (ruleType == null) {
+            // S3 侧质检程序是按设计文档的「中文规则类型名」登记规则的（照抄提示词里的稽核规则清单），
+            // 与界面传编码并存：编码解析不到时按 label 再解析一次（fromLabel 即为此保留）。
+            ruleType = QualityRuleType.fromLabel(dto.getRuleType());
+        }
+        if (ruleType == null) {
             throw new BusinessException("无法识别的规则类型: " + dto.getRuleType()
                     + "（必须是 7 类之一，禁止自造同义词）");
         }
@@ -508,7 +513,14 @@ public class DqRuleService {
 
     private static String normalizeDisposeMode(String raw) {
         QualityDisposeMode mode = QualityDisposeMode.fromCode(raw);
-        return mode == null ? QualityDisposeMode.ALERT.getCode() : mode.getCode();
+        if (mode != null) {
+            return mode.getCode();
+        }
+        // S3 侧程序是按设计文档的处置方式文案传的（"阻断下游+告警" / "告警"），
+        // 与界面传编码并存：含"阻断"即 BLOCK，其余落 ALERT ——
+        // 一律退化成 ALERT 会把「阻断下游」的语义悄悄丢掉。
+        return raw != null && raw.contains("阻断")
+                ? QualityDisposeMode.BLOCK.getCode() : QualityDisposeMode.ALERT.getCode();
     }
 
     private static String trimToNull(String raw) {

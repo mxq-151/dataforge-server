@@ -107,17 +107,23 @@ public class AssetInventoryService {
      *
      * @param env 可选，限定环境（按库名后缀 _prod/_gray/_test 解析，见 {@link DeployEnvParser}）；
      *            null 表示不按环境过滤
+     * @param domainCode 可选，限定业务域 —— 目录「规范视角」的「数仓名称」节点，由表名第二段解析；
+     *                   null 表示不过滤（注意：业务域 ≠ 调度项目编码，后者见 projectCode）
+     * @param layerCode  可选，限定分层 —— 目录「规范视角」的「分层」节点，由表名首段解析；
+     *                   传 {@link TableNameConventionParser#UNCLASSIFIED_LAYER} 时匹配未解析出分层的表；
+     *                   null 表示不过滤
      */
-    public AssetInventoryVO overview(String projectCode, String env) {
+    public AssetInventoryVO overview(String projectCode, String env, String domainCode, String layerCode) {
         String scopedEnv = DeployEnvParser.normalize(env);
         LocalDate statDate = snapshotService.latestStatDate();
         return statDate == null
-                ? overviewLive(projectCode, scopedEnv)
-                : overviewFromSnapshot(statDate, projectCode, scopedEnv);
+                ? overviewLive(projectCode, scopedEnv, domainCode, layerCode)
+                : overviewFromSnapshot(statDate, projectCode, scopedEnv, domainCode, layerCode);
     }
 
-    private AssetInventoryVO overviewLive(String projectCode, String env) {
-        List<TableMetadata> tables = visibleTables(projectCode, false, env);
+    private AssetInventoryVO overviewLive(String projectCode, String env, String domainCode, String layerCode) {
+        List<TableMetadata> tables = filterTablesByLayer(
+                filterTablesByDomain(visibleTables(projectCode, false, env), domainCode), layerCode);
 
         AssetInventoryVO vo = new AssetInventoryVO();
         vo.setTotalTables(tables.size());
@@ -140,9 +146,9 @@ public class AssetInventoryService {
 
             // 解析失败但仍是已知分层的表，也归入该分层 —— 让它在规范视角里可见，
             // 同时靠 unclassifiedCount 单独计数，而不是被藏进「未分类」看不见。
-            String layerCode = parsed.layerCode() != null ? parsed.layerCode()
+            String groupLayerCode = parsed.layerCode() != null ? parsed.layerCode()
                     : TableNameConventionParser.UNCLASSIFIED_LAYER;
-            AssetInventoryVO.LayerStat layerStat = layerStats.computeIfAbsent(layerCode, code -> {
+            AssetInventoryVO.LayerStat layerStat = layerStats.computeIfAbsent(groupLayerCode, code -> {
                 AssetInventoryVO.LayerStat stat = new AssetInventoryVO.LayerStat();
                 stat.setLayerCode(code);
                 stat.setTableCount(0);
@@ -185,10 +191,12 @@ public class AssetInventoryService {
     }
 
     /** 从快照聚合盘点：不再解析表名，也不再逐表 COUNT 字段 */
-    private AssetInventoryVO overviewFromSnapshot(LocalDate statDate, String projectCode, String env) {
+    private AssetInventoryVO overviewFromSnapshot(LocalDate statDate, String projectCode, String env,
+                                                  String domainCode, String layerCode) {
         Long datasourceId = resolveProjectDatasource(projectCode);
-        List<AssetCatalogDaily> rows = filterByEnv(
-                permissionSupport.filterSelectableSnapshots(snapshotService.load(statDate, datasourceId)), env);
+        List<AssetCatalogDaily> rows = filterByLayer(filterByDomain(filterByEnv(
+                permissionSupport.filterSelectableSnapshots(snapshotService.load(statDate, datasourceId)), env),
+                domainCode), layerCode);
 
         AssetInventoryVO vo = new AssetInventoryVO();
         vo.setTotalTables(rows.size());
@@ -208,9 +216,9 @@ public class AssetInventoryService {
                 unclassified++;
             }
 
-            String layerCode = row.getLayerCode() != null ? row.getLayerCode()
+            String groupLayerCode = row.getLayerCode() != null ? row.getLayerCode()
                     : TableNameConventionParser.UNCLASSIFIED_LAYER;
-            AssetInventoryVO.LayerStat layerStat = layerStats.computeIfAbsent(layerCode, code -> {
+            AssetInventoryVO.LayerStat layerStat = layerStats.computeIfAbsent(groupLayerCode, code -> {
                 AssetInventoryVO.LayerStat stat = new AssetInventoryVO.LayerStat();
                 stat.setLayerCode(code);
                 stat.setTableCount(0);
@@ -272,19 +280,26 @@ public class AssetInventoryService {
      * <p>读快照里已固化的治理项编码，不再逐表重算；快照未生成时回退实时计算。</p>
      *
      * @param env 可选，限定环境；null 表示不按环境过滤
+     * @param domainCode 可选，限定业务域（规范视角的「数仓名称」节点）；null 表示不过滤
+     * @param layerCode  可选，限定分层（规范视角的「分层」节点）；null 表示不过滤
      */
-    public List<AssetHealthIssueVO> health(String projectCode, String env) {
+    public List<AssetHealthIssueVO> health(String projectCode, String env, String domainCode, String layerCode) {
         String scopedEnv = DeployEnvParser.normalize(env);
+        List<TableMetadata> scopedTables = filterTablesByLayer(
+                filterTablesByDomain(visibleTables(projectCode, true, scopedEnv), domainCode), layerCode);
         LocalDate statDate = snapshotService.latestStatDate();
         return statDate == null
-                ? healthService.overview(visibleTables(projectCode, true, scopedEnv))
-                : healthFromSnapshot(statDate, projectCode, scopedEnv);
+                ? healthService.overview(scopedTables)
+                : healthFromSnapshot(statDate, projectCode, scopedEnv, domainCode, layerCode, scopedTables);
     }
 
-    private List<AssetHealthIssueVO> healthFromSnapshot(LocalDate statDate, String projectCode, String env) {
+    private List<AssetHealthIssueVO> healthFromSnapshot(LocalDate statDate, String projectCode, String env,
+                                                        String domainCode, String layerCode,
+                                                        List<TableMetadata> scopedTables) {
         Long datasourceId = resolveProjectDatasource(projectCode);
-        List<AssetCatalogDaily> rows = filterByEnv(
-                permissionSupport.filterSelectableSnapshots(snapshotService.load(statDate, datasourceId)), env);
+        List<AssetCatalogDaily> rows = filterByLayer(filterByDomain(filterByEnv(
+                permissionSupport.filterSelectableSnapshots(snapshotService.load(statDate, datasourceId)), env),
+                domainCode), layerCode);
 
         Map<String, List<AssetCatalogDaily>> byIssue = new LinkedHashMap<>();
         for (AssetHealthService.Issue issue : AssetHealthService.Issue.values()) {
@@ -292,6 +307,10 @@ public class AssetInventoryService {
         }
         for (AssetCatalogDaily row : rows) {
             for (String code : splitIssueCodes(row.getHealthIssueCodes())) {
+                // 质量规则覆盖是实时配置，不采用快照固化的旧值，下面按当前规则实时重算
+                if (AssetHealthService.Issue.NO_QUALITY_RULE.getCode().equals(code)) {
+                    continue;
+                }
                 List<AssetCatalogDaily> bucket = byIssue.get(code);
                 if (bucket != null) {
                     bucket.add(row);
@@ -301,6 +320,10 @@ public class AssetInventoryService {
 
         List<AssetHealthIssueVO> result = new ArrayList<>(AssetHealthService.Issue.values().length);
         for (AssetHealthService.Issue issue : AssetHealthService.Issue.values()) {
+            if (issue == AssetHealthService.Issue.NO_QUALITY_RULE) {
+                result.add(healthService.qualityRuleIssue(scopedTables));
+                continue;
+            }
             List<AssetCatalogDaily> matched = byIssue.get(issue.getCode());
             AssetHealthIssueVO vo = new AssetHealthIssueVO();
             vo.setIssueCode(issue.getCode());
@@ -377,6 +400,86 @@ public class AssetInventoryService {
             }
         }
         return filtered;
+    }
+
+    /**
+     * 按业务域过滤快照行（业务域取自表名第二段解析结果）。
+     *
+     * <p>与分层过滤同理，放在权限过滤之后：收窄的是「看哪一部分」，不改变「能看到什么」。</p>
+     */
+    private static List<AssetCatalogDaily> filterByDomain(List<AssetCatalogDaily> rows, String domainCode) {
+        if (domainCode == null || domainCode.isBlank()) {
+            return rows;
+        }
+        String target = domainCode.trim();
+        List<AssetCatalogDaily> filtered = new ArrayList<>(rows.size());
+        for (AssetCatalogDaily row : rows) {
+            if (matchesDomain(row.getDomainCode(), target)) {
+                filtered.add(row);
+            }
+        }
+        return filtered;
+    }
+
+    /** 按业务域过滤表元数据行（业务域由表名实时解析） */
+    private static List<TableMetadata> filterTablesByDomain(List<TableMetadata> tables, String domainCode) {
+        if (domainCode == null || domainCode.isBlank()) {
+            return tables;
+        }
+        String target = domainCode.trim();
+        List<TableMetadata> filtered = new ArrayList<>(tables.size());
+        for (TableMetadata table : tables) {
+            if (matchesDomain(TableNameConventionParser.parse(table.getTableName()).domainCode(), target)) {
+                filtered.add(table);
+            }
+        }
+        return filtered;
+    }
+
+    /**
+     * 按分层过滤快照行（分层取自表名首段解析结果）。
+     *
+     * <p>与盘点聚合口径一致：解析不出分层的表归入
+     * {@link TableNameConventionParser#UNCLASSIFIED_LAYER}，因此点击目录树的「未分类」
+     * 分层节点（{@code layerCode=__unclassified}）能命中这些表。</p>
+     */
+    private static List<AssetCatalogDaily> filterByLayer(List<AssetCatalogDaily> rows, String layerCode) {
+        if (layerCode == null || layerCode.isBlank()) {
+            return rows;
+        }
+        String target = layerCode.trim();
+        List<AssetCatalogDaily> filtered = new ArrayList<>(rows.size());
+        for (AssetCatalogDaily row : rows) {
+            if (matchesLayer(row.getLayerCode(), target)) {
+                filtered.add(row);
+            }
+        }
+        return filtered;
+    }
+
+    /** 按分层过滤表元数据行（分层由表名实时解析） */
+    private static List<TableMetadata> filterTablesByLayer(List<TableMetadata> tables, String layerCode) {
+        if (layerCode == null || layerCode.isBlank()) {
+            return tables;
+        }
+        String target = layerCode.trim();
+        List<TableMetadata> filtered = new ArrayList<>(tables.size());
+        for (TableMetadata table : tables) {
+            if (matchesLayer(TableNameConventionParser.parse(table.getTableName()).layerCode(), target)) {
+                filtered.add(table);
+            }
+        }
+        return filtered;
+    }
+
+    /** 分层匹配：解析不出分层的表归入 UNCLASSIFIED_LAYER 占位，未分类节点可命中 */
+    private static boolean matchesLayer(String actual, String target) {
+        return target.equalsIgnoreCase(actual != null ? actual : TableNameConventionParser.UNCLASSIFIED_LAYER);
+    }
+
+    /** 业务域匹配：业务域解析为空（null）的表归入 UNCLASSIFIED_LAYER 占位，未识别节点可命中 */
+    private static boolean matchesDomain(String actual, String target) {
+        return target.equalsIgnoreCase(actual != null ? actual : TableNameConventionParser.UNCLASSIFIED_LAYER);
     }
 
     // ==================================================================

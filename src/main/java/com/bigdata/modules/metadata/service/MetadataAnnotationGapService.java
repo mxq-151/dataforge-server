@@ -3,6 +3,7 @@ package com.bigdata.modules.metadata.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bigdata.common.security.DataAccessPermissionService;
 import com.bigdata.common.utils.DeployEnvParser;
+import com.bigdata.modules.asset.service.TableNameConventionParser;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
@@ -68,8 +69,12 @@ public class MetadataAnnotationGapService {
      * @param databaseName 可选，限定库
      * @param limit        扫描表数量上限，null 时取默认值
      * @param env          可选，限定环境（按库名后缀 _prod/_gray/_test 解析）；null 表示不按环境过滤
+     * @param domainCode   可选，限定业务域（规范视角的「数仓名称」节点，表名第二段解析）；null 表示不过滤
+     * @param layerCode    可选，限定分层（规范视角的「分层」节点，表名首段解析）；
+     *                     {@link TableNameConventionParser#UNCLASSIFIED_LAYER} 命中未解析出分层的表；null 表示不过滤
      */
-    public AnnotationGapSummaryVO query(Long datasourceId, String databaseName, Integer limit, String env) {
+    public AnnotationGapSummaryVO query(Long datasourceId, String databaseName, Integer limit, String env,
+                                        String domainCode, String layerCode) {
         int effectiveLimit = limit == null || limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
 
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
@@ -81,6 +86,7 @@ public class MetadataAnnotationGapService {
         }
         String scopedEnv = DeployEnvParser.normalize(env);
         applyEnvFilter(wrapper, scopedEnv);
+        applyConventionFilter(wrapper, layerCode, domainCode);
         wrapper.orderByAsc(TableMetadata::getDatabaseName).orderByAsc(TableMetadata::getTableName);
         // 多取一条用于判断是否被 limit 截断
         wrapper.last("LIMIT " + (effectiveLimit + 1));
@@ -92,6 +98,7 @@ public class MetadataAnnotationGapService {
         }
 
         List<TableMetadata> visible = filterByPermission(scanned, datasourceId);
+        visible = filterByConvention(visible, layerCode, domainCode);
         Map<Long, List<ColumnMetadata>> columnsByTable = loadColumns(visible);
 
         Map<Long, String> datasourceNames = new HashMap<>();
@@ -168,6 +175,77 @@ public class MetadataAnnotationGapService {
             return;
         }
         wrapper.apply("database_name LIKE {0} ESCAPE '!'", "%!" + "_" + env);
+    }
+
+    /**
+     * 把「按分层 / 业务域过滤」下推为表名 LIKE 粗筛。
+     *
+     * <p>分层是表名首段、业务域是第二段，都来自命名规范、库里没有对应列，无法精确下推；
+     * 因此这里只用一个「超集」模式减少候选行，再由 {@link #filterByConvention} 用解析结果精筛。
+     * 之所以仍要下推：与 env 同理，粗筛能让 {@code LIMIT} 截断落在真正相关的表上，
+     * 而不是先截断再过滤导致命中数虚低。</p>
+     *
+     * <p>占位码 {@code __unclassified} 代表「解析不出分段」，无法用表名模式表达，
+     * 此时不追加 SQL 条件，完全交给内存精筛。</p>
+     */
+    static void applyConventionFilter(LambdaQueryWrapper<TableMetadata> wrapper, String layerCode, String domainCode) {
+        String layer = concreteCategory(layerCode);
+        String domain = concreteCategory(domainCode);
+        if (layer == null && domain == null) {
+            return;
+        }
+        String pattern;
+        if (layer != null && domain != null) {
+            pattern = layer + "!_" + domain + "!_%";
+        } else if (layer != null) {
+            pattern = layer + "!_%";
+        } else {
+            pattern = "%!_" + domain + "!_%";
+        }
+        wrapper.apply("table_name LIKE {0} ESCAPE '!'", pattern);
+    }
+
+    /** 过滤出可用于 SQL 下推的具体编码；空值与 {@code __unclassified} 占位码返回 null。 */
+    private static String concreteCategory(String code) {
+        if (code == null || code.isBlank()) {
+            return null;
+        }
+        String trimmed = code.trim();
+        return TableNameConventionParser.UNCLASSIFIED_LAYER.equalsIgnoreCase(trimmed) ? null : trimmed;
+    }
+
+    /**
+     * 用命名规范解析结果精确过滤分层 / 业务域。
+     *
+     * <p>与盘点概览同一口径：解析不出分层的表归入 {@link TableNameConventionParser#UNCLASSIFIED_LAYER}，
+     * 因此点击目录树的「未分类」节点也能命中这些表。</p>
+     */
+    private static List<TableMetadata> filterByConvention(List<TableMetadata> tables,
+                                                          String layerCode, String domainCode) {
+        boolean hasLayer = layerCode != null && !layerCode.isBlank();
+        boolean hasDomain = domainCode != null && !domainCode.isBlank();
+        if (!hasLayer && !hasDomain) {
+            return tables;
+        }
+        String targetLayer = hasLayer ? layerCode.trim() : null;
+        String targetDomain = hasDomain ? domainCode.trim() : null;
+        List<TableMetadata> filtered = new ArrayList<>(tables.size());
+        for (TableMetadata table : tables) {
+            TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
+            if (hasLayer && !matchesCategory(parsed.layerCode(), targetLayer)) {
+                continue;
+            }
+            if (hasDomain && !matchesCategory(parsed.domainCode(), targetDomain)) {
+                continue;
+            }
+            filtered.add(table);
+        }
+        return filtered;
+    }
+
+    /** 分类匹配：解析为空的段归入 UNCLASSIFIED_LAYER 占位，未分类节点可命中 */
+    private static boolean matchesCategory(String actual, String target) {
+        return target.equalsIgnoreCase(actual != null ? actual : TableNameConventionParser.UNCLASSIFIED_LAYER);
     }
 
     /** 按调用者的库 / 表权限过滤，口径与 /metadata/tables 一致。 */    private List<TableMetadata> filterByPermission(List<TableMetadata> tables, Long datasourceId) {

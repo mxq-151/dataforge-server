@@ -395,8 +395,8 @@ class AssetCatalogApiContractTest {
         @Test
         @DisplayName("盘点 / 治理项 / 字典 字段名")
         void inventoryAndMetaKeys() throws Exception {
-            when(assetInventoryService.overview("proj_a", null)).thenReturn(inventory());
-            when(assetInventoryService.health("proj_a", null)).thenReturn(List.of(healthIssue()));
+            when(assetInventoryService.overview("proj_a", null, null, null)).thenReturn(inventory());
+            when(assetInventoryService.health("proj_a", null, null, null)).thenReturn(List.of(healthIssue()));
             when(assetMetaService.listCategories()).thenReturn(List.of(category()));
             when(assetGovernanceService.getDoc(101L)).thenReturn(doc());
             when(assetGovernanceService.listDocHistory(101L)).thenReturn(List.of(docHistory()));
@@ -463,7 +463,15 @@ class AssetCatalogApiContractTest {
         @DisplayName("盘点不传 projectCode 时按全量口径（null 透传，由服务层决定收窄）")
         void inventoryDefaults() throws Exception {
             mockMvc.perform(get("/asset/inventory/overview")).andExpect(status().isOk());
-            verify(assetInventoryService).overview(null, null);
+            verify(assetInventoryService).overview(null, null, null, null);
+        }
+
+        @Test
+        @DisplayName("盘点：domainCode（数仓名称）/ layerCode（分层）逐字透传给服务层")
+        void inventoryCategoryBinding() throws Exception {
+            mockMvc.perform(get("/asset/inventory/overview?domainCode=order&layerCode=dwd"))
+                    .andExpect(status().isOk());
+            verify(assetInventoryService).overview(null, null, "order", "dwd");
         }
 
         @Test
@@ -479,10 +487,10 @@ class AssetCatalogApiContractTest {
             verify(assetCatalogService).suggest("ord", "test");
 
             mockMvc.perform(get("/asset/inventory/overview?env=prod")).andExpect(status().isOk());
-            verify(assetInventoryService).overview(null, "prod");
+            verify(assetInventoryService).overview(null, "prod", null, null);
 
             mockMvc.perform(get("/asset/inventory/health?env=gray")).andExpect(status().isOk());
-            verify(assetInventoryService).health(null, "gray");
+            verify(assetInventoryService).health(null, "gray", null, null);
 
             mockMvc.perform(get("/asset/inventory/top-assets?env=test")).andExpect(status().isOk());
             verify(assetInventoryService).topAssets(100, "test");

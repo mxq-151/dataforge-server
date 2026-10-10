@@ -239,20 +239,27 @@ public class AssetCatalogController {
     // 盘点
     // ==================================================================
 
-    /** 资产盘点概览；env 按库名后缀过滤（表数量 / 占用空间 / 分层聚合都随之收敛） */
+    /**
+     * 资产盘点概览；env 按库名后缀过滤，domainCode / layerCode 按命名规范解析的业务域 / 分层过滤
+     * （对应目录「规范视角」的数仓名称 / 分层节点），表数量 / 占用空间 / 字段数 / 分层聚合都随之收敛。
+     */
     @GetMapping("/inventory/overview")
     public Result<AssetInventoryVO> getInventoryOverview(
             @RequestParam(required = false) String projectCode,
-            @RequestParam(required = false) String env) {
-        return Result.success(assetInventoryService.overview(projectCode, env));
+            @RequestParam(required = false) String env,
+            @RequestParam(required = false) String domainCode,
+            @RequestParam(required = false) String layerCode) {
+        return Result.success(assetInventoryService.overview(projectCode, env, domainCode, layerCode));
     }
 
-    /** 治理项清单；env 按库名后缀过滤 */
+    /** 治理项清单；env 按库名后缀过滤，domainCode / layerCode 按命名规范解析的业务域 / 分层过滤 */
     @GetMapping("/inventory/health")
     public Result<List<AssetHealthIssueVO>> getInventoryHealth(
             @RequestParam(required = false) String projectCode,
-            @RequestParam(required = false) String env) {
-        return Result.success(assetInventoryService.health(projectCode, env));
+            @RequestParam(required = false) String env,
+            @RequestParam(required = false) String domainCode,
+            @RequestParam(required = false) String layerCode) {
+        return Result.success(assetInventoryService.health(projectCode, env, domainCode, layerCode));
     }
 
     /** 资产概况①：按环境（生产/灰度/测试）× 项目聚合的表数量与占用空间 */

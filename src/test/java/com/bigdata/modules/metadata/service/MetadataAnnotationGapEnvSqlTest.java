@@ -49,4 +49,28 @@ class MetadataAnnotationGapEnvSqlTest {
         assertEquals(sqlOf("prod"), sqlOf("gray"));
         assertEquals(sqlOf("prod"), sqlOf("test"));
     }
+
+    private static String conventionSqlOf(String layerCode, String domainCode) {
+        LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
+        MetadataAnnotationGapService.applyConventionFilter(wrapper, layerCode, domainCode);
+        return wrapper.getCustomSqlSegment();
+    }
+
+    @Test
+    @DisplayName("分层 / 业务域：下推表名 LIKE 粗筛，编码走占位符不进 SQL 文本")
+    void conventionAppendsEscapedTableNameLike() {
+        String sql = conventionSqlOf("ods", "olist");
+        assertTrue(sql.contains("table_name LIKE"), sql);
+        assertTrue(sql.contains("ESCAPE '!'"), "转义字符必须显式声明，否则 _ 会被当作通配符：" + sql);
+        assertFalse(sql.contains("ods"), "分层编码不能拼进 SQL 文本：" + sql);
+        assertFalse(sql.contains("olist"), "业务域编码不能拼进 SQL 文本：" + sql);
+    }
+
+    @Test
+    @DisplayName("不传分层 / 业务域，或只传未分类占位码：不追加条件")
+    void conventionAppendsNothing() {
+        assertFalse(conventionSqlOf(null, null).contains("LIKE"));
+        assertFalse(conventionSqlOf("__unclassified", null).contains("LIKE"));
+        assertFalse(conventionSqlOf(null, "__unclassified").contains("LIKE"));
+    }
 }

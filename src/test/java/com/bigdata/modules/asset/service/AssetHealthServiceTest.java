@@ -103,12 +103,35 @@ class AssetHealthServiceTest {
     @DisplayName("多项问题同时命中时全部返回，不做「取最高优先级」的合并")
     void aggregatesAllIssues() {
         TableMetadata table = healthyTable();
-        table.setTableName("bad_name");
+        // 分层可解析（算数仓分层表，纳入质量规则判定）但四要素不齐 → 命名不合规
+        table.setTableName("dwd_order");
         table.setBusinessOwner(null);
         table.setTableComment(null);
 
         List<AssetHealthService.Issue> issues = service.issuesFor(table, contextWith(1L, false, false, 0));
         assertEquals(6, issues.size(), "6 项治理项应全部命中，实际: " + issues);
+    }
+
+    @Test
+    @DisplayName("「未配置质量规则」只覆盖数仓分层表：源表不纳入、质检层 dqc 排除")
+    void qualityRuleScope() {
+        // 源表解析不出分层 → 不纳入
+        TableMetadata source = healthyTable();
+        source.setTableName("olist_orders_dataset");
+        assertFalse(service.issuesFor(source, contextWith(1L, true, true, 0))
+                .contains(AssetHealthService.Issue.NO_QUALITY_RULE));
+
+        // 质检层 dqc 本身是质检资产 → 排除
+        TableMetadata dqc = healthyTable();
+        dqc.setTableName("dqc_olist_rule_d");
+        assertFalse(service.issuesFor(dqc, contextWith(1L, true, true, 0))
+                .contains(AssetHealthService.Issue.NO_QUALITY_RULE));
+
+        // 普通数仓分层表 → 纳入
+        TableMetadata ods = healthyTable();
+        ods.setTableName("ods_olist_orders_d");
+        assertTrue(service.issuesFor(ods, contextWith(1L, true, true, 0))
+                .contains(AssetHealthService.Issue.NO_QUALITY_RULE));
     }
 
     @Test

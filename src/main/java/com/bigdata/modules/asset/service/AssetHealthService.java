@@ -42,6 +42,14 @@ public class AssetHealthService {
     /** 治理项样本最多返回多少条（清单用于「知道去哪看」，不是导出） */
     public static final int MAX_SAMPLES = 5;
 
+    /**
+     * 质检层分层编码。
+     *
+     * <p>{@code dqc_*} 本身承载质检规则与结果，属质检资产而非被质检对象，
+     * 不应要求它再配置质量规则 —— 「未配置质量规则」口径里整层排除。</p>
+     */
+    private static final String DQC_LAYER = "dqc";
+
     /** 治理项定义：编码 + 名称 + 为什么它算问题 */
     public enum Issue {
 
@@ -211,7 +219,7 @@ public class AssetHealthService {
      */
     private Map<Long, Integer> countEnabledRules(List<TableMetadata> tables) {
         LambdaQueryWrapper<DqRule> wrapper = new LambdaQueryWrapper<>();
-        wrapper.select(DqRule::getId, DqRule::getDatasourceId, DqRule::getDatasourceName,
+        wrapper.select(DqRule::getId, DqRule::getDatasourceId,
                         DqRule::getDatabaseName, DqRule::getTableName, DqRule::getEnabled);
         List<DqRule> rules = dqRuleMapper.selectList(wrapper);
         if (rules.isEmpty()) {
@@ -247,16 +255,15 @@ public class AssetHealthService {
         return result;
     }
 
+    /**
+     * 规则与表的数据源是否匹配。
+     *
+     * <p>规则未绑定数据源 id 时视为「不按数据源收窄」，只按「库 + 表」匹配 —— 登记接口
+     * 允许只填数据源名，若把它当成「指定了别处」而排除，会让这批规则整批落空（与表详情页
+     * 「质检规则」的口径保持一致）。绑定了数据源 id 时才要求一致。</p>
+     */
     private boolean ruleMatchesDatasource(TableMetadata table, DqRule rule) {
-        if (rule.getDatasourceId() != null) {
-            return rule.getDatasourceId().equals(table.getDatasourceId());
-        }
-        // 规则只填了数据源名（历史数据）时按名称比对；表侧没有数据源则视为不限制
-        if (rule.getDatasourceName() != null && !rule.getDatasourceName().isBlank()
-                && table.getDatasourceId() != null) {
-            return false;
-        }
-        return true;
+        return rule.getDatasourceId() == null || rule.getDatasourceId().equals(table.getDatasourceId());
     }
 
     // ==================================================================
@@ -291,13 +298,28 @@ public class AssetHealthService {
         if (tableId != null && !context.tablesWithDoc.contains(tableId)) {
             issues.add(Issue.NO_DOC);
         }
-        if (context.ruleCount(tableId) == 0) {
+        if (context.ruleCount(tableId) == 0 && needsQualityRule(table)) {
             issues.add(Issue.NO_QUALITY_RULE);
         }
         if (tableId != null && !context.tablesWithTag.contains(tableId)) {
             issues.add(Issue.NO_TAG);
         }
         return issues;
+    }
+
+    /**
+     * 该表是否纳入「未配置质量规则」判定。
+     *
+     * <p>口径：只看数仓分层表 —— 表名首段能解析出分层，且不是质检层 {@code dqc}
+     * （{@code dqc_*} 本身是质检规则/结果资产，不再要求它配规则）。解析不出分层的源表等不纳入。
+     * 判定的纯函数性质保证「规范调整后无需回刷」，与 {@link TableNameConventionParser} 同步。</p>
+     */
+    static boolean needsQualityRule(TableMetadata table) {
+        if (table == null) {
+            return false;
+        }
+        String layer = TableNameConventionParser.parse(table.getTableName()).layerCode();
+        return layer != null && !DQC_LAYER.equalsIgnoreCase(layer);
     }
 
     /** 单表治理项计数（资产详情页顶部的「治理项」徽标） */
@@ -341,6 +363,32 @@ public class AssetHealthService {
             result.add(vo);
         }
         return result;
+    }
+
+    /**
+     * 实时计算「未配置质量规则」这一项治理项。
+     *
+     * <p>质量规则覆盖是实时配置（登记后立即生效），不适合固化在 T+1 快照里 ——
+     * 快照生成之后再登记规则，用快照口径会一直显示旧值。因此治理项清单里这一项实时重算，
+     * 口径与 {@link #issuesFor} 完全一致（仅数仓分层表、排除质检层 {@code dqc}）。</p>
+     *
+     * @param tables 已按权限与环境/业务域/分层收窄后的表集合
+     */
+    public AssetHealthIssueVO qualityRuleIssue(List<TableMetadata> tables) {
+        Context context = buildContext(tables);
+        List<TableMetadata> matched = new ArrayList<>();
+        for (TableMetadata table : tables) {
+            if (needsQualityRule(table) && context.ruleCount(table.getId()) == 0) {
+                matched.add(table);
+            }
+        }
+        AssetHealthIssueVO vo = new AssetHealthIssueVO();
+        vo.setIssueCode(Issue.NO_QUALITY_RULE.getCode());
+        vo.setIssueName(Issue.NO_QUALITY_RULE.getName());
+        vo.setCount(matched.size());
+        vo.setImpact(buildImpact(Issue.NO_QUALITY_RULE, matched.size(), tables.size()));
+        vo.setSamples(buildSamples(matched));
+        return vo;
     }
 
     /** 影响面描述：既说数量占比，也说这条治理项到底意味着什么 */

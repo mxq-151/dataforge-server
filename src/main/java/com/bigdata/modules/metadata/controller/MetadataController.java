@@ -51,8 +51,11 @@ public class MetadataController {
             @RequestParam(required = false) Long datasourceId,
             @RequestParam(required = false) String databaseName,
             @RequestParam(required = false) Integer limit,
-            @RequestParam(required = false) String env) {
-        return Result.success(metadataAnnotationGapService.query(datasourceId, databaseName, limit, env));
+            @RequestParam(required = false) String env,
+            @RequestParam(required = false) String domainCode,
+            @RequestParam(required = false) String layerCode) {
+        return Result.success(
+                metadataAnnotationGapService.query(datasourceId, databaseName, limit, env, domainCode, layerCode));
     }
 
     @GetMapping("/tables")

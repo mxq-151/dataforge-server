@@ -571,6 +571,9 @@
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `projectCode` | string | 否 | 按项目收窄；不传则全量 |
+| `env` | string | 否 | 按环境收窄（库名后缀 `_prod/_gray/_test`）；不传则不按环境过滤 |
+| `domainCode` | string | 否 | 按业务域收窄 —— 目录「规范视角」的**数仓名称**节点，由表名第二段解析；`__unclassified` 命中未识别业务域的表 |
+| `layerCode` | string | 否 | 按分层收窄 —— 目录「规范视角」的**分层**节点，由表名首段解析；`__unclassified` 命中未解析出分层的表 |
 
 **响应**：`AssetInventory`
 
@@ -600,6 +603,8 @@
 
 **`projectCode` 口径（重要）**：平台目前**没有项目↔资产绑定表**，传入 `projectCode` 时盘点范围被收窄为"该项目默认数据源（`dev_project.default_datasource_id`）下的资产"。这是明确的近似，不是完整项目资产台账。项目不存在或未配置默认数据源会返回业务异常（不静默放宽范围）。
 
+**`domainCode` ≠ `projectCode`（重要）**：`domainCode` 是命名规范台账里的**业务域**（表名第二段，如 `order`），而 `projectCode` 是**调度项目编码**（`dev_project.project_code`，如 `olist`）。二者不可互相替代：前端目录「规范视角」的**数仓名称**节点请用 `domainCode` 传参，不要塞进 `projectCode`（后者命中不到 `dev_project` 会返回 404）。
+
 ---
 
 ### 15. 治理项清单
@@ -609,6 +614,9 @@
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `projectCode` | string | 否 | 同盘点概览口径 |
+| `env` | string | 否 | 按环境收窄（库名后缀）；不传则不按环境过滤 |
+| `domainCode` | string | 否 | 按业务域收窄（规范视角「数仓名称」节点）；口径同盘点概览 |
+| `layerCode` | string | 否 | 按分层收窄（规范视角「分层」节点）；口径同盘点概览 |
 
 **响应**：`AssetHealthIssue[]`（固定 8 项，顺序稳定）
 

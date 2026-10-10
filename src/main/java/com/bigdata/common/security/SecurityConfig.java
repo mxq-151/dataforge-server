@@ -70,6 +70,10 @@ public class SecurityConfig {
                         // 用户身份由请求体携带，鉴权走请求头 X-Permission-Check-Token（共享密钥，
                         // 在 PermissionController 内校验），因此这里不要求 JWT。
                         .requestMatchers(HttpMethod.POST, "/system/permission/check").permitAll()
+                        // 数据质量 S3 侧质检程序回调：规则登记 + 结果回传。
+                        // 调用方是 Spark / 调度任务，没有登录态（地址由部署环境按
+                        // DATAFORGE_QUALITY_REPORT_URL 注入），因此不再要求 JWT。
+                        .requestMatchers(HttpMethod.POST, "/quality/rule/register", "/quality/run/report").permitAll()
                         .requestMatchers(HttpMethod.GET, "/devops/datasource/types").permitAll()
                         .requestMatchers(HttpMethod.GET, "/devops/storage/types").permitAll()
                         .requestMatchers(HttpMethod.GET, "/file/explorer/storage-types").permitAll()

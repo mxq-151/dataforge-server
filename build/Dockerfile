@@ -177,6 +177,19 @@ RUN printf '\n' >> /opt/dolphinscheduler/standalone-server/bin/jvm_args_env.sh \
 --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
 EOF
 
+# ---------- DolphinScheduler 时区修正 ----------
+# DS 的 jvm_args_env.sh 里 `-Duser.timezone=${SPRING_JACKSON_TIME_ZONE}` 不会被展开:
+# start.sh 只是把以 "-" 开头的行原样拼进 java 命令行,不做 shell 变量替换,
+# 于是 JVM 收到字面量 ${SPRING_JACKSON_TIME_ZONE} 无法解析,时区退化为 GMT。
+# 后果:依赖(DEPENDENT)任务按 GMT 计算业务日期,与上游调度日期相差一天(8 小时),
+# 前置依赖永远等不到上游成功实例,工作流长期卡在 RUNNING。
+# 构建期用具体时区替换占位符(sed 幂等),并导出同名环境变量供 DS/Jackson 运行时使用。
+ARG SPRING_JACKSON_TIME_ZONE=Asia/Shanghai
+ENV SPRING_JACKSON_TIME_ZONE=${SPRING_JACKSON_TIME_ZONE}
+RUN sed -i "s|^-Duser.timezone=.*$|-Duser.timezone=${SPRING_JACKSON_TIME_ZONE}|" \
+        /opt/dolphinscheduler/standalone-server/bin/jvm_args_env.sh \
+ && grep -n 'Duser.timezone' /opt/dolphinscheduler/standalone-server/bin/jvm_args_env.sh
+
 # ---------- Marquez 0.51.1(自建产物) ----------
 COPY --from=marquez-builder /opt/marquez-src/api/build/libs/marquez-api-0.51.1.jar /opt/marquez/
 COPY --from=marquez-builder /opt/marquez-src/marquez.dev.yml /opt/marquez/
