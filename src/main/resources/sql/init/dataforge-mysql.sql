@@ -201,28 +201,11 @@ CREATE TABLE IF NOT EXISTS `column_metadata` (
   KEY `idx_column_name` (`column_name`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='表字段元数据表';
 
--- 数据质量校验结果表
-CREATE TABLE IF NOT EXISTS `data_quality_check_result` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `datasource_id` bigint DEFAULT NULL COMMENT '数据源ID',
-  `datasource_name` varchar(100) NOT NULL COMMENT '数据源名称',
-  `database_name` varchar(100) DEFAULT NULL COMMENT '数据库名',
-  `table_name` varchar(200) NOT NULL COMMENT '表名',
-  `check_item` varchar(200) NOT NULL COMMENT '检查项(如:空值率/唯一性/数据范围/主键缺失)',
-  `check_time` datetime NOT NULL COMMENT '检查时间',
-  `check_record_count` bigint NOT NULL DEFAULT '0' COMMENT '检查记录数',
-  `fail_record_count` bigint NOT NULL DEFAULT '0' COMMENT '未通过记录数',
-  `fail_detail` text COMMENT '未通过明细(JSON)',
-  `rule_type` varchar(64) DEFAULT NULL COMMENT '规则类型(7类之一)，历史数据为空表示未分类',
-  `rule_name` varchar(200) DEFAULT NULL COMMENT '规则名',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_dqc_datasource_id` (`datasource_id`),
-  KEY `idx_dqc_table` (`database_name`,`table_name`),
-  KEY `idx_dqc_check_time` (`check_time`),
-  KEY `idx_dqc_rule_type` (`rule_type`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据质量校验结果表';
+-- ==================================================================
+-- data_quality_check_result 已下线（2026-10-10）
+--   该历史结果表（check_item 为自由文本）已被 dq_rule_result 取代：
+--   规则级结果统一落 dq_rule_result。表连同前后端兼容端点一并移除。
+-- ==================================================================
 
 -- 数据源配置表
 CREATE TABLE IF NOT EXISTS `datasource_config` (
@@ -367,8 +350,8 @@ CREATE TABLE IF NOT EXISTS `dev_script_execution` (
 -- 数据质量模块（dq_*）：对标 DataWorks 数据质量
 --   契约早已存在 —— 智能体提示词里已约定 7 类规则类型（主键唯一性/非空/值域/
 --   行数波动/行数环比/上下游对账/口径一致性）与 DQC 质量层，但平台侧原先只有
---   结果表 data_quality_check_result（「检查项」是自由文本），规则定义、阈值与
---   运行记录无处存放。本模块补齐「规则 + 运行」两段。
+--   一张自由文本的结果表，规则定义、阈值与运行记录无处存放。
+--   本模块补齐「规则 + 运行」两段（历史结果表 data_quality_check_result 已下线，2026-10-10）。
 --   ⚠ 规则类型是契约：新增/改名必须同时改前端 types/quality.ts 与提示词，禁止自造同义词。
 -- ==================================================================
 

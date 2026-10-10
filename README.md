@@ -28,7 +28,7 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 | `development` | 开发工程、代码执行、Jar 依赖                | `/development/project`、`/development/execution`、`/devops/dependency`                                                                                    |
 | `metadata`    | 库表与字段元数据、元数据代理（供 AI 使用）、指标      | `/metadata`、`/metadata/agent`、`/metadata/indicators`                                                                                                    |
 | `knowledge`   | 知识文档                            | `/knowledge/document`                                                                                                                                   |
-| `quality`     | 数据质量校验结果                        | `/quality/check-result`                                                                                                                                 |
+| `quality`     | 数据质量：规则、模板、结果留痕                  | `/quality/rule`、`/quality/template`、`/quality/overview`、`/quality/run/report`                                                                             |
 
 通用层位于 `src/main/java/com/bigdata/common/`：`config`（MyBatis-Plus 填充、WebMvc、Jackson）、`security`（JWT 过滤器、安全配置、数据访问鉴权）、`exception`（业务异常 + 全局异常处理）、`utils`（令牌、密码）、`vo`（`Result` / `PageVO`）、`aspect`（审计日志切面）、`sql`（Calcite DDL 解析）。
 
@@ -36,7 +36,7 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 
 ## 数据模型
 
-`src/main/resources/sql/init/` 下的初始化脚本共 **28 张表**，按用途分为五组：
+`src/main/resources/sql/init/` 下的初始化脚本共 **27 张表**，按用途分为五组：
 
 | 分组        | 表                                                                                                                                                                                                                                                                 |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,7 +44,7 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 | 文件权限（2）   | `sys_file_permission`、`sys_role_file_permission`                                                                                                                                                                                                                  |
 | 数据源与存储（2） | `datasource_config`、`storage_config`                                                                                                                                                                                                                              |
 | 开发与执行（5）  | `dev_project`、`dev_program_params`、`dev_script_execution`、`ddl_execution_log`、`dev_jar_dependency`                                                                                                                                                                |
-| 元数据与治理（7） | `table_metadata`、`column_metadata`、`indicators`、`indicators_fields`、`knowledge_document`、`data_quality_check_result`、`operation_audit_log`                                                                                                                        |
+| 元数据与治理（6） | `table_metadata`、`column_metadata`、`indicators`、`indicators_fields`、`knowledge_document`、`operation_audit_log`                                                                                                                        |
 
 权限模型支持到**行级与列级**（`sys_table_permission_row` / `sys_table_permission_column`）；文件权限按路径 + 存储配置维度控制。
 

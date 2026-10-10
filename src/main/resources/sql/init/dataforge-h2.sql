@@ -224,32 +224,11 @@ COMMENT ON TABLE column_metadata IS '表字段元数据表';
 COMMENT ON COLUMN column_metadata.business_desc IS '业务描述(与 column_comment 的技术注释区分，供资产目录展示)';
 COMMENT ON COLUMN column_metadata.security_level IS '字段安全等级';
 
--- 数据质量校验结果表
-CREATE TABLE IF NOT EXISTS data_quality_check_result (
-  id BIGINT AUTO_INCREMENT,
-  datasource_id BIGINT,
-  datasource_name VARCHAR(100) NOT NULL,
-  database_name VARCHAR(100),
-  table_name VARCHAR(200) NOT NULL,
-  check_item VARCHAR(200) NOT NULL,
-  check_time TIMESTAMP NOT NULL,
-  check_record_count BIGINT NOT NULL DEFAULT 0,
-  fail_record_count BIGINT NOT NULL DEFAULT 0,
-  fail_detail CLOB,
-  rule_type VARCHAR(64),
-  rule_name VARCHAR(200),
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS idx_dqc_datasource_id ON data_quality_check_result (datasource_id);
-CREATE INDEX IF NOT EXISTS idx_dqc_table ON data_quality_check_result (database_name, table_name);
-CREATE INDEX IF NOT EXISTS idx_dqc_check_time ON data_quality_check_result (check_time);
-CREATE INDEX IF NOT EXISTS idx_dqc_rule_type ON data_quality_check_result (rule_type);
-COMMENT ON TABLE data_quality_check_result IS '数据质量校验结果表';
-COMMENT ON COLUMN data_quality_check_result.check_item IS '检查项(自由文本，历史字段；新链路请用 rule_type/rule_name)';
-COMMENT ON COLUMN data_quality_check_result.rule_type IS '规则类型(7类之一)，历史数据为空表示未分类';
-COMMENT ON COLUMN data_quality_check_result.rule_name IS '规则名';
+-- ==================================================================
+-- data_quality_check_result 已下线（2026-10-10）
+--   该历史结果表（check_item 为自由文本）已被 dq_rule_result 取代：
+--   规则级结果统一落 dq_rule_result。表连同前后端兼容端点一并移除。
+-- ==================================================================
 
 -- 数据源配置表
 CREATE TABLE IF NOT EXISTS datasource_config (
@@ -400,8 +379,8 @@ COMMENT ON TABLE dev_script_execution IS '脚本执行历史表';
 -- 数据质量模块（dq_*）：对标 DataWorks 数据质量
 --   契约早已存在 —— 智能体提示词里已约定 7 类规则类型（主键唯一性/非空/值域/
 --   行数波动/行数环比/上下游对账/口径一致性）与 DQC 质量层，但平台侧原先只有
---   结果表 data_quality_check_result（「检查项」是自由文本），规则定义、阈值与
---   运行记录无处存放。本模块补齐「规则 + 运行」两段。
+--   一张自由文本的结果表，规则定义、阈值与运行记录无处存放。
+--   本模块补齐「规则 + 运行」两段（历史结果表 data_quality_check_result 已下线，2026-10-10）。
 --   ⚠ 规则类型是契约：新增/改名必须同时改前端 types/quality.ts 与提示词，禁止自造同义词。
 -- ==================================================================
 
