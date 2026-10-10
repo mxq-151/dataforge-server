@@ -405,8 +405,9 @@ class AssetCatalogApiContractTest {
             assertNoSnakeCaseKey(inv, "$");
             assertEquals(120, inv.get("totalTables").asInt());
             assertEquals(5000000000L, inv.get("totalSizeBytes").asLong());
-            assertEquals(7, inv.get("unclassifiedCount").asInt());
+            assertEquals(0.75, inv.get("qualityCoverageRate").asDouble(), 0.0001);
             assertEquals("dwd", inv.get("byLayer").get(0).get("layerCode").asText());
+            assertEquals(0.8, inv.get("byLayer").get(0).get("qualityCoverageRate").asDouble(), 0.0001);
 
             JsonNode health = dataOf(get("/asset/inventory/health?projectCode=proj_a"));
             assertNoSnakeCaseKey(health, "$");
@@ -697,11 +698,13 @@ class AssetCatalogApiContractTest {
         layer.setLayerCode("dwd");
         layer.setTableCount(40);
         layer.setSizeBytes(1000000000L);
+        layer.setQualityCoverageRate(0.8);
 
         AssetInventoryVO.DomainStat domain = new AssetInventoryVO.DomainStat();
         domain.setDomainCode("order");
         domain.setTableCount(15);
         domain.setSizeBytes(400000000L);
+        domain.setQualityCoverageRate(0.6);
 
         AssetInventoryVO.DatasourceStat datasource = new AssetInventoryVO.DatasourceStat();
         datasource.setDatasourceId(1L);
@@ -712,7 +715,7 @@ class AssetCatalogApiContractTest {
         vo.setTotalTables(120);
         vo.setTotalSizeBytes(5000000000L);
         vo.setTotalColumns(2400);
-        vo.setUnclassifiedCount(7);
+        vo.setQualityCoverageRate(0.75);
         vo.setByLayer(List.of(layer));
         vo.setByDomain(List.of(domain));
         vo.setByDatasource(List.of(datasource));

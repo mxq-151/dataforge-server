@@ -32,8 +32,13 @@ public class AssetInventoryVO implements Serializable {
     /** 按数据源统计 */
     private List<DatasourceStat> byDatasource;
 
-    /** 命名不合规、未标注等需治理的总数 */
-    private Integer unclassifiedCount;
+    /**
+     * 质检规划覆盖率（0~1）—— 范围内「已配置质检规则」的表占「应配置质检规则」的表比例。
+     *
+     * <p>分母为能解析出数仓分层、且非质检层 {@code dqc} 的表；分子是其中已启用至少一条
+     * 质检规则的表。无应配置表时为 null（前端展示为「—」）。</p>
+     */
+    private Double qualityCoverageRate;
 
     public Integer getTotalTables() { return totalTables; }
     public void setTotalTables(Integer totalTables) { this.totalTables = totalTables; }
@@ -47,8 +52,8 @@ public class AssetInventoryVO implements Serializable {
     public void setByDomain(List<DomainStat> byDomain) { this.byDomain = byDomain; }
     public List<DatasourceStat> getByDatasource() { return byDatasource; }
     public void setByDatasource(List<DatasourceStat> byDatasource) { this.byDatasource = byDatasource; }
-    public Integer getUnclassifiedCount() { return unclassifiedCount; }
-    public void setUnclassifiedCount(Integer unclassifiedCount) { this.unclassifiedCount = unclassifiedCount; }
+    public Double getQualityCoverageRate() { return qualityCoverageRate; }
+    public void setQualityCoverageRate(Double qualityCoverageRate) { this.qualityCoverageRate = qualityCoverageRate; }
 
     /**
      * 分层统计项。
@@ -66,12 +71,17 @@ public class AssetInventoryVO implements Serializable {
         /** 存储量 */
         private Long sizeBytes;
 
+        /** 该分层的质检规划覆盖率（0~1）；无应配置表时为 null */
+        private Double qualityCoverageRate;
+
         public String getLayerCode() { return layerCode; }
         public void setLayerCode(String layerCode) { this.layerCode = layerCode; }
         public Integer getTableCount() { return tableCount; }
         public void setTableCount(Integer tableCount) { this.tableCount = tableCount; }
         public Long getSizeBytes() { return sizeBytes; }
         public void setSizeBytes(Long sizeBytes) { this.sizeBytes = sizeBytes; }
+        public Double getQualityCoverageRate() { return qualityCoverageRate; }
+        public void setQualityCoverageRate(Double qualityCoverageRate) { this.qualityCoverageRate = qualityCoverageRate; }
     }
 
     /**
@@ -90,12 +100,17 @@ public class AssetInventoryVO implements Serializable {
         /** 存储量 */
         private Long sizeBytes;
 
+        /** 该业务域（数仓）的质检规划覆盖率（0~1）；无应配置表时为 null */
+        private Double qualityCoverageRate;
+
         public String getDomainCode() { return domainCode; }
         public void setDomainCode(String domainCode) { this.domainCode = domainCode; }
         public Integer getTableCount() { return tableCount; }
         public void setTableCount(Integer tableCount) { this.tableCount = tableCount; }
         public Long getSizeBytes() { return sizeBytes; }
         public void setSizeBytes(Long sizeBytes) { this.sizeBytes = sizeBytes; }
+        public Double getQualityCoverageRate() { return qualityCoverageRate; }
+        public void setQualityCoverageRate(Double qualityCoverageRate) { this.qualityCoverageRate = qualityCoverageRate; }
     }
 
     /**

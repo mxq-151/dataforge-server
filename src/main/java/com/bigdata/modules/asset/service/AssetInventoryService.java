@@ -19,6 +19,8 @@ import com.bigdata.modules.metadata.mapper.TableMetadataMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -116,9 +118,12 @@ public class AssetInventoryService {
     public AssetInventoryVO overview(String projectCode, String env, String domainCode, String layerCode) {
         String scopedEnv = DeployEnvParser.normalize(env);
         LocalDate statDate = snapshotService.latestStatDate();
-        return statDate == null
+        AssetInventoryVO vo = statDate == null
                 ? overviewLive(projectCode, scopedEnv, domainCode, layerCode)
                 : overviewFromSnapshot(statDate, projectCode, scopedEnv, domainCode, layerCode);
+        // 质检规划覆盖率是实时配置，不采用 T+1 快照里固化的旧值，统一实时重算后再落到结果上
+        applyQualityCoverage(vo, projectCode, scopedEnv, domainCode, layerCode);
+        return vo;
     }
 
     private AssetInventoryVO overviewLive(String projectCode, String env, String domainCode, String layerCode) {
@@ -133,19 +138,15 @@ public class AssetInventoryService {
         long totalSize = 0L;
         Map<String, AssetInventoryVO.LayerStat> layerStats = new LinkedHashMap<>();
         Map<String, AssetInventoryVO.DomainStat> domainStats = new LinkedHashMap<>();
-        int unclassified = 0;
 
         for (TableMetadata table : tables) {
             long size = table.getSizeBytes() == null ? 0L : table.getSizeBytes();
             totalSize += size;
 
             TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
-            if (!parsed.parsed()) {
-                unclassified++;
-            }
 
             // 解析失败但仍是已知分层的表，也归入该分层 —— 让它在规范视角里可见，
-            // 同时靠 unclassifiedCount 单独计数，而不是被藏进「未分类」看不见。
+            // 而不是被藏进「未分类」看不见。
             String groupLayerCode = parsed.layerCode() != null ? parsed.layerCode()
                     : TableNameConventionParser.UNCLASSIFIED_LAYER;
             AssetInventoryVO.LayerStat layerStat = layerStats.computeIfAbsent(groupLayerCode, code -> {
@@ -177,7 +178,6 @@ public class AssetInventoryService {
         }
 
         vo.setTotalSizeBytes(totalSize);
-        vo.setUnclassifiedCount(unclassified);
 
         List<AssetInventoryVO.LayerStat> byLayer = new ArrayList<>(layerStats.values());
         byLayer.sort(Comparator.comparingInt(AssetInventoryVO.LayerStat::getTableCount).reversed());
@@ -203,7 +203,6 @@ public class AssetInventoryService {
 
         long totalSize = 0L;
         long totalColumns = 0L;
-        int unclassified = 0;
         Map<String, AssetInventoryVO.LayerStat> layerStats = new LinkedHashMap<>();
         Map<String, AssetInventoryVO.DomainStat> domainStats = new LinkedHashMap<>();
         Map<Long, AssetInventoryVO.DatasourceStat> datasourceStats = new LinkedHashMap<>();
@@ -212,9 +211,6 @@ public class AssetInventoryService {
             long size = row.getSizeBytes() == null ? 0L : row.getSizeBytes();
             totalSize += size;
             totalColumns += row.getColumnCount() == null ? 0L : row.getColumnCount();
-            if (row.getConventionParsed() == null || row.getConventionParsed() != 1) {
-                unclassified++;
-            }
 
             String groupLayerCode = row.getLayerCode() != null ? row.getLayerCode()
                     : TableNameConventionParser.UNCLASSIFIED_LAYER;
@@ -257,7 +253,6 @@ public class AssetInventoryService {
 
         vo.setTotalSizeBytes(totalSize);
         vo.setTotalColumns((int) totalColumns);
-        vo.setUnclassifiedCount(unclassified);
 
         List<AssetInventoryVO.LayerStat> byLayer = new ArrayList<>(layerStats.values());
         byLayer.sort(Comparator.comparingInt(AssetInventoryVO.LayerStat::getTableCount).reversed());
@@ -272,6 +267,94 @@ public class AssetInventoryService {
         vo.setByDatasource(byDatasource);
 
         return vo;
+    }
+
+    /**
+     * 质检规划覆盖率 —— 范围内「已配置质检规则」的表占「应配置质检规则」的表的比例。
+     *
+     * <p>口径与治理项「未配置质量规则」严格一致（见
+     * {@link AssetHealthService#needsQualityRule} 与
+     * {@link AssetHealthService#qualityRuleIssue}）：分母只算能解析出数仓分层、
+     * 且非质检层 {@code dqc} 的表；分子是其中已启用至少一条质检规则的表。
+     * 无应配置表时覆盖率记为 null（前端展示「—」，不伪装成 0% 或 100%）。</p>
+     *
+     * <p>质检规则是实时配置（登记后立即生效），因此这里不受 T+1 快照口径影响，总是实时重算；
+     * 同时按分层、业务域分别聚合，落到 {@code byLayer} / {@code byDomain} 条目上，
+     * 以支持「按数仓（业务域）及分层」查看覆盖率。</p>
+     *
+     * @param vo         已算好规模与分组的盘点结果，本方法只补齐覆盖率字段
+     * @param projectCode 项目收窄（同盘点口径）
+     * @param env        已归一化的环境码，null 表示不按环境过滤
+     * @param domainCode 业务域收窄（规范视角「数仓名称」节点）
+     * @param layerCode  分层收窄（规范视角「分层」节点）
+     */
+    private void applyQualityCoverage(AssetInventoryVO vo, String projectCode, String env,
+                                      String domainCode, String layerCode) {
+        // 与治理项「未配置质量规则」同源：用实时可见表范围重算，不读快照里固化的健康数据
+        List<TableMetadata> tables = filterTablesByLayer(
+                filterTablesByDomain(visibleTables(projectCode, false, env), domainCode), layerCode);
+        AssetHealthService.Context context = healthService.buildContext(tables);
+
+        int target = 0;
+        int covered = 0;
+        Map<String, int[]> layerAgg = new HashMap<>();
+        Map<String, int[]> domainAgg = new HashMap<>();
+        for (TableMetadata table : tables) {
+            if (!AssetHealthService.needsQualityRule(table)) {
+                continue;
+            }
+            boolean isCovered = context.ruleCount(table.getId()) > 0;
+            target++;
+            if (isCovered) {
+                covered++;
+            }
+            TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
+            accumulateCoverage(layerAgg, parsed.layerCode(), isCovered);
+            // 与盘点聚合口径一致：只有分层成立时业务域才参与统计（见 overviewLive 的说明）
+            if (parsed.layerCode() != null && parsed.domainCode() != null) {
+                accumulateCoverage(domainAgg, parsed.domainCode(), isCovered);
+            }
+        }
+
+        vo.setQualityCoverageRate(rate(covered, target));
+        if (vo.getByLayer() != null) {
+            for (AssetInventoryVO.LayerStat stat : vo.getByLayer()) {
+                stat.setQualityCoverageRate(groupCoverageRate(layerAgg, stat.getLayerCode()));
+            }
+        }
+        if (vo.getByDomain() != null) {
+            for (AssetInventoryVO.DomainStat stat : vo.getByDomain()) {
+                stat.setQualityCoverageRate(groupCoverageRate(domainAgg, stat.getDomainCode()));
+            }
+        }
+    }
+
+    /** 累计某个分组（分层/业务域）的应配置表数与已覆盖表数 */
+    private static void accumulateCoverage(Map<String, int[]> agg, String code, boolean covered) {
+        if (code == null) {
+            return;
+        }
+        int[] pair = agg.computeIfAbsent(code, k -> new int[2]);
+        pair[0]++;
+        if (covered) {
+            pair[1]++;
+        }
+    }
+
+    /** 分组覆盖率；该分组无应配置表时返回 null */
+    private static Double groupCoverageRate(Map<String, int[]> agg, String code) {
+        int[] pair = code == null ? null : agg.get(code);
+        return pair == null ? null : rate(pair[1], pair[0]);
+    }
+
+    /** 比例，保留 4 位小数；分母不足 1 时返回 null（覆盖率无定义） */
+    private static Double rate(int numerator, int denominator) {
+        if (denominator <= 0) {
+            return null;
+        }
+        return BigDecimal.valueOf(numerator)
+                .divide(BigDecimal.valueOf(denominator), 4, RoundingMode.HALF_UP)
+                .doubleValue();
     }
 
     /**

@@ -582,12 +582,12 @@
   "totalTables": 120,
   "totalSizeBytes": 5000000000,
   "totalColumns": 2400,
-  "unclassifiedCount": 7,
+  "qualityCoverageRate": 0.75,
   "byLayer": [
-    { "layerCode": "dwd", "tableCount": 40, "sizeBytes": 1000000000 }
+    { "layerCode": "dwd", "tableCount": 40, "sizeBytes": 1000000000, "qualityCoverageRate": 0.8 }
   ],
   "byDomain": [
-    { "domainCode": "order", "tableCount": 15, "sizeBytes": 400000000 }
+    { "domainCode": "order", "tableCount": 15, "sizeBytes": 400000000, "qualityCoverageRate": 0.6 }
   ],
   "byDatasource": [
     { "datasourceId": 1, "datasourceName": "hive-prod", "tableCount": 120 }
@@ -598,8 +598,8 @@
 | 字段 | 说明 |
 | --- | --- |
 | `totalTables` / `totalColumns` / `totalSizeBytes` | 表数 / 字段总数 / 存储总量（字节） |
-| `unclassifiedCount` | 命名规范解析失败的表数 |
-| `byLayer` / `byDomain` / `byDatasource` | 按分层 / 业务域 / 数据源统计，按表数倒序 |
+| `qualityCoverageRate` | 质检规划覆盖率（0~1）：范围内「已配置质检规则」的表 ÷「应配置质检规则」的表。分母只算能解析出数仓分层、且非质检层 `dqc` 的表；无应配置表时为 `null`。 |
+| `byLayer` / `byDomain` / `byDatasource` | 按分层 / 业务域 / 数据源统计，按表数倒序；`byLayer` 与 `byDomain` 每项另带该分组的 `qualityCoverageRate` |
 
 **`projectCode` 口径（重要）**：平台目前**没有项目↔资产绑定表**，传入 `projectCode` 时盘点范围被收窄为"该项目默认数据源（`dev_project.default_datasource_id`）下的资产"。这是明确的近似，不是完整项目资产台账。项目不存在或未配置默认数据源会返回业务异常（不静默放宽范围）。
 

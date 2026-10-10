@@ -3,6 +3,8 @@ package com.bigdata.modules.metadata.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.bigdata.modules.asset.entity.AssetCatalogDaily;
+import com.bigdata.modules.asset.mapper.AssetCatalogDailyMapper;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
 import com.bigdata.modules.metadata.entity.TableMetadata;
@@ -23,6 +25,9 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
 
     @Autowired
     private ColumnMetadataMapper columnMetadataMapper;
+
+    @Autowired
+    private AssetCatalogDailyMapper assetCatalogDailyMapper;
 
 
     public static final String DELIMITER = "##";
@@ -235,6 +240,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             colDelWrapper.eq(ColumnMetadata::getTableMetadataId, existing.getId());
             columnMetadataMapper.delete(colDelWrapper);
             removeById(existing.getId());
+            pruneCatalogSnapshot(List.of(existing.getId()));
         }
     }
 
@@ -250,6 +256,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
             colDelWrapper.eq(ColumnMetadata::getTableMetadataId, existing.getId());
             columnMetadataMapper.delete(colDelWrapper);
             removeById(existing.getId());
+            pruneCatalogSnapshot(List.of(existing.getId()));
         }
     }
 
@@ -288,6 +295,7 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
         columnMetadataMapper.delete(colDelWrapper);
 
         removeByIds(orphanIds);
+        pruneCatalogSnapshot(orphanIds);
         return orphanIds.size();
     }
 
@@ -327,5 +335,22 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
         columnMetadataMapper.delete(colDelWrapper);
 
         removeByIds(tableIds);
+        pruneCatalogSnapshot(tableIds);
+    }
+
+    /**
+     * 清理资产目录快照里已删除表的残留行。
+     *
+     * <p>目录树 / 检索 / 盘点 / 治理项读的是 T+1 快照 {@code asset_catalog_daily}，
+     * 而快照每天才重建一次。表元数据被删除（DROP DDL、全量同步清理孤表、按名批量删除）后，
+     * 若不同步清理快照，被删的表会继续出现在资产目录里，直到次日快照重新生成。
+     * 这里在删除元数据的同一事务里把对应快照行一并删掉，使目录即时反映删除，无需等 T+1。</p>
+     */
+    private void pruneCatalogSnapshot(Collection<Long> tableMetadataIds) {
+        if (tableMetadataIds == null || tableMetadataIds.isEmpty()) {
+            return;
+        }
+        assetCatalogDailyMapper.delete(new LambdaQueryWrapper<AssetCatalogDaily>()
+                .in(AssetCatalogDaily::getTableMetadataId, tableMetadataIds));
     }
 }
