@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.DataAccessPermissionService;
+import com.bigdata.common.utils.DeployEnvParser;
 import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.modules.asset.entity.AssetCatalogDaily;
 import com.bigdata.modules.asset.entity.AssetTag;
@@ -140,9 +141,6 @@ public class AssetCatalogService {
     private AssetGovernanceService governanceService;
 
     @Autowired
-    private AssetBookmarkService bookmarkService;
-
-    @Autowired
     private AssetCatalogSnapshotService snapshotService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -162,12 +160,15 @@ public class AssetCatalogService {
      * @param datasourceId  可选，限定数据源
      * @param databaseName  可选，限定库
      * @param keyword       可选，按表名/表注释模糊过滤（过滤后再建树，保证父节点计数与可见子节点一致）
+     * @param env           可选，限定环境（按库名后缀 _prod/_gray/_test 解析）；null 表示不按环境过滤
      */
-    public List<CatalogTreeNodeVO> tree(String view, Long datasourceId, String databaseName, String keyword) {
+    public List<CatalogTreeNodeVO> tree(String view, Long datasourceId, String databaseName, String keyword,
+                                        String env) {
+        String scopedEnv = DeployEnvParser.normalize(env);
         LocalDate statDate = snapshotService.latestStatDate();
         List<TreeRow> rows = statDate == null
-                ? liveTreeRows(datasourceId, databaseName, keyword)
-                : snapshotTreeRows(statDate, datasourceId, databaseName, keyword);
+                ? liveTreeRows(datasourceId, databaseName, keyword, scopedEnv)
+                : snapshotTreeRows(statDate, datasourceId, databaseName, keyword, scopedEnv);
         boolean convention = "convention".equalsIgnoreCase(view == null ? "" : view.trim());
         return convention ? buildConventionTree(rows) : buildEngineTree(rows);
     }
@@ -184,7 +185,7 @@ public class AssetCatalogService {
     }
 
     /** 实时回退：直接读 table_metadata 并即时解析表名（快照不可用时使用） */
-    private List<TreeRow> liveTreeRows(Long datasourceId, String databaseName, String keyword) {
+    private List<TreeRow> liveTreeRows(Long datasourceId, String databaseName, String keyword, String env) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
         if (datasourceId != null) {
             wrapper.eq(TableMetadata::getDatasourceId, datasourceId);
@@ -202,6 +203,9 @@ public class AssetCatalogService {
         List<TableMetadata> tables = permissionSupport.filterSelectable(tableMetadataMapper.selectList(wrapper));
         List<TreeRow> rows = new ArrayList<>(tables.size());
         for (TableMetadata table : tables) {
+            if (!DeployEnvParser.matches(table.getDatabaseName(), env)) {
+                continue;
+            }
             TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
             rows.add(new TreeRow(table.getId(), table.getDatasourceId(), table.getDatabaseName(),
                     table.getTableName(), engineCodeOf(table),
@@ -212,11 +216,14 @@ public class AssetCatalogService {
 
     /** 读快照，取分层/业务域为已固化结果 */
     private List<TreeRow> snapshotTreeRows(LocalDate statDate, Long datasourceId,
-                                           String databaseName, String keyword) {
+                                           String databaseName, String keyword, String env) {
         List<AssetCatalogDaily> snapshots = permissionSupport.filterSelectableSnapshots(
                 snapshotService.load(statDate, datasourceId, databaseName, keyword));
         List<TreeRow> rows = new ArrayList<>(snapshots.size());
         for (AssetCatalogDaily row : snapshots) {
+            if (!DeployEnvParser.matches(row.getDatabaseName(), env)) {
+                continue;
+            }
             rows.add(new TreeRow(row.getTableMetadataId(), row.getDatasourceId(), row.getDatabaseName(),
                     row.getTableName(), row.getStorageEngine(),
                     row.getLayerCode(), row.getDomainCode(), isParsed(row.getConventionParsed())));
@@ -378,9 +385,15 @@ public class AssetCatalogService {
      * 因此单类最多扫描 {@value #SEARCH_SCAN_CAP} 条候选；命中数达到上限时
      * 返回的 total 是「已扫描范围内的命中数」，前端可提示用户收窄关键词。
      * 刻意不返回一个假的精确总数。</p>
+     *
+     * <h3>环境维度</h3>
+     * <p>环境只对<b>表 / 字段</b>两类生效（按所属库名后缀解析）；指标是定义级资产，
+     * 本身没有环境维度，因此不受 env 影响。</p>
+     *
+     * @param env 可选，限定环境；null 表示不按环境过滤
      */
     public AssetSearchResultVO search(String keyword, String typesCsv, int current, int size,
-                                     String layerCode, String domainCode) {
+                                     String layerCode, String domainCode, String env) {
         AssetSearchResultVO result = new AssetSearchResultVO();
         result.setTables(List.of());
         result.setColumns(List.of());
@@ -393,11 +406,12 @@ public class AssetCatalogService {
         Set<String> types = parseTypes(typesCsv);
         int pageNo = Math.max(1, current);
         int pageSize = Math.max(1, Math.min(200, size));
+        String scopedEnv = DeployEnvParser.normalize(env);
 
         List<AssetSearchHitVO> tables = types.contains("table")
-                ? searchTables(value, layerCode, domainCode) : List.of();
+                ? searchTables(value, layerCode, domainCode, scopedEnv) : List.of();
         List<AssetSearchHitVO> columns = types.contains("column")
-                ? searchColumns(value, layerCode, domainCode) : List.of();
+                ? searchColumns(value, layerCode, domainCode, scopedEnv) : List.of();
         List<AssetSearchHitVO> indicators = types.contains("indicator")
                 ? searchIndicators(value) : List.of();
 
@@ -409,14 +423,15 @@ public class AssetCatalogService {
     }
 
     /** 表检索：优先走 T+1 快照，快照未生成时回退实时计算 */
-    private List<AssetSearchHitVO> searchTables(String keyword, String layerCode, String domainCode) {
+    private List<AssetSearchHitVO> searchTables(String keyword, String layerCode, String domainCode, String env) {
         LocalDate statDate = snapshotService.latestStatDate();
         return statDate == null
-                ? searchTablesLive(keyword, layerCode, domainCode)
-                : searchTablesFromSnapshot(statDate, keyword, layerCode, domainCode);
+                ? searchTablesLive(keyword, layerCode, domainCode, env)
+                : searchTablesFromSnapshot(statDate, keyword, layerCode, domainCode, env);
     }
 
-    private List<AssetSearchHitVO> searchTablesLive(String keyword, String layerCode, String domainCode) {
+    private List<AssetSearchHitVO> searchTablesLive(String keyword, String layerCode, String domainCode,
+                                                    String env) {
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.like(TableMetadata::getTableName, keyword)
                         .or().like(TableMetadata::getTableComment, keyword));
@@ -426,6 +441,9 @@ public class AssetCatalogService {
         }
         List<AssetSearchHitVO> hits = new ArrayList<>();
         for (TableMetadata table : permissionSupport.filterSelectable(matched)) {
+            if (!DeployEnvParser.matches(table.getDatabaseName(), env)) {
+                continue;
+            }
             TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
             if (!matchesCategory(parsed.layerCode(), parsed.domainCode(), layerCode, domainCode)) {
                 continue;
@@ -446,13 +464,16 @@ public class AssetCatalogService {
     }
 
     private List<AssetSearchHitVO> searchTablesFromSnapshot(LocalDate statDate, String keyword,
-                                                           String layerCode, String domainCode) {
+                                                           String layerCode, String domainCode, String env) {
         List<AssetCatalogDaily> candidates = snapshotService.load(statDate, null, null, keyword);
         if (candidates.size() > SEARCH_SCAN_CAP) {
             candidates = new ArrayList<>(candidates.subList(0, SEARCH_SCAN_CAP));
         }
         List<AssetSearchHitVO> hits = new ArrayList<>();
         for (AssetCatalogDaily row : permissionSupport.filterSelectableSnapshots(candidates)) {
+            if (!DeployEnvParser.matches(row.getDatabaseName(), env)) {
+                continue;
+            }
             if (!matchesCategory(row.getLayerCode(), row.getDomainCode(), layerCode, domainCode)) {
                 continue;
             }
@@ -477,7 +498,7 @@ public class AssetCatalogService {
      * <p>先按关键词取候选，再按「所属表是否可见」过滤 ——
      * 顺序很重要：反过来先取全部可见表的字段会让 IN 列表大到不可控。</p>
      */
-    private List<AssetSearchHitVO> searchColumns(String keyword, String layerCode, String domainCode) {
+    private List<AssetSearchHitVO> searchColumns(String keyword, String layerCode, String domainCode, String env) {
         LambdaQueryWrapper<ColumnMetadata> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(w -> w.like(ColumnMetadata::getColumnName, keyword)
                         .or().like(ColumnMetadata::getColumnComment, keyword))
@@ -498,6 +519,10 @@ public class AssetCatalogService {
         for (ColumnMetadata column : candidates) {
             TableMetadata table = visibleTables.get(column.getTableMetadataId());
             if (table == null) {
+                continue;
+            }
+            // 字段的环境跟随所属表：所属表不在所选环境时，字段也不应命中
+            if (!DeployEnvParser.matches(table.getDatabaseName(), env)) {
                 continue;
             }
             TableNameConventionParser.Parsed parsed = TableNameConventionParser.parse(table.getTableName());
@@ -549,19 +574,30 @@ public class AssetCatalogService {
         return hits;
     }
 
-    /** 输入建议：只返回表名，且已过权限 */
-    public List<String> suggest(String keyword) {
+    /**
+     * 输入建议：只返回表名，且已过权限与环境过滤。
+     *
+     * @param env 可选，限定环境（按库名后缀）；null 表示不按环境过滤
+     */
+    public List<String> suggest(String keyword, String env) {
         if (keyword == null || keyword.isBlank()) {
             return List.of();
         }
-        LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
-        wrapper.select(TableMetadata::getTableName)
-                .like(TableMetadata::getTableName, keyword.trim())
-                .orderByAsc(TableMetadata::getTableName);
+        String scopedEnv = DeployEnvParser.normalize(env);
+        // 必须带 database_name：环境过滤依据库名后缀，缺了它无法判定。
+        // 这里用 QueryWrapper + 字符串列名而非 LambdaQueryWrapper：只取两列的投影用字符串更直白，
+        // 也避免 Lambda 的列名解析依赖实体元数据缓存（该缓存只在 Spring 启动时初始化）。
+        QueryWrapper<TableMetadata> wrapper = new QueryWrapper<>();
+        wrapper.select("table_name", "database_name")
+                .like("table_name", keyword.trim())
+                .orderByAsc("table_name");
         List<TableMetadata> matched = tableMetadataMapper.selectList(wrapper);
         List<String> result = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (TableMetadata table : permissionSupport.filterSelectable(matched)) {
+            if (!DeployEnvParser.matches(table.getDatabaseName(), scopedEnv)) {
+                continue;
+            }
             String name = table.getTableName();
             if (name != null && seen.add(name)) {
                 result.add(name);
@@ -618,17 +654,10 @@ public class AssetCatalogService {
         vo.setLastModifyTime(formatTime(table.getLastModifyTime()));
         vo.setSyncTime(formatTime(table.getSyncTime()));
 
-        vo.setBrowseCount30d(table.getBrowseCnt30d() == null ? 0 : table.getBrowseCnt30d());
-        vo.setReadCount30d(table.getReadCnt30d() == null ? 0 : table.getReadCnt30d());
-        vo.setBookmarkCount(table.getBookmarkCnt() == null ? 0 : table.getBookmarkCnt());
-        vo.setLastAccessTime(formatTime(table.getLastAccessTime()));
-
         vo.setColumns(columnsOf(table));
         vo.setTags(tagsOf(table.getId()));
         vo.setHealthIssueCount(healthService.countIssues(table));
 
-        Long userId = SecurityUtils.getCurrentUserId();
-        vo.setBookmarked(bookmarkService.isBookmarked(userId, "table", table.getId()));
         return vo;
     }
 
@@ -676,7 +705,6 @@ public class AssetCatalogService {
             vo.setNullable(intToBoolean(column.getNullable()));
             vo.setOrdinalPosition(column.getOrdinalPosition() == null ? 0 : column.getOrdinalPosition());
             vo.setSecurityLevel(nullToDefault(column.getSecurityLevel(), ""));
-            vo.setHotScore(column.getHotScore() == null ? 0 : column.getHotScore());
             result.add(vo);
         }
         return result;

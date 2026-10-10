@@ -13,17 +13,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * 表存储大小按日刷新 —— 只更新 {@code table_metadata.size_bytes}。
+ * 表存储统计按日刷新 —— 覆盖写 {@code table_metadata} 的 {@code size_bytes} 与 {@code row_count}。
  *
  * <h3>为什么独立于全量同步</h3>
- * <p>结构类元数据（表/字段/注释/分区）只在变更时需要同步，而存储大小每天都在变。
- * 本服务借 {@link ExecutionStrategy#listTableSizes} 按引擎走低成本系统表口径
- * （JDBC 查 information_schema / system.tables，Kyuubi 走 DESCRIBE EXTENDED，
+ * <p>结构类元数据（表/字段/注释/分区）只在变更时需要同步，而存储大小与行数每天都在变。
+ * 本服务借 {@link ExecutionStrategy#listTableSizes} / {@link ExecutionStrategy#listTableRowCounts}
+ * 按引擎走低成本系统表口径（JDBC 查 information_schema / pg_class，Kyuubi 走 DESCRIBE EXTENDED，
  * HBase 走 RegionMetrics），不重建字段、不动其他列，可安全地每日执行。</p>
+ *
+ * <h3>为什么行数要单独采</h3>
+ * <p>全量同步只搬「表清单」里的字段，行数不在其中；不落这一条链路，
+ * {@code row_count} 会永远是 NULL —— 资产详情页的行数、以及依赖它的容量判断都会落空。
+ * 行数取引擎维护的估算值（不跑 {@code count(*)}），{@code 0} 是合法值必须写。</p>
  *
  * <h3>覆盖写与幂等</h3>
  * <p>只按「数据源 + 库 + 表名」匹配已纳管表，取到多少写多少：漏跑一天、单库连接失败，
@@ -80,7 +87,12 @@ public class TableStorageSizeRefreshService {
     }
 
     /**
-     * 刷新单个数据源下全部库的表存储大小，返回实际更新的表数。
+     * 刷新单个数据源下全部库的表存储统计，返回实际更新的表数。
+     *
+     * <p>一轮里同时覆盖 {@code size_bytes} 与 {@code row_count}：两者来自同一次系统表
+     * 采集、同属「每天在变」的存量指标，分开跑只会让两个字段互相不一致。</p>
+     *
+     * <p>行数的 {@code 0} 是合法值（空表），必须写；大小为 {@code 0} 视为不可得、不写。</p>
      */
     public int refreshDatasource(DatasourceConfig config) {
         ExecutionStrategy strategy = executionStrategyFactory.getStrategy(config);
@@ -94,16 +106,29 @@ public class TableStorageSizeRefreshService {
                 continue;
             }
             Map<String, Long> sizes = strategy.listTableSizes(config, databaseName);
-            for (Map.Entry<String, Long> entry : sizes.entrySet()) {
-                Long size = entry.getValue();
-                if (size == null || size <= 0 || entry.getKey() == null) {
+            Map<String, Long> rows = strategy.listTableRowCounts(config, databaseName);
+            Set<String> tableNames = new LinkedHashSet<>(sizes.keySet());
+            tableNames.addAll(rows.keySet());
+            for (String tableName : tableNames) {
+                if (tableName == null) {
+                    continue;
+                }
+                Long size = sizes.get(tableName);
+                Long rowCount = rows.get(tableName);
+                boolean hasSize = size != null && size > 0;
+                if (!hasSize && rowCount == null) {
                     continue;
                 }
                 LambdaUpdateWrapper<TableMetadata> wrapper = new LambdaUpdateWrapper<>();
                 wrapper.eq(TableMetadata::getDatasourceId, config.getId())
                         .eq(TableMetadata::getDatabaseName, databaseName)
-                        .eq(TableMetadata::getTableName, entry.getKey())
-                        .set(TableMetadata::getSizeBytes, size);
+                        .eq(TableMetadata::getTableName, tableName);
+                if (hasSize) {
+                    wrapper.set(TableMetadata::getSizeBytes, size);
+                }
+                if (rowCount != null && rowCount >= 0) {
+                    wrapper.set(TableMetadata::getRowCount, rowCount);
+                }
                 updated += tableMetadataMapper.update(null, wrapper);
             }
         }

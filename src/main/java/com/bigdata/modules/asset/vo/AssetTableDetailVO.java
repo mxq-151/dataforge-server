@@ -4,7 +4,7 @@ import java.io.Serializable;
 import java.util.List;
 
 /**
- * 资产详情聚合体：基础信息 + 字段 + 分区 + 分类标签 + 热度 + 治理项。
+ * 资产详情聚合体：基础信息 + 字段 + 分区 + 分类标签 + 治理项。
  *
  * <p>字段名与前端 src/api/assetCatalog.ts 的契约逐字对应，改动需两端同步。</p>
  *
@@ -104,23 +104,8 @@ public class AssetTableDetailVO implements Serializable {
     /** 元数据同步时间 */
     private String syncTime;
 
-    /** 近30日浏览数 */
-    private Integer browseCount30d;
-
-    /** 近30日读取数 */
-    private Integer readCount30d;
-
-    /** 收藏数 */
-    private Integer bookmarkCount;
-
-    /** 最近访问时间 */
-    private String lastAccessTime;
-
     /** 治理项计数（非加权评分） */
     private Integer healthIssueCount;
-
-    /** 当前登录用户是否已收藏 */
-    private Boolean bookmarked;
 
     /** 字段列表 */
     private List<AssetColumnVO> columns;
@@ -188,18 +173,8 @@ public class AssetTableDetailVO implements Serializable {
     public void setLastModifyTime(String lastModifyTime) { this.lastModifyTime = lastModifyTime; }
     public String getSyncTime() { return syncTime; }
     public void setSyncTime(String syncTime) { this.syncTime = syncTime; }
-    public Integer getBrowseCount30d() { return browseCount30d; }
-    public void setBrowseCount30d(Integer browseCount30d) { this.browseCount30d = browseCount30d; }
-    public Integer getReadCount30d() { return readCount30d; }
-    public void setReadCount30d(Integer readCount30d) { this.readCount30d = readCount30d; }
-    public Integer getBookmarkCount() { return bookmarkCount; }
-    public void setBookmarkCount(Integer bookmarkCount) { this.bookmarkCount = bookmarkCount; }
-    public String getLastAccessTime() { return lastAccessTime; }
-    public void setLastAccessTime(String lastAccessTime) { this.lastAccessTime = lastAccessTime; }
     public Integer getHealthIssueCount() { return healthIssueCount; }
     public void setHealthIssueCount(Integer healthIssueCount) { this.healthIssueCount = healthIssueCount; }
-    public Boolean getBookmarked() { return bookmarked; }
-    public void setBookmarked(Boolean bookmarked) { this.bookmarked = bookmarked; }
     public List<AssetColumnVO> getColumns() { return columns; }
     public void setColumns(List<AssetColumnVO> columns) { this.columns = columns; }
     public List<AssetTagVO> getTags() { return tags; }

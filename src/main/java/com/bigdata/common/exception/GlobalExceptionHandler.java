@@ -93,7 +93,7 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 缺少必填请求参数（如 {@code DELETE /asset/bookmark} 未传 {@code assetId}）。
+     * 缺少必填请求参数（如 {@code GET /asset/table/{id}} 路径参数缺失对应的查询参数）。
      * <p>
      * 与上面的类型不匹配同理：此前会落到 {@code Exception} 兜底分支返回 500，
      * 前端据此提示「服务器内部错误,请联系管理员」，把调用方的参数漏传误导为服务故障。

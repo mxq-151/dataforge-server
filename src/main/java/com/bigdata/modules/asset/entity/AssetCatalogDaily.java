@@ -1,11 +1,9 @@
 package com.bigdata.modules.asset.entity;
 
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.common.entity.BaseEntity;
 
 import java.time.LocalDate;
-import java.util.Date;
 
 /**
  * asset_catalog_daily —— 资产目录日快照（一行 = 一张表 × 一个统计日）。
@@ -76,16 +74,6 @@ public class AssetCatalogDaily extends BaseEntity {
     /** 治理项编码集合，逗号分隔（如 NO_TAG,NO_DOC） */
     private String healthIssueCodes;
 
-    // ── 使用热度（T+1 固化）────────────────────────────────────────────────
-    /** 驼峰推导会得到 browseCount30d，与库中 browse_count_30d 不符，须显式指定 */
-    @TableField("browse_count_30d")
-    private Integer browseCount30d;
-    /** 同上，显式指定 read_count_30d */
-    @TableField("read_count_30d")
-    private Integer readCount30d;
-    private Integer bookmarkCount;
-    private Date lastAccessTime;
-
     public LocalDate getStatDate() { return statDate; }
     public void setStatDate(LocalDate statDate) { this.statDate = statDate; }
     public Long getTableMetadataId() { return tableMetadataId; }
@@ -142,12 +130,4 @@ public class AssetCatalogDaily extends BaseEntity {
     public void setHealthIssueCount(Integer healthIssueCount) { this.healthIssueCount = healthIssueCount; }
     public String getHealthIssueCodes() { return healthIssueCodes; }
     public void setHealthIssueCodes(String healthIssueCodes) { this.healthIssueCodes = healthIssueCodes; }
-    public Integer getBrowseCount30d() { return browseCount30d; }
-    public void setBrowseCount30d(Integer browseCount30d) { this.browseCount30d = browseCount30d; }
-    public Integer getReadCount30d() { return readCount30d; }
-    public void setReadCount30d(Integer readCount30d) { this.readCount30d = readCount30d; }
-    public Integer getBookmarkCount() { return bookmarkCount; }
-    public void setBookmarkCount(Integer bookmarkCount) { this.bookmarkCount = bookmarkCount; }
-    public Date getLastAccessTime() { return lastAccessTime; }
-    public void setLastAccessTime(Date lastAccessTime) { this.lastAccessTime = lastAccessTime; }
 }

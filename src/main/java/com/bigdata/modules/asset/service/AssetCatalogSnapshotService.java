@@ -161,6 +161,23 @@ public class AssetCatalogSnapshotService {
         return assetCatalogDailyMapper.selectList(wrapper);
     }
 
+    /**
+     * 读取统计日区间内的表大小历史（只投影算增长率需要的列）。
+     *
+     * <p>供大小增长率看板按窗口对比：上期与本期都取自同一套采集口径的快照，
+     * 不拿实时值与历史值比较。</p>
+     */
+    public List<AssetCatalogDaily> loadSizeHistory(LocalDate fromDate, LocalDate toDate) {
+        LambdaQueryWrapper<AssetCatalogDaily> wrapper = new LambdaQueryWrapper<>();
+        wrapper.select(AssetCatalogDaily::getStatDate, AssetCatalogDaily::getTableMetadataId,
+                        AssetCatalogDaily::getDatasourceId, AssetCatalogDaily::getDatabaseName,
+                        AssetCatalogDaily::getTableName, AssetCatalogDaily::getSizeBytes)
+                .ge(AssetCatalogDaily::getStatDate, fromDate)
+                .le(AssetCatalogDaily::getStatDate, toDate)
+                .orderByAsc(AssetCatalogDaily::getStatDate);
+        return assetCatalogDailyMapper.selectList(wrapper);
+    }
+
     // ==================================================================
     // 生成
     // ==================================================================
@@ -273,10 +290,6 @@ public class AssetCatalogSnapshotService {
         row.setHealthIssueCodes(codes.isEmpty() ? null : String.join(",", codes));
         row.setHealthIssueCount(codes.size());
 
-        row.setBrowseCount30d(table.getBrowseCnt30d());
-        row.setReadCount30d(table.getReadCnt30d());
-        row.setBookmarkCount(table.getBookmarkCnt());
-        row.setLastAccessTime(table.getLastAccessTime());
         return row;
     }
 

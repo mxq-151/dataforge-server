@@ -1,19 +1,15 @@
 package com.bigdata.modules.asset.controller;
 
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.exception.GlobalExceptionHandler;
 import com.bigdata.common.test.ContractMockMvcSupport;
-import com.bigdata.modules.asset.service.AssetBookmarkService;
 import com.bigdata.modules.asset.service.AssetCatalogService;
 import com.bigdata.modules.asset.service.AssetGovernanceService;
 import com.bigdata.modules.asset.service.AssetInventoryService;
 import com.bigdata.modules.asset.service.AssetMetaService;
 import com.bigdata.modules.asset.service.AssetProducerService;
-import com.bigdata.modules.asset.service.AssetUsageService;
 import com.bigdata.modules.asset.service.SchedulerTaskMetricsService;
 import com.bigdata.modules.asset.task.AssetCatalogSnapshotTask;
-import com.bigdata.modules.asset.task.AssetUsageRollupTask;
 import com.bigdata.modules.asset.task.SchedulerTaskMetricsCollectTask;
 import com.bigdata.modules.asset.vo.AssetCategoryVO;
 import com.bigdata.modules.asset.vo.AssetColumnVO;
@@ -29,7 +25,7 @@ import com.bigdata.modules.asset.vo.AssetSearchHitVO;
 import com.bigdata.modules.asset.vo.AssetSearchResultVO;
 import com.bigdata.modules.asset.vo.AssetTableDetailVO;
 import com.bigdata.modules.asset.vo.AssetTagVO;
-import com.bigdata.modules.asset.vo.AssetUsageVO;
+import com.bigdata.modules.asset.vo.AssetTaskDelayVO;
 import com.bigdata.modules.asset.vo.CatalogTreeNodeVO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -64,7 +60,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -99,11 +94,7 @@ class AssetCatalogApiContractTest {
     @Mock
     private AssetCatalogService assetCatalogService;
     @Mock
-    private AssetUsageService assetUsageService;
-    @Mock
     private AssetGovernanceService assetGovernanceService;
-    @Mock
-    private AssetBookmarkService assetBookmarkService;
     @Mock
     private AssetMetaService assetMetaService;
     @Mock
@@ -115,8 +106,6 @@ class AssetCatalogApiContractTest {
     @Mock
     private AssetCatalogSnapshotTask catalogSnapshotTask;
     @Mock
-    private AssetUsageRollupTask usageRollupTask;
-    @Mock
     private SchedulerTaskMetricsCollectTask schedulerMetricsTask;
 
     private MockMvc mockMvc;
@@ -125,15 +114,12 @@ class AssetCatalogApiContractTest {
     void setUp() {
         AssetCatalogController controller = new AssetCatalogController();
         ReflectionTestUtils.setField(controller, "assetCatalogService", assetCatalogService);
-        ReflectionTestUtils.setField(controller, "assetUsageService", assetUsageService);
         ReflectionTestUtils.setField(controller, "assetGovernanceService", assetGovernanceService);
-        ReflectionTestUtils.setField(controller, "assetBookmarkService", assetBookmarkService);
         ReflectionTestUtils.setField(controller, "assetMetaService", assetMetaService);
         ReflectionTestUtils.setField(controller, "assetInventoryService", assetInventoryService);
         ReflectionTestUtils.setField(controller, "assetProducerService", assetProducerService);
         ReflectionTestUtils.setField(controller, "schedulerTaskMetricsService", schedulerTaskMetricsService);
         ReflectionTestUtils.setField(controller, "catalogSnapshotTask", catalogSnapshotTask);
-        ReflectionTestUtils.setField(controller, "usageRollupTask", usageRollupTask);
         ReflectionTestUtils.setField(controller, "schedulerMetricsTask", schedulerMetricsTask);
         mockMvc = ContractMockMvcSupport.productionMockMvc(controller);
     }
@@ -151,7 +137,6 @@ class AssetCatalogApiContractTest {
         calls.add(get("/asset/suggest"));
         // 详情与页签
         calls.add(get("/asset/table/1"));
-        calls.add(get("/asset/table/1/usage"));
         calls.add(get("/asset/table/1/producers"));
         calls.add(get("/asset/table/1/indicators"));
         calls.add(get("/asset/table/1/quality"));
@@ -170,22 +155,16 @@ class AssetCatalogApiContractTest {
                 .content("{\"content\":\"# 表说明\"}"));
         calls.add(get("/asset/table/1/doc/history"));
         calls.add(post("/asset/table/1/refresh"));
-        // 收藏与字典
-        calls.add(get("/asset/bookmark"));
-        calls.add(post("/asset/bookmark").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"assetType\":\"table\",\"assetId\":1}"));
-        calls.add(delete("/asset/bookmark").param("assetType", "table").param("assetId", "1"));
+        // 字典
         calls.add(get("/asset/tag"));
         calls.add(get("/asset/category"));
-        // 埋点与盘点
-        calls.add(post("/asset/access").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"items\":[{\"assetType\":\"table\",\"assetId\":1,\"accessType\":\"browse\"}]}"));
+        // 盘点
         calls.add(get("/asset/inventory/overview"));
         calls.add(get("/asset/inventory/health"));
         // 资产概况看板：五个看板均已接入（top-compute / task-delay 的数据由
         // SchedulerTaskMetricsCollectTask 每日从 DolphinScheduler 采集落库）
         calls.add(get("/asset/inventory/env-project"));
-        calls.add(get("/asset/inventory/top-assets?sortBy=access&limit=100"));
+        calls.add(get("/asset/inventory/top-assets?limit=100"));
         calls.add(get("/asset/inventory/top-compute?sortBy=resource&limit=50"));
         calls.add(get("/asset/inventory/task-delay?days=30"));
         calls.add(get("/asset/inventory/size-growth?growthPercent=10&minSizeBytes=10737418240"));
@@ -237,10 +216,10 @@ class AssetCatalogApiContractTest {
     class RouteCoverage {
 
         @Test
-        @DisplayName("前端已接通的 30 个调用全部命中，无 404 / 405")
+        @DisplayName("前端已接通的 25 个调用全部命中，无 404 / 405")
         void allFrontendCallsAreMapped() throws Exception {
             List<MockHttpServletRequestBuilder> calls = frontendCalls();
-            assertEquals(30, calls.size(),
+            assertEquals(25, calls.size(),
                     "路由表条数必须与前端 assetCatalog.ts 中已接通的调用数一致；新增接口时请同步本表");
 
             for (MockHttpServletRequestBuilder builder : calls) {
@@ -316,7 +295,7 @@ class AssetCatalogApiContractTest {
         @Test
         @DisplayName("目录树：engine 视角节点用 nodeKind / tableMetadataId / unclassified")
         void catalogTreeKeys() throws Exception {
-            when(assetCatalogService.tree("engine", 1L, "dw", null)).thenReturn(List.of(treeRoot()));
+            when(assetCatalogService.tree("engine", 1L, "dw", null, null)).thenReturn(List.of(treeRoot()));
 
             JsonNode data = dataOf(get("/asset/catalog/tree?view=engine&datasourceId=1&databaseName=dw"));
             assertNoSnakeCaseKey(data, "$");
@@ -351,17 +330,13 @@ class AssetCatalogApiContractTest {
             assertEquals("order", data.get("domainCode").asText());
             assertTrue(data.get("conventionParsed").asBoolean());
             assertEquals(2, data.get("healthIssueCount").asInt());
-            assertEquals(31, data.get("browseCount30d").asInt());
-            assertEquals(7, data.get("readCount30d").asInt());
-            assertEquals(3, data.get("bookmarkCount").asInt());
-            assertTrue(data.get("bookmarked").asBoolean());
 
             JsonNode col = data.get("columns").get(0);
             // Boolean 包装类型的 getter 是 getIsPartition()，Jackson 属性名必须是 isPartition
             assertFalse(col.get("isPartition").asBoolean());
             assertTrue(col.get("isPrimaryKey").asBoolean());
             assertFalse(col.get("nullable").asBoolean());
-            assertEquals(5, col.get("hotScore").asInt());
+            assertEquals("L2", col.get("securityLevel").asText());
 
             assertEquals("core", data.get("tags").get(0).get("tagCode").asText());
         }
@@ -369,7 +344,7 @@ class AssetCatalogApiContractTest {
         @Test
         @DisplayName("检索结果：tables/columns/indicators 三组命中共用同一 hit 结构")
         void searchKeys() throws Exception {
-            when(assetCatalogService.search("order", "table,column,indicator", 1, 20, "dwd", null))
+            when(assetCatalogService.search("order", "table,column,indicator", 1, 20, "dwd", null, null))
                     .thenReturn(searchResult());
 
             JsonNode data = dataOf(get("/asset/search?keyword=order&types=table,column,indicator"
@@ -383,20 +358,6 @@ class AssetCatalogApiContractTest {
             assertNotNull(hit.get("matchedText"));
             assertEquals("core", data.get("columns").get(0).get("layerCode").asText());
             assertEquals("IND_ORDER_AMT", data.get("indicators").get(0).get("title").asText());
-        }
-
-        @Test
-        @DisplayName("使用热度：browseTrend[].browseCount / topColumns[].columnName")
-        void usageKeys() throws Exception {
-            when(assetUsageService.usage(101L, 30)).thenReturn(usage());
-
-            JsonNode data = dataOf(get("/asset/table/101/usage?days=30"));
-            assertNoSnakeCaseKey(data, "$");
-
-            assertEquals("2026-09-16", data.get("browseTrend").get(0).get("statDate").asText());
-            assertEquals(12, data.get("browseTrend").get(0).get("browseCount").asInt());
-            assertEquals("order_id", data.get("topColumns").get(0).get("columnName").asText());
-            assertEquals("zhangsan", data.get("topReaders").get(0).get("userName").asText());
         }
 
         @Test
@@ -434,8 +395,8 @@ class AssetCatalogApiContractTest {
         @Test
         @DisplayName("盘点 / 治理项 / 字典 字段名")
         void inventoryAndMetaKeys() throws Exception {
-            when(assetInventoryService.overview("proj_a")).thenReturn(inventory());
-            when(assetInventoryService.health("proj_a")).thenReturn(List.of(healthIssue()));
+            when(assetInventoryService.overview("proj_a", null)).thenReturn(inventory());
+            when(assetInventoryService.health("proj_a", null)).thenReturn(List.of(healthIssue()));
             when(assetMetaService.listCategories()).thenReturn(List.of(category()));
             when(assetGovernanceService.getDoc(101L)).thenReturn(doc());
             when(assetGovernanceService.listDocHistory(101L)).thenReturn(List.of(docHistory()));
@@ -467,19 +428,6 @@ class AssetCatalogApiContractTest {
             assertNoSnakeCaseKey(history, "$");
             assertEquals(2, history.get(0).get("version").asInt());
         }
-
-        @Test
-        @DisplayName("收藏列表：Page 结构 records/total 保持 MyBatis-Plus 语义")
-        void bookmarkKeys() throws Exception {
-            Page<AssetSearchHitVO> page = new Page<>(1, 20, 1);
-            page.setRecords(List.of(hit("table", 101L)));
-            when(assetBookmarkService.page(1, 20)).thenReturn(page);
-
-            JsonNode data = dataOf(get("/asset/bookmark?current=1&size=20"));
-            assertNoSnakeCaseKey(data, "$");
-            assertEquals(1, data.get("total").asInt());
-            assertEquals("table", data.get("records").get(0).get("assetType").asText());
-        }
     }
 
     // ==================================================================
@@ -494,38 +442,72 @@ class AssetCatalogApiContractTest {
         @DisplayName("目录树缺省 view=engine，其余参数为 null")
         void treeDefaults() throws Exception {
             mockMvc.perform(get("/asset/catalog/tree")).andExpect(status().isOk());
-            verify(assetCatalogService).tree("engine", null, null, null);
+            verify(assetCatalogService).tree("engine", null, null, null, null);
         }
 
         @Test
         @DisplayName("检索缺省 current=1 / size=20，types 以逗号串透传")
         void searchDefaults() throws Exception {
             mockMvc.perform(get("/asset/search?keyword=order")).andExpect(status().isOk());
-            verify(assetCatalogService).search("order", null, 1, 20, null, null);
+            verify(assetCatalogService).search("order", null, 1, 20, null, null, null);
         }
 
         @Test
-        @DisplayName("详情页签缺省 days=30、limit=20")
+        @DisplayName("详情页签缺省 limit=20")
         void tabDefaults() throws Exception {
-            mockMvc.perform(get("/asset/table/101/usage")).andExpect(status().isOk());
-            verify(assetUsageService).usage(101L, 30);
-
             mockMvc.perform(get("/asset/table/101/preview")).andExpect(status().isOk());
             verify(assetCatalogService).preview(101L, 20, null);
-        }
-
-        @Test
-        @DisplayName("收藏分页缺省 current=1 / size=20")
-        void bookmarkDefaults() throws Exception {
-            mockMvc.perform(get("/asset/bookmark")).andExpect(status().isOk());
-            verify(assetBookmarkService).page(1, 20);
         }
 
         @Test
         @DisplayName("盘点不传 projectCode 时按全量口径（null 透传，由服务层决定收窄）")
         void inventoryDefaults() throws Exception {
             mockMvc.perform(get("/asset/inventory/overview")).andExpect(status().isOk());
-            verify(assetInventoryService).overview(null);
+            verify(assetInventoryService).overview(null, null);
+        }
+
+        @Test
+        @DisplayName("env 参数：目录树 / 检索 / 建议 / 盘点 / 看板逐一透传给服务层")
+        void envBinding() throws Exception {
+            mockMvc.perform(get("/asset/catalog/tree?env=prod")).andExpect(status().isOk());
+            verify(assetCatalogService).tree("engine", null, null, null, "prod");
+
+            mockMvc.perform(get("/asset/search?keyword=order&env=gray")).andExpect(status().isOk());
+            verify(assetCatalogService).search("order", null, 1, 20, null, null, "gray");
+
+            mockMvc.perform(get("/asset/suggest?keyword=ord&env=test")).andExpect(status().isOk());
+            verify(assetCatalogService).suggest("ord", "test");
+
+            mockMvc.perform(get("/asset/inventory/overview?env=prod")).andExpect(status().isOk());
+            verify(assetInventoryService).overview(null, "prod");
+
+            mockMvc.perform(get("/asset/inventory/health?env=gray")).andExpect(status().isOk());
+            verify(assetInventoryService).health(null, "gray");
+
+            mockMvc.perform(get("/asset/inventory/top-assets?env=test")).andExpect(status().isOk());
+            verify(assetInventoryService).topAssets(100, "test");
+
+            mockMvc.perform(get("/asset/inventory/size-growth?env=prod")).andExpect(status().isOk());
+            // 阈值与对比窗口默认值由服务层兜底，控制器只透传显式参数
+            verify(assetInventoryService).sizeGrowth(null, null, null, "prod");
+
+            mockMvc.perform(get("/asset/inventory/top-compute?env=gray")).andExpect(status().isOk());
+            verify(schedulerTaskMetricsService).topCompute("resource", 50, "gray");
+
+            mockMvc.perform(get("/asset/inventory/task-delay?env=test")).andExpect(status().isOk());
+            verify(schedulerTaskMetricsService).taskDelay(30, "test");
+        }
+
+        @Test
+        @DisplayName("env 未传时按 null 透传（服务层据此判定「不按环境过滤」）")
+        void envOmittedIsNull() throws Exception {
+            when(assetInventoryService.topAssets(5, null)).thenReturn(List.of());
+            mockMvc.perform(get("/asset/inventory/top-assets?limit=5")).andExpect(status().isOk());
+            verify(assetInventoryService).topAssets(5, null);
+
+            when(schedulerTaskMetricsService.taskDelay(7, null)).thenReturn(new AssetTaskDelayVO());
+            mockMvc.perform(get("/asset/inventory/task-delay?days=7")).andExpect(status().isOk());
+            verify(schedulerTaskMetricsService).taskDelay(7, null);
         }
 
         @Test
@@ -549,28 +531,6 @@ class AssetCatalogApiContractTest {
                     org.mockito.ArgumentCaptor.forClass(com.bigdata.modules.asset.dto.AssetTagsUpdateDTO.class);
             verify(assetGovernanceService).updateTags(org.mockito.ArgumentMatchers.eq(101L), tags.capture());
             assertEquals(List.of("core", "pii"), tags.getValue().getTagCodes());
-
-            mockMvc.perform(post("/asset/access")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content("{\"items\":[{\"assetType\":\"table\",\"assetId\":101,"
-                                    + "\"accessType\":\"browse\",\"keyword\":\"order\"}]}"))
-                    .andExpect(status().isOk());
-            org.mockito.ArgumentCaptor<com.bigdata.modules.asset.dto.AssetAccessReportDTO> access =
-                    org.mockito.ArgumentCaptor.forClass(com.bigdata.modules.asset.dto.AssetAccessReportDTO.class);
-            verify(assetUsageService).recordAccess(access.capture());
-            assertEquals(1, access.getValue().getItems().size());
-            assertEquals("browse", access.getValue().getItems().get(0).getAccessType());
-        }
-
-        @Test
-        @DisplayName("收藏删除按 query 参数绑定，缺少必填参数报 400")
-        void bookmarkDeleteBinding() throws Exception {
-            mockMvc.perform(delete("/asset/bookmark").param("assetType", "table").param("assetId", "101"))
-                    .andExpect(status().isOk());
-            verify(assetBookmarkService).remove("table", 101L);
-
-            mockMvc.perform(delete("/asset/bookmark").param("assetType", "table"))
-                    .andExpect(status().isBadRequest());
         }
     }
 
@@ -619,7 +579,6 @@ class AssetCatalogApiContractTest {
         column.setNullable(false);
         column.setOrdinalPosition(1);
         column.setSecurityLevel("L2");
-        column.setHotScore(5);
 
         AssetTagVO tag = new AssetTagVO();
         tag.setId(1L);
@@ -648,11 +607,7 @@ class AssetCatalogApiContractTest {
         vo.setAssetLevel("L1");
         vo.setRowCount(1200000L);
         vo.setPartitionColumns(List.of("dt"));
-        vo.setBrowseCount30d(31);
-        vo.setReadCount30d(7);
-        vo.setBookmarkCount(3);
         vo.setHealthIssueCount(2);
-        vo.setBookmarked(true);
         vo.setColumns(List.of(column));
         vo.setTags(List.of(tag));
         return vo;
@@ -684,28 +639,6 @@ class AssetCatalogApiContractTest {
         result.setIndicators(List.of(indicator));
         result.setTotal(3);
         return result;
-    }
-
-    private static AssetUsageVO usage() {
-        AssetUsageVO.BrowseTrendPoint point = new AssetUsageVO.BrowseTrendPoint();
-        point.setStatDate("2026-09-16");
-        point.setBrowseCount(12);
-        point.setReadCount(4);
-
-        AssetUsageVO.ColumnHot hot = new AssetUsageVO.ColumnHot();
-        hot.setColumnName("order_id");
-        hot.setHotScore(5);
-        hot.setHitCount(20);
-
-        AssetUsageVO.TopReader reader = new AssetUsageVO.TopReader();
-        reader.setUserName("zhangsan");
-        reader.setReadCount(4);
-
-        AssetUsageVO vo = new AssetUsageVO();
-        vo.setBrowseTrend(List.of(point));
-        vo.setTopColumns(List.of(hot));
-        vo.setTopReaders(List.of(reader));
-        return vo;
     }
 
     private static AssetQualitySummaryVO quality() {
@@ -850,24 +783,11 @@ class AssetCatalogApiContractTest {
         @Test
         @DisplayName("未来统计日被拒绝：返回错误且不触发任务")
         void testRunFutureDateRejected() throws Exception {
-            JsonNode body = call(post("/asset/task/usage-rollup/run")
+            JsonNode body = call(post("/asset/task/catalog-snapshot/run")
                     .param("statDate", LocalDate.now().plusDays(1).toString()));
 
             assertNotEquals(200, body.get("code").asInt());
-            verify(usageRollupTask, never()).runOnce(any(LocalDate.class));
-        }
-
-        @Test
-        @DisplayName("热度汇总：返回 assetCount/hotUpdated/tablesUpdated")
-        void testRunUsageRollup() throws Exception {
-            when(usageRollupTask.runOnce(any(LocalDate.class)))
-                    .thenReturn(new AssetUsageRollupTask.RunResult(LocalDate.of(2026, 9, 29), 45, 12, 30));
-
-            JsonNode data = dataOf(post("/asset/task/usage-rollup/run"));
-
-            assertEquals(45, data.get("assetCount").asInt());
-            assertEquals(12, data.get("hotUpdated").asInt());
-            assertEquals(30, data.get("tablesUpdated").asInt());
+            verify(catalogSnapshotTask, never()).runOnce(any(LocalDate.class));
         }
 
         @Test

@@ -53,6 +53,47 @@
 - 血缘复用桌面端 Marquez 客户端；产出任务实时代理 DolphinScheduler（未接入返回空列表，不造假数据）；
   元数据标注缺口复用 `/metadata/annotation-gaps`；分层/业务域由表名实时解析（`TableNameConventionParser`），不落库。
 
+## 资产热度/收藏已整体下线（2026-10-10）
+
+资产模块原先的「访问频率」是**前端 UI 埋点**（目录树点选/搜索打开/收藏/预览四类），
+既采不到真实取数行为（数据探索、调度任务、下游消费全都没有），字段热度链路还因前端从不发
+`column` 埋点而恒为空。已按需求**整体删除**，不要在新代码里复活：
+
+- 类：`AssetUsageService` / `AssetUsageRollupTask` / `AssetBookmarkService` 及
+  `asset_access_log` / `asset_usage_daily` / `asset_bookmark` 三张表与对应 Mapper/DTO/VO。
+- 接口：`POST /asset/access`、`GET /asset/table/{id}/usage`、`GET|POST|DELETE /asset/bookmark`、
+  `POST /asset/task/usage-rollup/run`。治理项 `NO_ACCESS_30D` 也一并移除（依赖 last_access_time）。
+- 列：`table_metadata`(browse_cnt_30d/read_cnt_30d/bookmark_cnt/last_access_time)、
+  `column_metadata.hot_score`、`asset_catalog_daily` 同名列。init 表数 **41 → 38**。
+- `AssetInventoryService.topAssets(limit, env)` 已**去掉 sortBy**，固定按 sizeBytes 降序。
+- **后续方向**：要的是「各处理任务对表的读写信息」，需另起一轮设计（调度任务产出/消费关系、
+  查询引擎取数记录或库侧统计），届时新增独立的表与接口，不要复用已删的三张表名。
+
+## 容器内 DolphinScheduler（DS 3.4.1 standalone，2026-10-09 摸清）
+
+- 单进程 `org.apache.dolphinscheduler.StandaloneServer`，supervisord 程序名 **`dolphinscheduler`**
+  （改配置/清数据前用 `supervisorctl stop|start dolphinscheduler` 控制，autorestart=true，直接 kill 会被拉起）。
+- API：`http://127.0.0.1:12345/dolphinscheduler/`，认证用请求头 `token: <t_ds_access_token.token>`
+  （库里已有长期 token，`psql -tA -c "select token from t_ds_access_token order by id limit 1"`）。
+  容器内 curl 要加 `--noproxy '*'`。
+- **DS 的库是容器内 PostgreSQL，不是 h2**：`postgresql://127.0.0.1:5432/dolphinscheduler`，`postgres/123456`。
+  启动脚本用 `SPRING_DATASOURCE_*` 环境变量覆盖了 yaml 里的 h2 默认值，别被 `application.yaml` 里
+  `spring.profiles.active: h2` 骗到。表名是新命名（`t_ds_workflow_instance` / `t_ds_workflow_definition`）。
+- 语义映射：**补数 = `command_type=5` (COMPLEMENT_DATA)**；`7` = REPEAT_RUNNING（重跑），`6` = SCHEDULER。
+  实例接口：`GET /projects/{pc}/workflow-instances`、`POST /projects/{pc}/executors/execute`（STOP/PAUSE/…）、
+  `DELETE /projects/{pc}/workflow-instances/{id}`（**仅终态可删**，RUNNING 报 50006）。`test_project` code = `183115978154240`。
+- **坑**：DS 崩溃被 supervisord 拉起后，master 会自动"恢复"库里 `RUNNING_EXECUTION` 的实例并重跑，
+  于是"停不掉也删不掉"。要清实例必须先 `supervisorctl stop dolphinscheduler`，再直接清库，最后启动。
+- **坑**：**直接 `kill` DS 的 java 进程一律无效**——supervisord 的无条件重启链条是
+  `[program:dolphinscheduler] autorestart=true` → 但被托管的进程其实是包装脚本 `run-ds-standalone.sh`
+  而非 java（脚本末尾 `while pgrep -f StandaloneServer; … ; done; exit 1`，java 一没脚本就 exit 1 被重启）。
+  停它必须用 `supervisorctl stop dolphinscheduler`。另外该 program 段**缺 `stopasgroup/killasgroup`**
+  （postgres 段有），stop 后 java 可能成孤儿继续占 12345，需补 `pkill -f org.apache.dolphinscheduler.StandaloneServer`。
+- 容器总内存只有 8G（cgroup `memory.max=8GiB`），master `-Xms4g -Xmx4g` + 多个 Spark local 作业并发时极易把 DS 挤死。
+  实测容器 `/sys/fs/cgroup/memory.events` 的 `oom_kill` 已累计 74 次，DS 曾在 1 小时内被重启 17 次；
+  且反复退出时**没有 hs_err/hprof 转储**，说明是**被内核 OOM killer SIGKILL**，不是 JVM 堆内 OOM。
+  跑大批量补数前留意，根治办法是把 DS 堆降到 1~1.5g。
+
 ## 容器内 Spark 与写入合规监听器（2026-10-08 集成）
 
 - 容器内 Spark 是 **3.5.9 (local)**，`SPARK_HOME=/opt/spark`；镜像里放进 `$SPARK_HOME/jars` 的 jar

@@ -13,6 +13,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -327,7 +328,7 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
     }
 
     /**
-     * 采集「表名 → 存储字节数」：复用系统表统计口径，供每日存储大小刷新任务使用。
+     * 采集「表名 → 存储字节数」：复用系统表统计口径，供每日存储统计刷新任务使用。
      * 失败时返回空 Map（调用方覆盖写，不影响存量值）。
      */
     @Override
@@ -339,6 +340,47 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
                     .loadSizeBytes(datasourceConfig.getDatasourceType(), connection, databaseName);
         } catch (Exception e) {
             getLog().warn("采集表存储大小失败[database={}]: {}", databaseName, e.getMessage());
+            return Map.of();
+        } finally {
+            closeQuietly(connection);
+        }
+    }
+
+    /**
+     * 采集「表名 → 行数」：与 {@link #listTableSizes} 同源的系统表估算值口径。
+     * 失败时返回空 Map（调用方覆盖写，不影响存量值）。
+     */
+    @Override
+    public Map<String, Long> listTableRowCounts(DatasourceConfig datasourceConfig, String databaseName) {
+        Connection connection = null;
+        try {
+            connection = datasourceConfigService.getConnection(datasourceConfig.getId(), databaseName);
+            return new JdbcTableStatsCollector(getLog())
+                    .loadRowCounts(datasourceConfig.getDatasourceType(), connection, databaseName);
+        } catch (Exception e) {
+            getLog().warn("采集表行数失败[database={}]: {}", databaseName, e.getMessage());
+            return Map.of();
+        } finally {
+            closeQuietly(connection);
+        }
+    }
+
+    /**
+     * 采集「表名 → 当日最新分区大小」：与 {@link #listTableSizes} 同源，按真实引擎走系统表口径。
+     * 失败时返回空 Map（调用方覆盖写，不影响存量值）。
+     */
+    @Override
+    public Map<String, TablePartitionSize> listLatestPartitions(DatasourceConfig datasourceConfig,
+                                                                String databaseName,
+                                                                Collection<String> tableNames) {
+        Connection connection = null;
+        try {
+            connection = datasourceConfigService.getConnection(datasourceConfig.getId(), databaseName);
+            return new JdbcTableStatsCollector(getLog())
+                    .loadLatestPartitions(datasourceConfig.getDatasourceType(), connection,
+                            databaseName, tableNames);
+        } catch (Exception e) {
+            getLog().warn("采集分区大小失败[database={}]: {}", databaseName, e.getMessage());
             return Map.of();
         } finally {
             closeQuietly(connection);

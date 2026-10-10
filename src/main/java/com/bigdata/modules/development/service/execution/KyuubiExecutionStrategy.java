@@ -1141,11 +1141,135 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     }
 
     /**
+     * 采集「表名 → 当日最新分区大小」：SHOW PARTITIONS 取最新分区，再对该分区 DESCRIBE EXTENDED 取 totalSize。
+     * <p>供每日分区大小采集任务使用；单表取数失败只跳过该表，不影响其余。</p>
+     */
+    @Override
+    public Map<String, TablePartitionSize> listLatestPartitions(DatasourceConfig datasourceConfig,
+                                                                String databaseName,
+                                                                Collection<String> tableNames) {
+        Map<String, TablePartitionSize> result = new LinkedHashMap<>();
+        if (datasourceConfig == null || databaseName == null || tableNames == null || tableNames.isEmpty()) {
+            return result;
+        }
+        try {
+            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
+            SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(),
+                    datasourceConfig.getPassword(), ctx);
+            if (entry == null) {
+                return result;
+            }
+            String sessionHandle = entry.sessionHandle;
+            for (String tableName : tableNames) {
+                if (tableName == null || tableName.isBlank()) {
+                    continue;
+                }
+                TablePartitionSize latest = fetchLatestPartition(baseUrl, sessionHandle, databaseName, tableName);
+                if (latest != null) {
+                    result.put(tableName, latest);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("通过Kyuubi采集分区大小失败[{}]: {}", databaseName, e.getMessage());
+        }
+        return result;
+    }
+
+    /** 单表最新分区：SHOW PARTITIONS 取分区规格最大者，并取该分区大小 */
+    private TablePartitionSize fetchLatestPartition(String baseUrl, String sessionHandle,
+                                                    String databaseName, String tableName) {
+        try {
+            String operationHandle = submitOperation(baseUrl, sessionHandle,
+                    "SHOW PARTITIONS " + databaseName + "." + tableName);
+            if (operationHandle == null) {
+                return null;
+            }
+            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            if (result.status != OperationStatus.FINISHED || result.rows == null) {
+                return null;
+            }
+            String latest = null;
+            for (List<String> row : result.rows) {
+                if (row.isEmpty() || row.get(0) == null) {
+                    continue;
+                }
+                String spec = row.get(0).trim();
+                // 分区按创建顺序返回，日期值字典序与时间序一致，取最大即最新
+                if (!spec.isEmpty() && (latest == null || spec.compareTo(latest) > 0)) {
+                    latest = spec;
+                }
+            }
+            if (latest == null) {
+                return null;
+            }
+            String partitionClause = toPartitionClause(latest);
+            if (partitionClause == null) {
+                return null;
+            }
+            Long size = fetchPartitionSizeBytes(baseUrl, sessionHandle, databaseName, tableName, partitionClause);
+            if (size == null || size <= 0) {
+                return null;
+            }
+            return new TablePartitionSize(latest, size);
+        } catch (Exception e) {
+            log.warn("采集Hive分区大小失败[{}.{}]: {}", databaseName, tableName, e.getMessage());
+            return null;
+        }
+    }
+
+    private Long fetchPartitionSizeBytes(String baseUrl, String sessionHandle, String databaseName,
+                                         String tableName, String partitionClause) {
+        String operationHandle = submitOperation(baseUrl, sessionHandle,
+                "DESCRIBE EXTENDED " + databaseName + "." + tableName + " PARTITION (" + partitionClause + ")");
+        if (operationHandle == null) {
+            return null;
+        }
+        OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+        if (result.status == OperationStatus.FINISHED && result.rows != null) {
+            TableMetadata probe = new TableMetadata();
+            applyDescribeExtended(result.rows, probe);
+            return probe.getSizeBytes();
+        }
+        return null;
+    }
+
+    /**
+     * 分区规格 → Hive 分区子句。
+     * <p>如 {@code dt=2026-10-09/hour=10} → {@code dt='2026-10-09', hour='10'}；
+     * 结构不认识时返回 null，不猜。</p>
+     */
+    static String toPartitionClause(String spec) {
+        if (spec == null || spec.isBlank()) {
+            return null;
+        }
+        StringBuilder clause = new StringBuilder();
+        for (String part : spec.split("/")) {
+            int eq = part.indexOf('=');
+            if (eq <= 0) {
+                return null;
+            }
+            String column = part.substring(0, eq).trim();
+            String value = part.substring(eq + 1).trim();
+            if (column.isEmpty() || value.isEmpty()) {
+                return null;
+            }
+            if (clause.length() > 0) {
+                clause.append(", ");
+            }
+            clause.append(column).append("='").append(value.replace("'", "''")).append("'");
+        }
+        return clause.toString();
+    }
+
+    /**
      * 解析 DESCRIBE EXTENDED 输出并补齐表属性（包可见，便于单测）。
      *
      * <p>输出为分段文本：{@code # Partition Information} 段列出分区列；详细表信息段包含
      * {@code Location}、{@code totalSize}、{@code transient_lastDdlTime}
-     * 等参数，以及 ORC/Parquet 的压缩属性。仅识别已知键，其余行忽略。</p>
+     * 等参数，以及 ORC/Parquet 的压缩属性。仅识别已知键，其余行忽略。
+     * 表级描述的分段是 {@code # Detailed Table Information}，分区级描述是
+     * {@code # Detailed Partition Information}，两者都作为详细段处理。</p>
      */
     static void applyDescribeExtended(List<List<String>> rows, TableMetadata tableMeta) {
         if (rows == null || tableMeta == null) {
@@ -1163,7 +1287,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                 // 分段标记切换状态；表头行（如 # col_name）保持当前状态不变
                 if (first.equalsIgnoreCase("# Partition Information")) {
                     inPartitionSection = true;
-                } else if (first.equalsIgnoreCase("# Detailed Table Information")) {
+                } else if (first.equalsIgnoreCase("# Detailed Table Information")
+                        || first.equalsIgnoreCase("# Detailed Partition Information")) {
                     inPartitionSection = false;
                     inDetailedSection = true;
                 }

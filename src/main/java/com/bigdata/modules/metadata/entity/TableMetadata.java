@@ -1,7 +1,6 @@
 package com.bigdata.modules.metadata.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.bigdata.modules.devops.enums.DatasourceType;
@@ -57,19 +56,6 @@ public class TableMetadata {
     private String categoryCode;
     /** 资产等级 L1~L5 */
     private String assetLevel;
-
-    // ── 使用热度（T+1 由 asset_access_log 汇总回写）────────────────────────
-
-    /** 近 30 日浏览数。驼峰推导会得到 browse_cnt30d，与库中 browse_cnt_30d 不符，须显式指定 */
-    @TableField("browse_cnt_30d")
-    private Integer browseCnt30d;
-    /** 近 30 日读取数。同上，显式指定 read_cnt_30d */
-    @TableField("read_cnt_30d")
-    private Integer readCnt30d;
-    /** 收藏数 */
-    private Integer bookmarkCnt;
-    /** 最近访问时间（热度排序用） */
-    private Date lastAccessTime;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -133,12 +119,4 @@ public class TableMetadata {
     public void setCategoryCode(String categoryCode) { this.categoryCode = categoryCode; }
     public String getAssetLevel() { return assetLevel; }
     public void setAssetLevel(String assetLevel) { this.assetLevel = assetLevel; }
-    public Integer getBrowseCnt30d() { return browseCnt30d; }
-    public void setBrowseCnt30d(Integer browseCnt30d) { this.browseCnt30d = browseCnt30d; }
-    public Integer getReadCnt30d() { return readCnt30d; }
-    public void setReadCnt30d(Integer readCnt30d) { this.readCnt30d = readCnt30d; }
-    public Integer getBookmarkCnt() { return bookmarkCnt; }
-    public void setBookmarkCnt(Integer bookmarkCnt) { this.bookmarkCnt = bookmarkCnt; }
-    public Date getLastAccessTime() { return lastAccessTime; }
-    public void setLastAccessTime(Date lastAccessTime) { this.lastAccessTime = lastAccessTime; }
 }

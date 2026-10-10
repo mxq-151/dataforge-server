@@ -43,9 +43,6 @@ public class AssetColumnVO implements Serializable {
     /** 安全等级 */
     private String securityLevel;
 
-    /** 字段热度星级 0~5 */
-    private Integer hotScore;
-
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getColumnName() { return columnName; }
@@ -66,6 +63,4 @@ public class AssetColumnVO implements Serializable {
     public void setOrdinalPosition(Integer ordinalPosition) { this.ordinalPosition = ordinalPosition; }
     public String getSecurityLevel() { return securityLevel; }
     public void setSecurityLevel(String securityLevel) { this.securityLevel = securityLevel; }
-    public Integer getHotScore() { return hotScore; }
-    public void setHotScore(Integer hotScore) { this.hotScore = hotScore; }
 }

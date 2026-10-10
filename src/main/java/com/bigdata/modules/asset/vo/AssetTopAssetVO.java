@@ -3,7 +3,7 @@ package com.bigdata.modules.asset.vo;
 import java.io.Serializable;
 
 /**
- * TOP 资产清单项（按访问频率或占用空间排序）。
+ * TOP 资产清单项（按占用空间排序）。
  *
  * <p>字段名与前端 {@code AssetTopAssetVO} 逐字对应。</p>
  *
@@ -28,9 +28,6 @@ public class AssetTopAssetVO implements Serializable {
     /** 项目显示名；未归属任何项目时为「未归属项目」 */
     private String projectName;
 
-    /** 近 30 天访问次数（浏览 + 读取，T+1 汇总） */
-    private Integer accessCount30d;
-
     /** 占用空间（字节） */
     private Long sizeBytes;
 
@@ -49,8 +46,6 @@ public class AssetTopAssetVO implements Serializable {
     public void setProjectCode(String projectCode) { this.projectCode = projectCode; }
     public String getProjectName() { return projectName; }
     public void setProjectName(String projectName) { this.projectName = projectName; }
-    public Integer getAccessCount30d() { return accessCount30d; }
-    public void setAccessCount30d(Integer accessCount30d) { this.accessCount30d = accessCount30d; }
     public Long getSizeBytes() { return sizeBytes; }
     public void setSizeBytes(Long sizeBytes) { this.sizeBytes = sizeBytes; }
     public String getOwnerName() { return ownerName; }

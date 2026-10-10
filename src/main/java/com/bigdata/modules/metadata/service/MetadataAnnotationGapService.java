@@ -2,6 +2,7 @@ package com.bigdata.modules.metadata.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bigdata.common.security.DataAccessPermissionService;
+import com.bigdata.common.utils.DeployEnvParser;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import com.bigdata.modules.metadata.entity.ColumnMetadata;
@@ -66,8 +67,9 @@ public class MetadataAnnotationGapService {
      * @param datasourceId 可选，限定数据源
      * @param databaseName 可选，限定库
      * @param limit        扫描表数量上限，null 时取默认值
+     * @param env          可选，限定环境（按库名后缀 _prod/_gray/_test 解析）；null 表示不按环境过滤
      */
-    public AnnotationGapSummaryVO query(Long datasourceId, String databaseName, Integer limit) {
+    public AnnotationGapSummaryVO query(Long datasourceId, String databaseName, Integer limit, String env) {
         int effectiveLimit = limit == null || limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
 
         LambdaQueryWrapper<TableMetadata> wrapper = new LambdaQueryWrapper<>();
@@ -77,6 +79,8 @@ public class MetadataAnnotationGapService {
         if (databaseName != null && !databaseName.isBlank()) {
             wrapper.eq(TableMetadata::getDatabaseName, databaseName);
         }
+        String scopedEnv = DeployEnvParser.normalize(env);
+        applyEnvFilter(wrapper, scopedEnv);
         wrapper.orderByAsc(TableMetadata::getDatabaseName).orderByAsc(TableMetadata::getTableName);
         // 多取一条用于判断是否被 limit 截断
         wrapper.last("LIMIT " + (effectiveLimit + 1));
@@ -145,8 +149,28 @@ public class MetadataAnnotationGapService {
         return summary;
     }
 
-    /** 按调用者的库 / 表权限过滤，口径与 /metadata/tables 一致。 */
-    private List<TableMetadata> filterByPermission(List<TableMetadata> tables, Long datasourceId) {
+    /**
+     * 把「按环境过滤」下推到 SQL（库名后缀匹配）。
+     *
+     * <p>为什么必须在 SQL 层：环境过滤与 {@code LIMIT} 截断是同一层语义。
+     * 若改成「先按 limit 取回、再在内存里过滤」，那么被截断掉的可能是别的环境的表，
+     * 命中数与截断标记都会失去意义。</p>
+     *
+     * <p>模式 {@code %!_prod} 里 {@code !} 转义了 {@code _}：LIKE 中 {@code _} 是「任意单字符」，
+     * 不转义会误配 {@code xaprod} 这类并不以下划线分段的库名。
+     * 转义字符取 {@code !} 而不是反斜杠，是因为 {@code !} 在 MySQL / PostgreSQL 的字符串
+     * 字面量里都不特殊，无需再处理「反斜杠本身还要不要再转义」的方言差异。</p>
+     *
+     * @param env 已归一化的环境码；null 表示不追加条件
+     */
+    static void applyEnvFilter(LambdaQueryWrapper<TableMetadata> wrapper, String env) {
+        if (env == null) {
+            return;
+        }
+        wrapper.apply("database_name LIKE {0} ESCAPE '!'", "%!" + "_" + env);
+    }
+
+    /** 按调用者的库 / 表权限过滤，口径与 /metadata/tables 一致。 */    private List<TableMetadata> filterByPermission(List<TableMetadata> tables, Long datasourceId) {
         if (dataAccessPermissionService.isAdmin()) {
             return tables;
         }

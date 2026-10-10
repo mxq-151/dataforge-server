@@ -50,8 +50,9 @@ public class MetadataController {
     public Result<com.bigdata.modules.metadata.vo.AnnotationGapSummaryVO> getAnnotationGaps(
             @RequestParam(required = false) Long datasourceId,
             @RequestParam(required = false) String databaseName,
-            @RequestParam(required = false) Integer limit) {
-        return Result.success(metadataAnnotationGapService.query(datasourceId, databaseName, limit));
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String env) {
+        return Result.success(metadataAnnotationGapService.query(datasourceId, databaseName, limit, env));
     }
 
     @GetMapping("/tables")

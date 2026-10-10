@@ -2,6 +2,7 @@ package com.bigdata.modules.asset.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.bigdata.common.security.DataAccessPermissionService;
+import com.bigdata.common.utils.DeployEnvParser;
 import com.bigdata.modules.asset.entity.SchedulerTaskRunDaily;
 import com.bigdata.modules.asset.mapper.SchedulerTaskRunDailyMapper;
 import com.bigdata.modules.asset.vo.AssetTaskDelayVO;
@@ -251,15 +252,22 @@ public class SchedulerTaskMetricsService {
      * <p>由于本平台无 YARN，{@code cpuHours / memoryGbHours} 恒为 null，
      * 两个排序维度都按「窗口内累计运行时长」降序（resource 维度降级，前端提示语需同步）。</p>
      *
+     * <p>环境维度取自<b>工作流名后缀</b>：提交调度时环境就拼在工作流名末尾
+     * （{@code olist_code_ods} + test → {@code olist_code_ods_test}），
+     * 与库名的环境后缀是同一套约定（见 {@link DeployEnvParser}）。
+     * 工作流名解析不出环境时表示「无法归属到某个环境」，在显式按环境过滤时被排除。</p>
+     *
      * @param limit 条数上限，默认 50、硬上限 500
+     * @param env   可选，限定环境；null 表示不按环境过滤
      */
-    public List<AssetTopComputeTaskVO> topCompute(String sortBy, Integer limit) {
+    public List<AssetTopComputeTaskVO> topCompute(String sortBy, Integer limit, String env) {
         if (sortBy != null && !sortBy.isBlank()
                 && !"resource".equalsIgnoreCase(sortBy.trim())
                 && !"duration".equalsIgnoreCase(sortBy.trim())) {
             log.debug("top-compute 收到未知排序维度 {}，按 resource 处理", sortBy);
         }
         int top = limit == null ? TOP_TASK_DEFAULT : Math.max(1, Math.min(TOP_TASK_MAX, limit));
+        String scopedEnv = DeployEnvParser.normalize(env);
 
         LocalDate to = LocalDate.now();
         LocalDate from = to.minusDays(WINDOW_DAYS - 1L);
@@ -268,6 +276,9 @@ public class SchedulerTaskMetricsService {
         Map<String, ComputeAgg> grouped = new LinkedHashMap<>();
         for (SchedulerTaskRunDaily row : window(from, to)) {
             if (!projectAllowed(row.getProjectCode(), allowedProjects)) {
+                continue;
+            }
+            if (!DeployEnvParser.matches(row.getWorkflowName(), scopedEnv)) {
                 continue;
             }
             String key = row.getProjectCode() + "\u0000" + row.getWorkflowName() + "\u0000" + row.getNodeName();
@@ -291,17 +302,22 @@ public class SchedulerTaskMetricsService {
      * 任务延迟率。
      *
      * @param days 统计窗口天数，夹到 1~365
+     * @param env  可选，限定环境（按工作流名后缀过滤）；null 表示不按环境过滤
      */
-    public AssetTaskDelayVO taskDelay(Integer days) {
+    public AssetTaskDelayVO taskDelay(Integer days, String env) {
         int window = days == null ? WINDOW_DAYS : Math.max(1, Math.min(365, days));
         LocalDate to = LocalDate.now();
         LocalDate from = to.minusDays(window - 1L);
         Set<String> allowedProjects = permissionService.getAccessibleProjectCodes();
+        String scopedEnv = DeployEnvParser.normalize(env);
 
         long total = 0L;
         long delayed = 0L;
         for (SchedulerTaskRunDaily row : window(from, to)) {
             if (!projectAllowed(row.getProjectCode(), allowedProjects)) {
+                continue;
+            }
+            if (!DeployEnvParser.matches(row.getWorkflowName(), scopedEnv)) {
                 continue;
             }
             total += row.getTaskRunCount() == null ? 0 : row.getTaskRunCount();

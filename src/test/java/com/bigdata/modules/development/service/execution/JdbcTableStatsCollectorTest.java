@@ -4,6 +4,7 @@ import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.entity.TableMetadata;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
@@ -178,5 +180,93 @@ class JdbcTableStatsCollectorTest {
 
         assertEquals(1, sizes.size());
         assertEquals(2048L, sizes.get("Order_Detail"), "表名应保留系统表原始大小写");
+    }
+
+    @Test
+    @DisplayName("PostgreSQL：大小与行数都按「父表 = 自身 + 分区子表」聚合，子表不作为独立表返回")
+    void testPostgresAggregatesPartitions() throws Exception {
+        Connection connection = mock(Connection.class);
+        PreparedStatement statsPs = mock(PreparedStatement.class);
+        PreparedStatement partitionPs = mock(PreparedStatement.class);
+        when(connection.prepareStatement(contains("pg_inherits"))).thenReturn(statsPs);
+        when(connection.prepareStatement(contains("pg_partitioned_table"))).thenReturn(partitionPs);
+
+        ResultSet statsRs = mock(ResultSet.class);
+        when(statsPs.executeQuery()).thenReturn(statsRs);
+        when(statsRs.next()).thenReturn(true, false);
+        when(statsRs.getString("table_name")).thenReturn("ods_olist_orders_d");
+        when(statsRs.getLong("size_bytes")).thenReturn(24428544L);
+        when(statsRs.getLong("row_count")).thenReturn(99441L);
+
+        ResultSet partitionRs = mock(ResultSet.class);
+        when(partitionPs.executeQuery()).thenReturn(partitionRs);
+        when(partitionRs.next()).thenReturn(true, false);
+        when(partitionRs.getString("table_name")).thenReturn("ods_olist_orders_d");
+        when(partitionRs.getString("partition_columns")).thenReturn("dt");
+
+        List<TableMetadata> tables = singleTable("ods_olist_orders_d");
+        collector.fill(DatasourceType.POSTGRESQL, connection, "ods_olist_test", tables);
+
+        TableMetadata table = tables.get(0);
+        assertEquals(24428544L, table.getSizeBytes(), "分区父表大小应为聚合值而非 0");
+        assertEquals(99441L, table.getRowCount(), "分区父表行数应为子表累加值");
+        assertEquals("dt", table.getPartitionColumns());
+    }
+
+    @Test
+    @DisplayName("PostgreSQL 取数 SQL 必须聚合分区子表并排除子表本身")
+    void testPostgresSqlAggregatesPartitions() throws Exception {
+        Connection connection = mock(Connection.class);
+        PreparedStatement statsPs = mock(PreparedStatement.class);
+        PreparedStatement partitionPs = mock(PreparedStatement.class);
+        when(connection.prepareStatement(anyString())).thenReturn(statsPs);
+        ResultSet statsRs = mock(ResultSet.class);
+        when(statsPs.executeQuery()).thenReturn(statsRs);
+        when(statsRs.next()).thenReturn(false);
+        when(connection.prepareStatement(contains("pg_partitioned_table"))).thenReturn(partitionPs);
+        ResultSet partitionRs = mock(ResultSet.class);
+        when(partitionPs.executeQuery()).thenReturn(partitionRs);
+        when(partitionRs.next()).thenReturn(false);
+
+        collector.loadSizeBytes(DatasourceType.POSTGRESQL, connection, "ods_olist_test");
+
+        // 一次采集会下发两条语句（统计 + 分区列），此处只校验统计那条
+        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(connection, times(2)).prepareStatement(sqlCaptor.capture());
+        String sql = sqlCaptor.getAllValues().stream()
+                .filter(value -> value.contains("pg_inherits"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("未找到带分区聚合的表统计 SQL"));
+        assertTrue(sql.contains("sum(pg_total_relation_size"), "父表大小必须累加分区子表：" + sql);
+        assertTrue(sql.contains("NOT c.relispartition"), "分区子表不应作为独立表返回：" + sql);
+        assertTrue(sql.contains("row_count"), "同一轮查询应带出行数：" + sql);
+    }
+
+    @Test
+    @DisplayName("loadRowCounts：行数为 0 是合法值要保留，未统计过（负数）的表不计入")
+    void testLoadRowCounts() throws Exception {
+        Connection connection = mock(Connection.class);
+        PreparedStatement statsPs = mock(PreparedStatement.class);
+        PreparedStatement partitionPs = mock(PreparedStatement.class);
+        when(connection.prepareStatement(contains("information_schema.TABLES"))).thenReturn(statsPs);
+        when(connection.prepareStatement(contains("information_schema.PARTITIONS"))).thenReturn(partitionPs);
+
+        ResultSet statsRs = mock(ResultSet.class);
+        when(statsPs.executeQuery()).thenReturn(statsRs);
+        when(statsRs.next()).thenReturn(true, true, true, false);
+        when(statsRs.getString("TABLE_NAME")).thenReturn("Order_Detail", "empty_tbl", "never_analyzed");
+        when(statsRs.getLong("TABLE_ROWS")).thenReturn(2048L, 0L, -1L);
+        when(statsRs.getLong("DATA_LENGTH")).thenReturn(0L);
+        when(statsRs.getLong("INDEX_LENGTH")).thenReturn(0L);
+
+        ResultSet partitionRs = mock(ResultSet.class);
+        when(partitionPs.executeQuery()).thenReturn(partitionRs);
+        when(partitionRs.next()).thenReturn(false);
+
+        Map<String, Long> counts = collector.loadRowCounts(DatasourceType.MYSQL, connection, "dw");
+
+        assertEquals(2, counts.size());
+        assertEquals(2048L, counts.get("Order_Detail"), "表名应保留系统表原始大小写");
+        assertEquals(0L, counts.get("empty_tbl"), "空表的 0 必须保留，不能与「未知」混为一谈");
     }
 }

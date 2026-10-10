@@ -4,7 +4,6 @@ import com.bigdata.modules.metadata.entity.TableMetadata;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,7 +26,7 @@ class AssetHealthServiceTest {
 
     private final AssetHealthService service = new AssetHealthService();
 
-    /** 一张「各项都合规」的表：命名规范、有负责人/注释/文档/标签/规则，且近期有访问 */
+    /** 一张「各项都合规」的表：命名规范、有负责人/注释/文档/标签/规则 */
     private TableMetadata healthyTable() {
         TableMetadata table = new TableMetadata();
         table.setId(1L);
@@ -36,7 +35,6 @@ class AssetHealthServiceTest {
         table.setTableName("dwd_order_detail_d");
         table.setBusinessOwner("张三");
         table.setTableComment("订单明细表");
-        table.setLastAccessTime(new Date());
         return table;
     }
 
@@ -102,36 +100,15 @@ class AssetHealthServiceTest {
     }
 
     @Test
-    @DisplayName("近 30 日无访问被识别；从未访问过也算（null 属于最坏情况）")
-    void detectsIdleAssets() {
-        TableMetadata stale = healthyTable();
-        stale.setLastAccessTime(new Date(System.currentTimeMillis() - 45L * 24 * 60 * 60 * 1000));
-        assertTrue(service.issuesFor(stale, contextWith(1L, true, true, 1))
-                .contains(AssetHealthService.Issue.NO_ACCESS_30D));
-
-        TableMetadata never = healthyTable();
-        never.setLastAccessTime(null);
-        assertTrue(service.issuesFor(never, contextWith(1L, true, true, 1))
-                .contains(AssetHealthService.Issue.NO_ACCESS_30D));
-
-        // 29 天前访问过：仍在窗口内，不算低效资产
-        TableMetadata recent = healthyTable();
-        recent.setLastAccessTime(new Date(System.currentTimeMillis() - 29L * 24 * 60 * 60 * 1000));
-        assertFalse(service.issuesFor(recent, contextWith(1L, true, true, 1))
-                .contains(AssetHealthService.Issue.NO_ACCESS_30D));
-    }
-
-    @Test
     @DisplayName("多项问题同时命中时全部返回，不做「取最高优先级」的合并")
     void aggregatesAllIssues() {
         TableMetadata table = healthyTable();
         table.setTableName("bad_name");
         table.setBusinessOwner(null);
         table.setTableComment(null);
-        table.setLastAccessTime(null);
 
         List<AssetHealthService.Issue> issues = service.issuesFor(table, contextWith(1L, false, false, 0));
-        assertEquals(7, issues.size(), "7 项治理项应全部命中，实际: " + issues);
+        assertEquals(6, issues.size(), "6 项治理项应全部命中，实际: " + issues);
     }
 
     @Test

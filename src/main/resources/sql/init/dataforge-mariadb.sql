@@ -29,43 +29,8 @@ CREATE TABLE IF NOT EXISTS `asset_category` (
   KEY `idx_asset_category_parent` (`parent_code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资产分类表(分层/业务域，支持人工覆盖)';
 
--- 资产收藏表
-CREATE TABLE IF NOT EXISTS `asset_bookmark` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `user_id` bigint NOT NULL COMMENT '用户ID',
-  `asset_type` varchar(16) NOT NULL COMMENT '资产类型(table/column/indicator)',
-  `asset_id` bigint NOT NULL COMMENT '资产ID',
-  `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_asset_bookmark` (`user_id`,`asset_type`,`asset_id`),
-  KEY `idx_asset_bookmark_user` (`user_id`),
-  KEY `idx_asset_bookmark_table` (`table_metadata_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资产收藏表';
-
--- 资产访问埋点表(仅追加)：高频写入的轻量表，刻意与 operation_audit_log 分离，
--- 避免浏览行为淹没真正的操作留痕
-CREATE TABLE IF NOT EXISTS `asset_access_log` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `user_id` bigint DEFAULT NULL COMMENT '用户ID',
-  `user_name` varchar(100) DEFAULT NULL COMMENT '用户名',
-  `asset_type` varchar(16) NOT NULL COMMENT '资产类型(table/column/indicator)',
-  `asset_id` bigint NOT NULL COMMENT '资产ID',
-  `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
-  `access_type` varchar(16) NOT NULL COMMENT '访问类型(browse=浏览 read=读取 bookmark=收藏 query=带查询)',
-  `keyword` varchar(200) DEFAULT NULL COMMENT '检索关键词',
-  `access_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '访问时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_asset_access_asset` (`asset_type`,`asset_id`),
-  KEY `idx_asset_access_time` (`access_time`),
-  KEY `idx_asset_access_user` (`user_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资产访问埋点表(仅追加，按日汇总)';
-
-
 -- ==================================================================
--- 资产目录模块（第二批 / 第三批）：标签、使用说明、使用热度
---   使用热度走独立的轻量表按日汇总(T+1)，不回写 operation_audit_log；
+-- 资产目录模块（第二批 / 第三批）：标签、使用说明
 --   使用说明复用同一张 asset_doc + 版本历史，避免重复建设 markdown 与版本能力。
 -- ==================================================================
 
@@ -124,25 +89,6 @@ CREATE TABLE IF NOT EXISTS `asset_tag_rel` (
   KEY `idx_asset_tag_rel_table` (`table_metadata_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产标签关联表(支持表/字段/指标)';
 
--- 资产使用热度日汇总表(T+1，由 asset_access_log 汇总)
-CREATE TABLE IF NOT EXISTS `asset_usage_daily` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `asset_type` varchar(16) NOT NULL DEFAULT 'table' COMMENT '资产类型(table/column/indicator)',
-  `asset_id` bigint NOT NULL COMMENT '资产ID',
-  `table_metadata_id` bigint DEFAULT NULL COMMENT '表元数据ID(便于按表聚合)',
-  `stat_date` date NOT NULL COMMENT '统计日',
-  `browse_count` int NOT NULL DEFAULT 0 COMMENT '浏览数',
-  `read_count` int NOT NULL DEFAULT 0 COMMENT '读取数',
-  `bookmark_count` int NOT NULL DEFAULT 0 COMMENT '收藏数',
-  `relate_count` int NOT NULL DEFAULT 0 COMMENT '被关联数(引用该资产的规则/指标等)',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_asset_usage_daily` (`asset_type`,`asset_id`,`stat_date`),
-  KEY `idx_asset_usage_table` (`table_metadata_id`),
-  KEY `idx_asset_usage_date` (`stat_date`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产使用热度日汇总表(T+1，由 asset_access_log 汇总)';
-
 -- 资产目录日快照表(T+1，一行=一张表×一个统计日)
 CREATE TABLE IF NOT EXISTS `asset_catalog_daily` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
@@ -174,10 +120,6 @@ CREATE TABLE IF NOT EXISTS `asset_catalog_daily` (
   `has_doc` tinyint NOT NULL DEFAULT 0 COMMENT '是否有使用说明',
   `health_issue_count` int NOT NULL DEFAULT 0 COMMENT '治理项数量',
   `health_issue_codes` varchar(500) DEFAULT NULL COMMENT '治理项编码集合(逗号分隔)',
-  `browse_count_30d` int NOT NULL DEFAULT 0 COMMENT '近30日浏览数',
-  `read_count_30d` int NOT NULL DEFAULT 0 COMMENT '近30日读取数',
-  `bookmark_count` int NOT NULL DEFAULT 0 COMMENT '收藏数',
-  `last_access_time` datetime DEFAULT NULL COMMENT '最近访问时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -186,6 +128,26 @@ CREATE TABLE IF NOT EXISTS `asset_catalog_daily` (
   KEY `idx_asset_catalog_daily_domain` (`stat_date`,`domain_code`),
   KEY `idx_asset_catalog_daily_ds` (`stat_date`,`datasource_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='资产目录日快照表(T+1，一行=一张表×一个统计日)';
+
+-- 分区日大小表(T+1，一行=一张天分区表×一个统计日，记录当日最新分区)
+CREATE TABLE IF NOT EXISTS `table_partition_size_daily` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `stat_date` date NOT NULL COMMENT '统计日',
+  `table_metadata_id` bigint NOT NULL COMMENT '表元数据ID',
+  `datasource_id` bigint DEFAULT NULL COMMENT '数据源ID',
+  `database_name` varchar(100) DEFAULT NULL COMMENT '库名',
+  `table_name` varchar(200) NOT NULL COMMENT '表名',
+  `partition_column` varchar(64) DEFAULT NULL COMMENT '日期类分区列名',
+  `partition_value` varchar(64) DEFAULT NULL COMMENT '当日最新分区值',
+  `size_bytes` bigint DEFAULT NULL COMMENT '该分区存储字节数',
+  `row_count` bigint DEFAULT NULL COMMENT '该分区行数',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_partition_size_daily` (`stat_date`,`table_metadata_id`),
+  KEY `idx_partition_size_daily_table` (`table_metadata_id`,`stat_date`),
+  KEY `idx_partition_size_daily_date` (`stat_date`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='分区日大小表(T+1，一行=一张天分区表×一个统计日，记录当日最新分区)';
 
 -- 调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)
 CREATE TABLE IF NOT EXISTS `scheduler_task_run_daily` (
@@ -227,7 +189,6 @@ CREATE TABLE IF NOT EXISTS `column_metadata` (
   `default_value` varchar(500) DEFAULT NULL COMMENT '默认值',
   `business_desc` varchar(1000) DEFAULT NULL COMMENT '业务描述(与 column_comment 的技术注释区分，供资产目录展示)',
   `security_level` varchar(16) DEFAULT NULL COMMENT '字段安全等级',
-  `hot_score` tinyint NOT NULL DEFAULT '0' COMMENT '字段热度星级(0~5，由使用记录日汇总回写)',
   `sync_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '同步时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -843,10 +804,6 @@ CREATE TABLE IF NOT EXISTS `table_metadata` (
   `visibility` enum('public','internal','restricted') DEFAULT 'internal' COMMENT '可见性(对齐 indicators.visibility)',
   `category_code` varchar(64) DEFAULT NULL COMMENT '人工覆盖的分类编码；为空表示采用表名规范解析结果',
   `asset_level` varchar(16) DEFAULT NULL COMMENT '资产等级(L1~L5)',
-  `browse_cnt_30d` int NOT NULL DEFAULT '0' COMMENT '近30日浏览数(由 asset_access_log 日汇总回写)',
-  `read_cnt_30d` int NOT NULL DEFAULT '0' COMMENT '近30日读取数(由 asset_access_log 日汇总回写)',
-  `bookmark_cnt` int NOT NULL DEFAULT '0' COMMENT '收藏数(由 asset_bookmark 回写)',
-  `last_access_time` datetime DEFAULT NULL COMMENT '最近访问时间(埋点回写，用于热度排序)',
   `create_by` bigint DEFAULT NULL COMMENT '创建人',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

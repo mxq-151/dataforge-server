@@ -38,7 +38,7 @@
 
 ### 1.2 字段命名
 
-返回体统一 **camelCase**（由 `WebMvcConfig` 的 `@Primary` `ObjectMapper` 序列化，`application.yml` 里的 `property-naming-strategy: SNAKE_CASE` 对其不生效）。例如 `nodeKind`、`tableMetadataId`、`browseCount30d`。
+返回体统一 **camelCase**（由 `WebMvcConfig` 的 `@Primary` `ObjectMapper` 序列化，`application.yml` 里的 `property-naming-strategy: SNAKE_CASE` 对其不生效）。例如 `nodeKind`、`tableMetadataId`、`businessOwner`。
 
 ### 1.3 权限口径
 
@@ -51,8 +51,8 @@
 
 | 场景 | 格式 |
 | --- | --- |
-| 详情/热度等时间字段 | `yyyy-MM-dd HH:mm:ss` |
-| 使用趋势的统计日 `statDate` | `yyyy-MM-dd` |
+| 详情等时间字段（`lastModifyTime` / `syncTime`） | `yyyy-MM-dd HH:mm:ss` |
+| 快照统计日 `statDate`（仅内部） | `yyyy-MM-dd` |
 
 ### 1.5 数据来源与时延（T+1）
 
@@ -64,7 +64,7 @@
 | 表检索 `/search`（`types=table`） | 日快照 | 次日生效 |
 | 盘点 `/inventory/overview` | 日快照 | 次日生效 |
 | 治理项 `/inventory/health` | 日快照 | 次日生效 |
-| 大小突增 `/inventory/size-growth` | 日快照（本期 = 最新快照，上期 = 30 天前快照） | 次日生效 |
+| 大小突增 `/inventory/size-growth` | 全量表读日快照 `asset_catalog_daily`、天分区表读分区日表 `table_partition_size_daily`（均对比近 N 期均值） | 次日生效 |
 | 环境×项目 `/inventory/env-project`、TOP 资产 `/inventory/top-assets` | `table_metadata` 实时读取 | 实时 |
 | 调度看板 `/inventory/top-compute`、`/inventory/task-delay` | `scheduler_task_run_daily`（每日 03:30 从 DolphinScheduler 采集） | T+1 |
 | 字段/指标检索、详情及各页签、预览 | 实时计算 | 实时 |
@@ -83,30 +83,41 @@
 | 2 | GET | `/api/asset/search` | 统一检索（表 / 字段 / 指标） | 快照 + 实时 |
 | 3 | GET | `/api/asset/suggest` | 检索输入建议 | 实时 |
 | 4 | GET | `/api/asset/table/{id}` | 资产（表）详情 | 实时 |
-| 5 | GET | `/api/asset/table/{id}/usage` | 使用热度（趋势 / 字段热度 / 高频读者） | 实时 |
-| 6 | GET | `/api/asset/table/{id}/producers` | 产出任务（代理调度系统） | 实时 |
-| 7 | GET | `/api/asset/table/{id}/indicators` | 关联指标 | 实时 |
-| 8 | GET | `/api/asset/table/{id}/quality` | 质量规则摘要 | 实时 |
-| 9 | GET | `/api/asset/table/{id}/preview` | 数据预览 | 实时 |
-| 10 | GET | `/api/asset/table/{id}/doc` | 使用说明 | 实时 |
-| 11 | GET | `/api/asset/table/{id}/doc/history` | 使用说明历史版本 | 实时 |
-| 12 | GET | `/api/asset/bookmark` | 收藏列表（分页） | 实时 |
-| 13 | GET | `/api/asset/tag` | 标签字典 | 实时 |
-| 14 | GET | `/api/asset/category` | 分类字典（分层 / 业务域） | 实时 |
-| 15 | GET | `/api/asset/inventory/overview` | 资产盘点概览 | 快照 |
-| 16 | GET | `/api/asset/inventory/health` | 治理项清单 | 快照 |
-| 17 | GET | `/api/asset/inventory/env-project` | 资产概况①：按环境×项目的表数量与占用空间 | 实时 |
-| 18 | GET | `/api/asset/inventory/top-assets` | 资产概况②：访问频率 / 占用空间 TOP 资产 | 实时 |
-| 19 | GET | `/api/asset/inventory/top-compute` | 资产概况③：消耗计算资源 / 运行时长 TOP 任务 | 调度采集 |
-| 20 | GET | `/api/asset/inventory/task-delay` | 资产概况④：任务延迟率 | 调度采集 |
-| 21 | GET | `/api/asset/inventory/size-growth` | 资产概况⑤：数据大小增长率突增表 | 快照对比 |
+| 5 | GET | `/api/asset/table/{id}/producers` | 产出任务（代理调度系统） | 实时 |
+| 6 | GET | `/api/asset/table/{id}/indicators` | 关联指标 | 实时 |
+| 7 | GET | `/api/asset/table/{id}/quality` | 质量规则摘要 | 实时 |
+| 8 | GET | `/api/asset/table/{id}/preview` | 数据预览 | 实时 |
+| 9 | GET | `/api/asset/table/{id}/doc` | 使用说明 | 实时 |
+| 10 | GET | `/api/asset/table/{id}/doc/history` | 使用说明历史版本 | 实时 |
+| 11 | GET | `/api/asset/tag` | 标签字典 | 实时 |
+| 12 | GET | `/api/asset/category` | 分类字典（分层 / 业务域） | 实时 |
+| 13 | GET | `/api/asset/inventory/overview` | 资产盘点概览 | 快照 |
+| 14 | GET | `/api/asset/inventory/health` | 治理项清单 | 快照 |
+| 15 | GET | `/api/asset/inventory/env-project` | 资产概况①：按环境×项目的表数量与占用空间 | 实时 |
+| 16 | GET | `/api/asset/inventory/top-assets` | 资产概况②：占用空间 TOP 资产 | 实时 |
+| 17 | GET | `/api/asset/inventory/top-compute` | 资产概况③：消耗计算资源 / 运行时长 TOP 任务 | 调度采集 |
+| 18 | GET | `/api/asset/inventory/task-delay` | 资产概况④：任务延迟率 | 调度采集 |
+| 19 | GET | `/api/asset/inventory/size-growth` | 资产概况⑤：数据大小增长率突增表 | 快照 / 分区表对比 |
 
 **写能力**：`PUT /api/asset/table/{id}/lifecycle`（热/冷/保留天数）已接通，是资产模块当前唯一的写接口。
 
 > 资产概况的五块看板已全部接入。其中 ③④ 的数据由每日采集任务从 DolphinScheduler 落库，
 > 需要配置 `scheduler.dolphinscheduler.base-url`（见第五章）。
 
-> 治理写接口（`PUT /table/{id}/owner|category|tags|doc`、`POST /table/{id}/refresh`、收藏增删、`POST /access` 埋点）不在本文档范围。
+> 治理写接口（`PUT /table/{id}/owner|category|tags|doc`、`POST /table/{id}/refresh`）不在本文档范围。
+
+### 已下线接口（2026-10-10）
+
+原先基于「前端 UI 埋点」的一组接口已整体移除：原「使用热度」页签与
+`GET /api/asset/table/{id}/usage`、`POST /api/asset/access`（埋点上报）、
+`GET|POST|DELETE /api/asset/bookmark`（收藏）、`POST /api/asset/task/usage-rollup/run`（热度汇总）。
+对应的表 `asset_access_log` / `asset_usage_daily` / `asset_bookmark` 与
+`table_metadata`（`browse_cnt_30d` / `read_cnt_30d` / `bookmark_cnt` / `last_access_time`）、
+`column_metadata.hot_score`、`asset_catalog_daily` 的同名列均已从 init DDL 删除。
+
+原因：该埋点只覆盖资产目录页的点击，取不到真实取数行为（数据探索 / 调度任务 / 下游消费），
+统计出的「访问频率」名不副实；字段热度链路因前端从不发 `column` 埋点而恒为空。
+后续改为采集**各处理任务对表的读写关系**，届时另行增补接口与表。
 
 ---
 
@@ -345,7 +356,6 @@
 | `refreshCycle` | string | 刷新周期后缀（`d/h/w/m/y/r/f`） |
 | `compression` | string | 压缩算法（口径：Hive/Kyuubi 表参数、Doris PROPERTIES、ClickHouse 列编码、HBase 列族；空 = 未采集到） |
 | `healthIssueCount` | int | 该表治理项数量（非加权评分） |
-| `bookmarked` | boolean | 当前登录用户是否已收藏 |
 | `columns` | AssetColumn[] | 字段列表，**已按列级权限裁剪** |
 | `tags` | AssetTag[] | 标签列表 |
 
@@ -360,44 +370,8 @@
 | `isPartition` / `isPrimaryKey` / `nullable` | boolean | 分区 / 主键 / 可空 |
 | `ordinalPosition` | int | 字段序号 |
 | `securityLevel` | string | 安全等级 |
-| `hotScore` | int | 字段热度星级 `0~5` |
 
 > 资产不存在或不可见返回 `404`。
-
----
-
-### 5. 使用热度
-
-`GET /api/asset/table/{id}/usage`
-
-| 参数 | 类型 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- | --- |
-| `id` | path | long | - | 表元数据 id |
-| `days` | int | 否 | 30 | 趋势窗口天数，夹到 `1~365` |
-
-**响应**：`AssetUsage`
-
-```json
-{
-  "browseTrend": [
-    { "statDate": "2026-09-16", "browseCount": 12, "readCount": 4 }
-  ],
-  "topColumns": [
-    { "columnName": "order_id", "hotScore": 5, "hitCount": 20 }
-  ],
-  "topReaders": [
-    { "userName": "zhangsan", "readCount": 4 }
-  ]
-}
-```
-
-| 字段 | 说明 |
-| --- | --- |
-| `browseTrend` | 近 `days` 日浏览/读取趋势；**缺失日期补 0**，保证折线图不断档 |
-| `topColumns` | 字段热度 TOP；`hotScore` 来自 `column_metadata.hot_score`，`hitCount` 为该字段真实使用次数 |
-| `topReaders` | 高频读者 TOP（最多 10 条） |
-
-> 热度数据由 `asset_access_log` 经 T+1 汇总到 `asset_usage_daily` 并回写。
 
 ---
 
@@ -559,41 +533,7 @@
 
 ---
 
-### 12. 收藏列表
-
-`GET /api/asset/bookmark`
-
-| 参数 | 类型 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- | --- |
-| `current` | int | 否 | 1 | 页码 |
-| `size` | int | 否 | 20 | 每页条数 |
-
-**响应**：MyBatis-Plus 分页结构 `Page<AssetSearchHit>`
-
-```json
-{
-  "records": [
-    {
-      "assetType": "table",
-      "id": 101,
-      "tableMetadataId": 101,
-      "title": "dwd_order_detail_d",
-      "subtitle": "dw.dwd_order_detail_d",
-      "matchedText": null,
-      "ownerName": "zhangsan",
-      "layerCode": "dwd",
-      "domainCode": "order"
-    }
-  ],
-  "total": 1,
-  "size": 20,
-  "current": 1
-}
-```
-
----
-
-### 13. 标签字典
+### 12. 标签字典
 
 `GET /api/asset/tag`
 
@@ -605,7 +545,7 @@
 ]
 ```
 
-### 14. 分类字典
+### 13. 分类字典
 
 `GET /api/asset/category`
 
@@ -624,7 +564,7 @@
 
 ---
 
-### 15. 资产盘点概览
+### 14. 资产盘点概览
 
 `GET /api/asset/inventory/overview`
 
@@ -662,7 +602,7 @@
 
 ---
 
-### 16. 治理项清单
+### 15. 治理项清单
 
 `GET /api/asset/inventory/health`
 
@@ -697,7 +637,6 @@
 | `NO_DOC` | 缺少使用说明 |
 | `NO_QUALITY_RULE` | 未配置质量规则 |
 | `NO_TAG` | 未打标签 |
-| `NO_ACCESS_30D` | 近 30 日无访问 |
 
 | 字段 | 说明 |
 | --- | --- |
@@ -711,7 +650,7 @@
 
 对应前端「资产管理 → 资产概况」页签（`AssetOverviewTab.tsx`）。五块看板各自独立探测，互不影响。
 
-### 17. 按环境与项目的资产规模
+### 16. 按环境与项目的资产规模
 
 `GET /api/asset/inventory/env-project`
 
@@ -741,13 +680,12 @@
 - 权限：与其余资产接口一致，服务端按当前用户表级 SELECT 权限过滤。
 - 环境汇总卡（生产/灰度/测试三张 + 合计）由**前端就地聚合**，服务端不另开汇总接口。
 
-### 18. 访问频率 / 占用空间 TOP 资产
+### 17. 占用空间 TOP 资产
 
 `GET /api/asset/inventory/top-assets`
 
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- | --- |
-| `sortBy` | enum | 否 | `access` | `access`=近 30 天访问次数；`size`=占用空间。非法值按 `access` 处理 |
 | `limit` | int | 否 | 100 | 条数上限，硬上限 500 |
 
 **响应**：`AssetTopAsset[]`
@@ -761,7 +699,6 @@
     "env": "prod",
     "projectCode": "olist",
     "projectName": "Olist 数仓",
-    "accessCount30d": 3281,
     "sizeBytes": 21474836480,
     "ownerName": "zhangsan"
   }
@@ -770,13 +707,12 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `accessCount30d` | 近 30 天访问次数 = 浏览 + 读取（`browse_cnt_30d + read_cnt_30d`，含 query 计入读取） |
 | `ownerName` | 业务负责人；无为空串 |
-| 其余字段 | 同第 17 接口 |
+| 其余字段 | 同第 16 接口 |
 
-**口径**：**排序与截断都在服务端完成**，前端不做全量拉取后本地排序。环境与项目口径同第 17 接口（无环境后缀的库同样不计入）。
+**口径**：**排序（按占用空间降序）与截断都在服务端完成**，前端不做全量拉取后本地排序。环境与项目口径同第 16 接口（无环境后缀的库同样不计入）。
 
-### 19. 数据大小增长率突增表
+### 18. 数据大小增长率突增表
 
 `GET /api/asset/inventory/size-growth`
 
@@ -784,6 +720,7 @@
 | --- | --- | --- | --- | --- |
 | `growthPercent` | int | 否 | 10 | 增长率阈值（百分比） |
 | `minSizeBytes` | long | 否 | 10737418240（10GB） | 当前大小下限（字节） |
+| `windowDays` | int | 否 | 7 | 对比期数 N：分区表按近 N 个分区、全量表按近 N 天快照；夹到 `2~30` |
 
 **响应**：`AssetSizeGrowth[]`（按增长率降序）
 
@@ -798,26 +735,34 @@
     "previousSizeBytes": 17179869184,
     "currentSizeBytes": 32212254720,
     "growthBytes": 15032385536,
-    "growthRate": 0.875
+    "growthRate": 0.875,
+    "tableType": "PARTITIONED",
+    "compareDays": 7,
+    "partitionValue": "2026-10-09"
   }
 ]
 ```
 
 | 字段 | 说明 |
 | --- | --- |
-| `previousSizeBytes` / `currentSizeBytes` | 上期 / 本期大小（字节） |
+| `previousSizeBytes` / `currentSizeBytes` | 上期 / 本期大小（字节）。分区表为分区大小，全量表为整表大小 |
 | `growthBytes` | 增长量 = 本期 − 上期 |
 | `growthRate` | 增长率 0~1 小数 = `(current − previous) / previous` |
+| `tableType` | `PARTITIONED`=天分区表（分区口径）/ `FULL`=全量表（整表口径） |
+| `compareDays` | 实际参与均值的基线期数（近 N 个分区 / 近 N 天快照） |
+| `partitionValue` | 天分区表的最新分区值；全量表为 `null` |
 
 **口径（重要）**
 
-- 上期与本期**都取自资产目录日快照** `asset_catalog_daily`（同一套采集口径，不拿实时值与历史值比较）：本期 = 最新快照日，上期 = 30 天前的最近一个快照日。
-- **历史不足 30 天**时，上期退到最早的快照日（增长率因此会小于「30 天累计增长」的直觉值，前端提示语已标注筛选口径）。
-- **只有一天快照时无法比较，返回空数组**。
-- 筛选与排序在服务端完成：`growthRate > growthPercent` 且 `currentSizeBytes > minSizeBytes`，按 `growthRate` 降序。上期大小为 0 的表跳过（增长率无定义）。
-- 环境口径同第 17 接口。
+- **按表类型分流两条口径**（天分区表判定 = `partition_columns` 含日期类分区列，如 `dt/ds/date/day/pt`）：
+  - **天分区表**：本期 = 最新分区大小，上期 = 近 `windowDays` 个分区大小均值；取自分区日表 `table_partition_size_daily`（每日 02:20 采集「当日最新分区」，保留 180 天）。分区表整表大小只增不减，整表环比无意义，故下沉到分区粒度看单日突增。
+  - **全量表**：本期 = 最新快照整表大小，上期 = 近 `windowDays` 天快照大小均值；取自 `asset_catalog_daily`。
+- **均值为「近 N 期」，不含本期**：用均值而非单点对比，避免单日波动制造假突增。
+- **基线不足一期时无法比较**：分区表窗口内记录 < 2 条、全量表基线日为空时跳过该表（分区表**不退回整表口径**）。
+- 筛选与排序在服务端完成：`growthRate > growthPercent` 且 `currentSizeBytes > minSizeBytes`，按 `growthRate` 降序。上期为 0 的表跳过（增长率无定义）。
+- 环境口径同第 16 接口。
 
-### 20. 消耗计算资源 / 运行时长 TOP 任务
+### 19. 消耗计算资源 / 运行时长 TOP 任务
 
 `GET /api/asset/inventory/top-compute`
 
@@ -860,7 +805,7 @@
 - 因此 `sortBy` 的 `resource` 与 `duration` **当前都按「窗口内累计运行时长」降序**（`resource` 维度降级）。前端「按计算资源」的文案建议标注为「按时长（资源指标待接入）」。
 - 权限：按当前用户可见的**调度项目**过滤（与指标的项目授权口径一致）。
 
-### 21. 任务延迟率
+### 20. 任务延迟率
 
 `GET /api/asset/inventory/task-delay`
 
@@ -892,7 +837,7 @@
 
 - **延迟定义**：任务实际开始时间晚于其所属流程实例的计划开始时间（DolphinScheduler 的 `scheduleTime`）。计划时间取自流程实例，因此**跨流程实例的延迟判定依赖同窗口内取到该实例**。
 - **`byQueue` 恒为空数组**：按队列拆分需要 YARN 队列维度。本平台没有 YARN，故无数据源。前端的队列表在 `byQueue` 为空时不渲染，整体延迟率不受影响。
-- 窗口按统计日计算，数据为 T+1；权限口径同第 20 接口。
+- 窗口按统计日计算，数据为 T+1；权限口径同第 19 接口。
 
 ### 生命周期修改（写）
 
@@ -921,7 +866,7 @@
 | 项 | 说明 |
 | --- | --- |
 | 任务 | `SchedulerTaskMetricsCollectTask` |
-| 频率 | 每日 **03:30**（排在热度汇总 01:30、审计分区 02:00、目录快照 02:30 之后） |
+| 频率 | 每日 **03:30**（排在审计分区维护 02:00、目录快照 02:30 之后） |
 | 窗口 | 重拉**近 30 天**并整体覆盖写 → 幂等、漏跑可自愈，无需补偿脚本 |
 | 保留 | 180 天，超期随采集一并清理 |
 | 落库 | `scheduler_task_run_daily`（粒度：统计日 × 项目 × 工作流 × 节点 × 任务类型） |
@@ -979,8 +924,7 @@
 4. GET /api/asset/table/101/doc                      # 细读使用说明
 5. GET /api/asset/table/101/quality                  # 质量是否可信
 6. GET /api/asset/table/101/preview?limit=20         # 看真实数据（受行/列权限与脱敏约束）
-7. GET /api/asset/table/101/usage?days=30            # 热度与谁在用
-8. GET /api/asset/table/101/producers                # 谁产出、是否正常调度
+7. GET /api/asset/table/101/producers                # 谁产出、是否正常调度
 ```
 
 **治理视角**
@@ -994,13 +938,13 @@ GET /api/asset/inventory/health              # 哪些需要治理，按项看样
 
 ## 七、任务手动触发接口（运维）
 
-三个每日采集/汇总任务支持手动跑一次，与定时任务**共用同一执行入口**（`runOnce`），口径一致、幂等可重放。
+三个每日采集任务支持手动跑一次，与定时任务**共用同一执行入口**（`runOnce`），口径一致、幂等可重放。
 权限 `SUPER_ADMIN`；统计日缺省为**昨天**（T+1 口径），显式传参可补算历史日期，**未来日期直接拒绝**。
 
 | 接口 | 任务 | 定时 | 返回 |
 | --- | --- | --- | --- |
 | `POST /api/asset/task/catalog-snapshot/run?statDate=yyyy-MM-dd` | 目录快照（生成 + 超期清理） | 02:30 | `{statDate, tableCount, purged}` |
-| `POST /api/asset/task/usage-rollup/run?statDate=yyyy-MM-dd` | 使用热度汇总（聚合 + 冗余列回写） | 01:30 | `{statDate, assetCount, hotUpdated, tablesUpdated}` |
+| `POST /api/asset/task/partition-size/run?statDate=yyyy-MM-dd` | 分区大小采集（天分区表最新分区 + 超期清理） | 02:20 | `{statDate, partitionTableCount, rowCount, purged}` |
 | `POST /api/asset/task/scheduler-metrics/run?anchorDate=yyyy-MM-dd` | 调度指标采集（重拉近 30 天） | 03:30 | `{anchorDate, projectCount, taskInstanceCount, rowCount, skippedReason}` |
 
 > - `skippedReason` 非空表示调度系统未配置，属预期跳过而非失败。

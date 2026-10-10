@@ -36,47 +36,9 @@ CREATE INDEX IF NOT EXISTS idx_asset_category_parent ON asset_category (parent_c
 COMMENT ON TABLE asset_category IS '资产分类表(分层/业务域，支持人工覆盖)';
 COMMENT ON COLUMN asset_category.category_kind IS '分类维度(layer=数仓分层 domain=业务域)';
 
--- 资产收藏表
-CREATE TABLE IF NOT EXISTS asset_bookmark (
-  id BIGSERIAL,
-  user_id BIGINT NOT NULL,
-  asset_type VARCHAR(16) NOT NULL,
-  asset_id BIGINT NOT NULL,
-  table_metadata_id BIGINT,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  CONSTRAINT uk_asset_bookmark UNIQUE (user_id, asset_type, asset_id)
-);
-CREATE INDEX IF NOT EXISTS idx_asset_bookmark_user ON asset_bookmark (user_id);
-CREATE INDEX IF NOT EXISTS idx_asset_bookmark_table ON asset_bookmark (table_metadata_id);
-COMMENT ON TABLE asset_bookmark IS '资产收藏表';
-COMMENT ON COLUMN asset_bookmark.asset_type IS '资产类型(table/column/indicator)';
-
--- 资产访问埋点表(仅追加)：高频写入的轻量表，刻意与 operation_audit_log 分离，
--- 避免浏览行为淹没真正的操作留痕
-CREATE TABLE IF NOT EXISTS asset_access_log (
-  id BIGSERIAL,
-  user_id BIGINT,
-  user_name VARCHAR(100),
-  asset_type VARCHAR(16) NOT NULL,
-  asset_id BIGINT NOT NULL,
-  table_metadata_id BIGINT,
-  access_type VARCHAR(16) NOT NULL,
-  keyword VARCHAR(200),
-  access_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS idx_asset_access_asset ON asset_access_log (asset_type, asset_id);
-CREATE INDEX IF NOT EXISTS idx_asset_access_time ON asset_access_log (access_time);
-CREATE INDEX IF NOT EXISTS idx_asset_access_user ON asset_access_log (user_id);
-COMMENT ON TABLE asset_access_log IS '资产访问埋点表(仅追加，按日汇总)';
-COMMENT ON COLUMN asset_access_log.access_type IS '访问类型(browse=浏览 read=读取 bookmark=收藏 query=带查询)';
-
 
 -- ==================================================================
--- 资产目录模块（第二批 / 第三批）：标签、使用说明、使用热度
---   使用热度走独立的轻量表按日汇总(T+1)，不回写 operation_audit_log；
+-- 资产目录模块（第二批 / 第三批）：标签、使用说明
 --   使用说明复用同一张 asset_doc + 版本历史，避免重复建设 markdown 与版本能力。
 -- ==================================================================
 
@@ -141,28 +103,6 @@ CREATE INDEX IF NOT EXISTS idx_asset_tag_rel_asset ON asset_tag_rel (asset_type,
 CREATE INDEX IF NOT EXISTS idx_asset_tag_rel_table ON asset_tag_rel (table_metadata_id);
 COMMENT ON TABLE asset_tag_rel IS '资产标签关联表(支持表/字段/指标)';
 
--- 资产使用热度日汇总表(T+1，由 asset_access_log 汇总)
-CREATE TABLE IF NOT EXISTS asset_usage_daily (
-  id BIGSERIAL NOT NULL,
-  asset_type VARCHAR(16) NOT NULL DEFAULT 'table',
-  asset_id BIGINT NOT NULL,
-  table_metadata_id BIGINT,
-  stat_date DATE NOT NULL,
-  browse_count INTEGER NOT NULL DEFAULT 0,
-  read_count INTEGER NOT NULL DEFAULT 0,
-  bookmark_count INTEGER NOT NULL DEFAULT 0,
-  relate_count INTEGER NOT NULL DEFAULT 0,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  CONSTRAINT uk_asset_usage_daily UNIQUE (asset_type, asset_id, stat_date)
-);
-CREATE INDEX IF NOT EXISTS idx_asset_usage_table ON asset_usage_daily (table_metadata_id);
-CREATE INDEX IF NOT EXISTS idx_asset_usage_date ON asset_usage_daily (stat_date);
-COMMENT ON TABLE asset_usage_daily IS '资产使用热度日汇总表(T+1，由 asset_access_log 汇总)';
-COMMENT ON COLUMN asset_usage_daily.stat_date IS '统计日(按日汇总，T+1 生成)';
-COMMENT ON COLUMN asset_usage_daily.relate_count IS '被关联数(引用该资产的规则/指标等)';
-
 -- 资产目录日快照表(T+1，一行=一张表×一个统计日)
 CREATE TABLE IF NOT EXISTS asset_catalog_daily (
   id BIGSERIAL NOT NULL,
@@ -194,10 +134,6 @@ CREATE TABLE IF NOT EXISTS asset_catalog_daily (
   has_doc SMALLINT NOT NULL DEFAULT 0,
   health_issue_count INTEGER NOT NULL DEFAULT 0,
   health_issue_codes VARCHAR(500),
-  browse_count_30d INTEGER NOT NULL DEFAULT 0,
-  read_count_30d INTEGER NOT NULL DEFAULT 0,
-  bookmark_count INTEGER NOT NULL DEFAULT 0,
-  last_access_time TIMESTAMP,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -211,6 +147,30 @@ COMMENT ON COLUMN asset_catalog_daily.stat_date IS '统计日';
 COMMENT ON COLUMN asset_catalog_daily.layer_code IS '命名规范解析出的分层编码(未解析为NULL)';
 COMMENT ON COLUMN asset_catalog_daily.domain_code IS '命名规范解析出的业务域编码(未解析为NULL)';
 COMMENT ON COLUMN asset_catalog_daily.health_issue_codes IS '治理项编码集合(逗号分隔)';
+
+-- 分区日大小表(T+1，一行=一张天分区表×一个统计日，记录当日最新分区)
+CREATE TABLE IF NOT EXISTS table_partition_size_daily (
+  id BIGSERIAL NOT NULL,
+  stat_date DATE NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  datasource_id BIGINT,
+  database_name VARCHAR(100),
+  table_name VARCHAR(200) NOT NULL,
+  partition_column VARCHAR(64),
+  partition_value VARCHAR(64),
+  size_bytes BIGINT,
+  row_count BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_partition_size_daily UNIQUE (stat_date, table_metadata_id)
+);
+CREATE INDEX IF NOT EXISTS idx_partition_size_daily_table ON table_partition_size_daily (table_metadata_id, stat_date);
+CREATE INDEX IF NOT EXISTS idx_partition_size_daily_date ON table_partition_size_daily (stat_date);
+COMMENT ON TABLE table_partition_size_daily IS '分区日大小表(T+1，一行=一张天分区表×一个统计日，记录当日最新分区)';
+COMMENT ON COLUMN table_partition_size_daily.partition_column IS '日期类分区列名';
+COMMENT ON COLUMN table_partition_size_daily.partition_value IS '当日最新分区值';
+COMMENT ON COLUMN table_partition_size_daily.size_bytes IS '该分区存储字节数';
 
 -- 调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)
 CREATE TABLE IF NOT EXISTS scheduler_task_run_daily (
@@ -255,7 +215,6 @@ CREATE TABLE IF NOT EXISTS column_metadata (
   default_value VARCHAR(500),
   business_desc VARCHAR(1000),
   security_level VARCHAR(16),
-  hot_score SMALLINT NOT NULL DEFAULT 0,
   sync_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -267,7 +226,6 @@ CREATE INDEX IF NOT EXISTS idx_column_metadata_column_name ON column_metadata (c
 COMMENT ON TABLE column_metadata IS '表字段元数据表';
 COMMENT ON COLUMN column_metadata.business_desc IS '业务描述(与 column_comment 的技术注释区分，供资产目录展示)';
 COMMENT ON COLUMN column_metadata.security_level IS '字段安全等级';
-COMMENT ON COLUMN column_metadata.hot_score IS '字段热度星级(0~5，由使用记录日汇总回写)';
 
 -- 数据质量校验结果表
 CREATE TABLE IF NOT EXISTS data_quality_check_result (
@@ -924,10 +882,6 @@ CREATE TABLE IF NOT EXISTS table_metadata (
   visibility VARCHAR(20) NOT NULL DEFAULT 'internal',
   category_code VARCHAR(64),
   asset_level VARCHAR(16),
-  browse_cnt_30d INTEGER NOT NULL DEFAULT 0,
-  read_cnt_30d INTEGER NOT NULL DEFAULT 0,
-  bookmark_cnt INTEGER NOT NULL DEFAULT 0,
-  last_access_time TIMESTAMP,
   create_by BIGINT,
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -946,10 +900,6 @@ COMMENT ON COLUMN table_metadata.topic IS '所属主题域(对齐 indicators.top
 COMMENT ON COLUMN table_metadata.visibility IS '可见性(public/internal/restricted，对齐 indicators.visibility)';
 COMMENT ON COLUMN table_metadata.category_code IS '人工覆盖的分类编码；为空表示采用表名规范解析结果';
 COMMENT ON COLUMN table_metadata.asset_level IS '资产等级(L1~L5)';
-COMMENT ON COLUMN table_metadata.browse_cnt_30d IS '近30日浏览数(由 asset_access_log 日汇总回写)';
-COMMENT ON COLUMN table_metadata.read_cnt_30d IS '近30日读取数(由 asset_access_log 日汇总回写)';
-COMMENT ON COLUMN table_metadata.bookmark_cnt IS '收藏数(由 asset_bookmark 回写)';
-COMMENT ON COLUMN table_metadata.last_access_time IS '最近访问时间(埋点回写，用于热度排序)';
 
 -- ------------------------------------------------------------------
 -- ------------------------------------------------------------------

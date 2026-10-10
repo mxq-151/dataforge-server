@@ -117,4 +117,38 @@ class TableStorageSizeRefreshServiceTest {
         assertEquals(0, result.updatedTables());
         assertEquals(0, result.failedDatasources());
     }
+
+    @Test
+    @DisplayName("行数与大小同轮写入：只有行数的表也更新，行数 0 是合法值")
+    void testRefreshDatasource_writesRowCount() {
+        DatasourceConfig config = config(1L, "mysql-prod");
+        when(executionStrategyFactory.getStrategy(config)).thenReturn(strategy);
+        when(strategy.listDatabases(config)).thenReturn(List.of("dw"));
+        // order_detail 两者都有；empty_tbl 只有行数（真实存在的空表）；size_only 只有大小
+        when(strategy.listTableSizes(config, "dw")).thenReturn(Map.of("order_detail", 4096L, "size_only", 8192L));
+        when(strategy.listTableRowCounts(config, "dw")).thenReturn(Map.of("order_detail", 120L, "empty_tbl", 0L));
+        when(tableMetadataMapper.update(isNull(), any())).thenReturn(1);
+
+        int updated = refreshService.refreshDatasource(config);
+
+        assertEquals(3, updated,
+                "order_detail（大小+行数）、empty_tbl（仅行数 0）、size_only（仅大小）三张表都应各更新一次");
+        verify(strategy).listTableRowCounts(config, "dw");
+        verify(tableMetadataMapper, times(3)).update(isNull(), any());
+    }
+
+    @Test
+    @DisplayName("既无大小也无行数的表不产生更新语句")
+    void testRefreshDatasource_skipsTableWithoutStats() {
+        DatasourceConfig config = config(1L, "mysql-prod");
+        when(executionStrategyFactory.getStrategy(config)).thenReturn(strategy);
+        when(strategy.listDatabases(config)).thenReturn(List.of("dw"));
+        when(strategy.listTableSizes(config, "dw")).thenReturn(Map.of("empty_tbl", 0L));
+        when(strategy.listTableRowCounts(config, "dw")).thenReturn(Map.of());
+
+        int updated = refreshService.refreshDatasource(config);
+
+        assertEquals(0, updated);
+        verify(tableMetadataMapper, never()).update(isNull(), any());
+    }
 }

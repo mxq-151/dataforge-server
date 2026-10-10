@@ -15,7 +15,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -43,9 +42,6 @@ public class AssetHealthService {
     /** 治理项样本最多返回多少条（清单用于「知道去哪看」，不是导出） */
     public static final int MAX_SAMPLES = 5;
 
-    /** 近 N 日无访问视为低效资产 */
-    public static final int IDLE_DAYS = 30;
-
     /** 治理项定义：编码 + 名称 + 为什么它算问题 */
     public enum Issue {
 
@@ -62,9 +58,7 @@ public class AssetHealthService {
         NO_QUALITY_RULE("NO_QUALITY_RULE", "未配置质量规则",
                 "数据出问题不会被发现，下游只能靠事故发生来察觉"),
         NO_TAG("NO_TAG", "未打标签",
-                "无法按主题/敏感度等维度成批圈选与检索"),
-        NO_ACCESS_30D("NO_ACCESS_30D", "近 " + IDLE_DAYS + " 日无访问",
-                "可能是无人使用的僵尸资产，占用存储与维护成本");
+                "无法按主题/敏感度等维度成批圈选与检索");
 
         private final String code;
         private final String name;
@@ -303,9 +297,6 @@ public class AssetHealthService {
         if (tableId != null && !context.tablesWithTag.contains(tableId)) {
             issues.add(Issue.NO_TAG);
         }
-        if (isIdle(table.getLastAccessTime())) {
-            issues.add(Issue.NO_ACCESS_30D);
-        }
         return issues;
     }
 
@@ -313,14 +304,6 @@ public class AssetHealthService {
     public int countIssues(TableMetadata table) {
         Context context = buildContext(List.of(table));
         return issuesFor(table, context).size();
-    }
-
-    private boolean isIdle(Date lastAccessTime) {
-        if (lastAccessTime == null) {
-            return true;
-        }
-        long idleMillis = (long) IDLE_DAYS * 24 * 60 * 60 * 1000;
-        return System.currentTimeMillis() - lastAccessTime.getTime() > idleMillis;
     }
 
     // ==================================================================

@@ -8,10 +8,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * 表存储大小每日刷新任务。
+ * 表存储统计每日刷新任务。
  *
- * <p>每天 02:15 遍历全部数据源，从各引擎系统表采集「表 → 存储大小」并覆盖写
- * {@code table_metadata.size_bytes}。</p>
+ * <p>每天 02:15 遍历全部数据源，从各引擎系统表采集「表 → 存储大小 / 行数」并覆盖写
+ * {@code table_metadata.size_bytes} 与 {@code row_count}。</p>
  *
  * <h3>为什么选 02:15</h3>
  * <p>排在资产目录快照（02:30）之前，保证当日快照与「数据大小增长率」看板读到最新值；
@@ -32,15 +32,15 @@ public class TableStorageSizeRefreshTask {
     @Autowired
     private TableStorageSizeRefreshService refreshService;
 
-    /** 每日 02:15 刷新全部纳管表的存储大小 */
+    /** 每日 02:15 刷新全部纳管表的存储大小与行数 */
     @Scheduled(cron = "0 15 2 * * ?")
     public void refreshDaily() {
         try {
             TableStorageSizeRefreshService.RefreshResult result = refreshService.refreshAll();
-            log.info("表存储大小刷新任务完成：数据源={}, 更新表数={}, 失败数据源={}",
+            log.info("表存储统计刷新任务完成：数据源={}, 更新表数={}, 失败数据源={}",
                     result.datasourceCount(), result.updatedTables(), result.failedDatasources());
         } catch (Exception e) {
-            log.error("表存储大小刷新任务失败（覆盖写幂等，下次执行会补齐）", e);
+            log.error("表存储统计刷新任务失败（覆盖写幂等，下次执行会补齐）", e);
         }
     }
 }
