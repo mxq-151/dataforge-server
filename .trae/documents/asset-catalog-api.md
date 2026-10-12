@@ -457,7 +457,13 @@
   "lastRunTime": "2026-09-17 02:10:00",
   "errorCount": 1,
   "failCount": 0,
-  "problemRuleCount": 1
+  "problemRuleCount": 1,
+  "enabledRules": [
+    { "id": 101, "ruleName": "订单号唯一", "ruleType": "PRIMARY_KEY_UNIQUE", "columnName": "order_id", "disposeMode": "BLOCK", "ownerName": "张三" }
+  ],
+  "failedSamples": [
+    { "id": 901, "checkTime": "2026-09-17 02:10:00", "ruleName": "订单号唯一", "ruleType": "PRIMARY_KEY_UNIQUE", "status": "ERROR", "sample": "order_id=1001\norder_id=1002" }
+  ]
 }
 ```
 
@@ -469,8 +475,11 @@
 | `errorCount` | 状态为 `ERROR` 的结果数 |
 | `failCount` | 状态为 `FAILED` 的结果数 |
 | `problemRuleCount` | 去重后的未通过规则条数 |
+| `enabledRules` | 已启用的质检规则清单（`id` / `ruleName` / `ruleType` / `columnName` / `disposeMode` / `ownerName`），供详情页签列表展示 |
+| `failedSamples` | 最近一次校验中未通过的记录样例（`id` / `checkTime` 质检时间 / `ruleName` / `ruleType` / `status` / `sample` 完整数据样例，原样不截断），按质检时间倒序 |
 
 > 规则按「库 + 表」匹配；数据源已绑定的规则再按数据源筛一次，避免同名库表串味。
+> `failedSamples` 只取最近一次校验日（`lastRunTime` 所在当天）的未通过记录（`ERROR` / `FAILED`）。
 
 ---
 

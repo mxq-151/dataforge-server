@@ -822,14 +822,26 @@ public class AssetCatalogService {
         AssetQualitySummaryVO vo = new AssetQualitySummaryVO();
         vo.setRuleCount(scoped.size());
         int enabled = 0;
+        // 已启用规则清单：随摘要一并下发，供「数据质量」页签列表展示
+        List<AssetQualitySummaryVO.EnabledRuleVO> enabledRules = new ArrayList<>();
         Set<Long> ruleIds = new LinkedHashSet<>();
         for (DqRule rule : scoped) {
             if (rule.getEnabled() == null || rule.getEnabled() == 1) {
                 enabled++;
+                AssetQualitySummaryVO.EnabledRuleVO item = new AssetQualitySummaryVO.EnabledRuleVO();
+                item.setId(rule.getId());
+                item.setRuleName(nullToDefault(rule.getRuleName(), ""));
+                item.setRuleType(nullToDefault(rule.getRuleType(), ""));
+                item.setColumnName(nullToDefault(rule.getColumnName(), ""));
+                item.setDisposeMode(nullToDefault(rule.getDisposeMode(), ""));
+                item.setOwnerName(nullToDefault(rule.getOwnerName(), ""));
+                enabledRules.add(item);
             }
             ruleIds.add(rule.getId());
         }
         vo.setEnabledRuleCount(enabled);
+        vo.setEnabledRules(enabledRules);
+        vo.setFailedSamples(new ArrayList<>());
 
         // 最近一次校验：以「该表规则的结果留痕」为准（dq_rule_result 自包含，平台已无运行实例）
         if (ruleIds.isEmpty()) {
@@ -846,24 +858,40 @@ public class AssetCatalogService {
         List<DqRuleResult> results = dqRuleResultMapper.selectList(new LambdaQueryWrapper<DqRuleResult>()
                 .in(DqRuleResult::getRuleId, ruleIds)
                 .ge(DqRuleResult::getCreateTime, latestDate.atStartOfDay())
-                .lt(DqRuleResult::getCreateTime, latestDate.plusDays(1).atStartOfDay()));
+                .lt(DqRuleResult::getCreateTime, latestDate.plusDays(1).atStartOfDay())
+                .orderByDesc(DqRuleResult::getCreateTime));
 
         int errorCount = 0;
         int failCount = 0;
         Set<Long> problemRules = new LinkedHashSet<>();
+        // 未通过记录样例：异常 + 校验失败逐条留样，供页签列表展示（质检时间 / 规则 / 完整数据样例）
+        List<AssetQualitySummaryVO.FailedSampleVO> failedSamples = new ArrayList<>();
         for (DqRuleResult row : results) {
             String status = row.getStatus() == null ? "" : row.getStatus();
-            if (QualityCheckStatus.ERROR.getCode().equals(status)) {
+            boolean isError = QualityCheckStatus.ERROR.getCode().equals(status);
+            boolean isFailed = QualityCheckStatus.FAILED.getCode().equals(status);
+            if (isError) {
                 errorCount++;
                 problemRules.add(row.getRuleId());
-            } else if (QualityCheckStatus.FAILED.getCode().equals(status)) {
+            } else if (isFailed) {
                 failCount++;
                 problemRules.add(row.getRuleId());
+            }
+            if (isError || isFailed) {
+                AssetQualitySummaryVO.FailedSampleVO sample = new AssetQualitySummaryVO.FailedSampleVO();
+                sample.setId(row.getId());
+                sample.setCheckTime(formatTime(row.getCreateTime()));
+                sample.setRuleName(nullToDefault(row.getRuleName(), ""));
+                sample.setRuleType(nullToDefault(row.getRuleType(), ""));
+                sample.setStatus(status);
+                sample.setSample(nullToDefault(row.getErrorMsg(), ""));
+                failedSamples.add(sample);
             }
         }
         vo.setErrorCount(errorCount);
         vo.setFailCount(failCount);
         vo.setProblemRuleCount(problemRules.size());
+        vo.setFailedSamples(failedSamples);
         // 状态沿用原先的两档：有「校验失败（SQL 没跑通）」即 FAILED，否则 SUCCESS；
         // 红色异常由 errorCount 单独体现，不抬高整体状态（与运行实例时代的判定一致）
         vo.setLastRunStatus(failCount > 0 ? "FAILED" : "SUCCESS");

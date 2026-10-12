@@ -243,21 +243,49 @@ build_jar_only() {
 
   # 搭建独立的精简构建上下文(仅 jar + Dockerfile),避免 dataforge-server/.dockerignore
   # 中 `**/target/` 排除 jar,也不把 target 其余文件送入上下文。
-  # 同时带上监听器 jar / Spark 默认配置 / 容器脚本: 三者都能随增量构建刷新,
+  # 同时带上监听器 jar / Spark 默认配置 / 容器脚本 / 初始化 SQL: 都能随增量构建刷新,
   # 无需 FULL=1 重建基础镜像(基础镜像里已有同名文件,这里是覆盖)。
+  #
+  # ⚠ 初始化 SQL 必须在这里一起送: 增量路径若不带 sql/,镜像里的建表脚本就会永远停留在
+  #   上一次 FULL=1 时的版本。踩过这个坑 —— 脚本早就更新了,镜像里还是几个月前的旧版,
+  #   新建库缺表缺列,报 column "xxx" does not exist,而且排查时极容易被误判成"镜像没重建"。
   local staging; staging="$(mktemp -d)"
   cp "$SERVER_JAR_IN_DIST" "$staging/dataforge-server.jar"
   cp "$BUILD_DIR/conf/spark-defaults.conf" "$staging/spark-defaults.conf"
   cp -R "$SPARK_LISTENER_JARS_DIR" "$staging/spark-listeners"
   cp -R "$BUILD_DIR/scripts" "$staging/scripts"
+  mkdir -p "$staging/sql/testdata"
+  cp "$SERVER_DIR/src/main/resources/sql/init/dataforge-postgresql.sql" \
+     "$staging/sql/dataforge-postgresql.sql"
+  cp "$SERVER_DIR/src/main/resources/sql/testdata/dataforge-testdata-postgresql.sql" \
+     "$staging/sql/testdata/dataforge-testdata-postgresql.sql"
+  cp "$SERVER_DIR/src/main/resources/sql/testdata/test_db-postgresql.sql" \
+     "$staging/sql/testdata/test_db-postgresql.sql"
+  cp "$BUILD_DIR/sql/dolphinscheduler-init-data.sql" \
+     "$staging/sql/dolphinscheduler-init-data.sql"
+  cp "$BUILD_DIR/scripts/docker-entrypoint.sh" "$staging/docker-entrypoint.sh"
+  # sql/ 只进 /opt/dataforge-image: 该路径不被命名卷遮蔽,由 entrypoint 启动时同步到
+  # /opt/dataforge(否则卷里是旧副本,重建镜像也不生效)。scripts/ 两边都放,量小且更稳。
+  #
+  # ⚠ CMD 必须在这里重新声明: Dockerfile 里一旦设置 ENTRYPOINT,基础镜像继承来的 CMD
+  #   会被清空(Docker 明确的行为)。少了它容器会在 entrypoint 执行完后立即退出。
+  #
+  # ⚠ ARG BASE_IMAGE 必须带默认值: 不带默认值时 FROM ${BASE_IMAGE} 会触发 BuildKit 的
+  #   `InvalidDefaultArgInFrom` lint 警告(不影响构建,但每次输出都刷一段,容易被误当报错)。
+  #   构建时始终由下方 --build-arg 覆盖,这里的默认值只是为了让 lint 通过。
   cat > "$staging/Dockerfile" <<'DOCKEREOF'
-ARG BASE_IMAGE
+ARG BASE_IMAGE=dataforge-allinone:1.0
 FROM ${BASE_IMAGE}
 COPY dataforge-server.jar /opt/dataforge/dataforge-server.jar
 COPY spark-defaults.conf /opt/spark/conf/spark-defaults.conf
 COPY spark-listeners/ /opt/spark/jars/
 COPY scripts/ /opt/dataforge/scripts/
-RUN chmod +x /opt/dataforge/scripts/*.sh
+COPY scripts/ /opt/dataforge-image/scripts/
+COPY sql/ /opt/dataforge-image/sql/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /opt/dataforge/scripts/*.sh /opt/dataforge-image/scripts/*.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 DOCKEREOF
 
   echo "==> 3/4 基于 $BASE_IMAGE 覆盖新 jar 构建 $FULL_TAG"
@@ -268,7 +296,7 @@ DOCKEREOF
     -t "$FULL_TAG" -f "$staging/Dockerfile" "$staging"
 
   rm -rf "$staging"
-  echo "==> 4/4 完成: $FULL_TAG(已更新 dataforge-server jar / 监听器 jar / Spark 默认配置 / 容器脚本)"
+  echo "==> 4/4 完成: $FULL_TAG(已更新 dataforge-server jar / 监听器 jar / Spark 默认配置 / 容器脚本 / 初始化 SQL)"
 }
 
 # ---------- 2) 全量重建(基础镜像) ----------

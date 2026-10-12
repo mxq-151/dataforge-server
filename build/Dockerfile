@@ -203,16 +203,26 @@ COPY build/conf/marquez-web-nginx.conf /etc/nginx/conf.d/marquez-web.conf
 # jar 由宿主机 mvn 打好后落在 build/dist/(见 build/build.sh build_server_jar),此处只做拷贝
 COPY build/dist/dataforge-server.jar /opt/dataforge/dataforge-server.jar
 COPY build/dist/postgresql-42.7.12.jar /opt/dataforge/jars/postgresql-42.7.12.jar
-COPY src/main/resources/sql/init/dataforge-postgresql.sql /opt/dataforge/sql/dataforge-postgresql.sql
-COPY src/main/resources/sql/testdata/dataforge-testdata-postgresql.sql /opt/dataforge/sql/testdata/dataforge-testdata-postgresql.sql
-COPY src/main/resources/sql/testdata/test_db-postgresql.sql /opt/dataforge/sql/testdata/test_db-postgresql.sql
-COPY build/sql/dolphinscheduler-init-data.sql /opt/dataforge/sql/dolphinscheduler-init-data.sql
-COPY build/scripts/ /opt/dataforge/scripts/
+
+# ---------- 初始化 SQL 与容器脚本：放镜像专属目录，由 entrypoint 启动时同步 ----------
+# 不能直接 COPY 到 /opt/dataforge/{sql,scripts}：该目录常被命名卷 df-data 挂载，
+# 卷只在**首次创建**时用镜像内容播种，之后重建镜像都不会刷新卷里这些文件，
+# 于是"重建镜像 + 重启容器"依然跑着旧 SQL / 旧脚本 —— 实测踩过：镜像层里的
+# dataforge-postgresql.sql 已是新版，容器里读到的还是 9 月的旧版，建表缺列，
+# 报 column "xxx" does not exist，且极易被误判成"镜像没重建"。
+# /opt/dataforge-image 不被任何卷挂载，entrypoint 每次启动都用它覆盖 /opt/dataforge，
+# 保证镜像始终是权威版本（见 build/scripts/docker-entrypoint.sh）。
+COPY src/main/resources/sql/init/dataforge-postgresql.sql /opt/dataforge-image/sql/dataforge-postgresql.sql
+COPY src/main/resources/sql/testdata/dataforge-testdata-postgresql.sql /opt/dataforge-image/sql/testdata/dataforge-testdata-postgresql.sql
+COPY src/main/resources/sql/testdata/test_db-postgresql.sql /opt/dataforge-image/sql/testdata/test_db-postgresql.sql
+COPY build/sql/dolphinscheduler-init-data.sql /opt/dataforge-image/sql/dolphinscheduler-init-data.sql
+COPY build/scripts/ /opt/dataforge-image/scripts/
+COPY build/scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY build/conf/supervisord.conf /etc/supervisor/conf.d/dataforge.conf
 
 # PostgreSQL 允许外部(容器 IP/宿主端口映射)访问
 RUN echo "host all all 0.0.0.0/0 scram-sha-256" >> /etc/postgresql/14/main/pg_hba.conf \
- && chmod +x /opt/dataforge/scripts/*.sh
+ && chmod +x /opt/dataforge-image/scripts/*.sh /usr/local/bin/docker-entrypoint.sh
 
 # 清空构建期代理,避免固化到运行时镜像
 ENV http_proxy="" https_proxy="" HTTP_PROXY="" HTTPS_PROXY="" \
@@ -227,4 +237,7 @@ ENV JAVA_HOME=/opt/java/openjdk \
 
 EXPOSE 8082 5432 12345 5000 5001 3000
 
+# entrypoint 先把镜像里的 sql/ 与 scripts/ 同步进可能被命名卷遮蔽的 /opt/dataforge，
+# 再exec CMD 启动 supervisord（详见 build/scripts/docker-entrypoint.sh 顶部说明）
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]

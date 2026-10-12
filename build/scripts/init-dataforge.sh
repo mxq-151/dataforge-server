@@ -58,12 +58,21 @@ if ! su postgres -c "$PG_BIN/psql -tAc \"SELECT 1 FROM pg_database WHERE datname
 fi
 su postgres -c "$PG_BIN/psql -d marquez -c 'GRANT ALL PRIVILEGES ON SCHEMA public TO marquez;'" >/dev/null 2>&1 || true
 
-# 4. 导入 dataforge schema(建表 + admin 用户;忽略单条报错,保证幂等)
-echo "[init] import dataforge schema (init/dataforge-postgresql.sql)"
-if ! su postgres -c "$PG_BIN/psql -tAc \"SELECT 1 FROM information_schema.tables WHERE table_name='sys_user'\"" | grep -q 1; then
-  su postgres -c "$PG_BIN/psql -d dataforge -v ON_ERROR_STOP=0 < /opt/dataforge/sql/dataforge-postgresql.sql" >/dev/null 2>&1 || true
+# 4. 同步 dataforge schema(建表 + admin 用户)
+#    本脚本自身幂等,故**每次启动都执行**,不再用「sys_user 已存在就跳过」的守卫:
+#      * CREATE TABLE / INDEX IF NOT EXISTS  -> 补齐缺失的表与索引
+#      * INSERT ... ON CONFLICT DO NOTHING   -> 补齐平台级种子数据
+#      * 文件末尾「既有库自愈段」(DO 块 + 列/约束存在性判断) -> 补齐已有表缺的列与约束
+#    旧守卫是老库升级新镜像后报 column "xxx" does not exist 的根源:
+#    只要库里已有 sys_user,新增的列就永远不会被补上。
+echo "[init] sync dataforge schema (init/dataforge-postgresql.sql)"
+SCHEMA_OUT=$(su postgres -c "$PG_BIN/psql -d dataforge -v ON_ERROR_STOP=0 -f /opt/dataforge/sql/dataforge-postgresql.sql" 2>&1)
+SCHEMA_ERRORS=$(printf '%s\n' "$SCHEMA_OUT" | grep -c 'ERROR:' || true)
+if [ "${SCHEMA_ERRORS:-0}" -gt 0 ]; then
+  echo "[init] WARN: schema 同步有 ${SCHEMA_ERRORS} 条 ERROR(幂等脚本,通常不影响启动,但请核查):"
+  printf '%s\n' "$SCHEMA_OUT" | grep 'ERROR:' | head -20
 else
-  echo "[init] dataforge schema already imported"
+  echo "[init] dataforge schema synced (0 error)"
 fi
 
 # 5. 导入测试数据(脚本幂等,可重复执行)

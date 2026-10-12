@@ -115,3 +115,75 @@
   以逻辑计划为主要判定依据，物理侧 `DataWritingCommandExec` 包装节点不单独提取。
   `WriteTarget.Type.PATH` 现在会被真正产出（历史实现恒返回 TABLE）。
 
+## ⚠ 命名卷 df-data 会遮蔽 /opt/dataforge（2026-10-12 查证）
+
+`startup/compose/docker-compose.persist.yml` 把命名卷 `df-data` 挂在 `/opt/dataforge`，本意只持久化
+warehouse / DS-H2 / 上传 jar，但**同时遮蔽了镜像里 COPY 进去的 `sql/`、`scripts/`、`dataforge-server.jar`**。
+Docker 只在卷首次创建时用镜像内容播种，之后重建镜像都不会刷新卷里这些文件。
+
+- 实测（2026-10-12）：镜像层 `dataforge-postgresql.sql` md5 `f8c7ed9f…`（= 仓库当前版，38 表），
+  运行容器里读到的是 `e5350a57…`（旧版，仍建已下线的 `data_quality_check_result`，库里 39 表）；
+  同理 `scripts/run-ds-standalone.sh` 也是旧的（缺 `SPRING_JACKSON_TIME_ZONE` 默认值导出，
+  但镜像 ENV 已提供同名变量，暂未造成实际影响）。
+- 后果：只要 `df-data` 卷不复建，任何 `sql/`、`scripts/` 改动都不会进容器。最危险的是
+  pgdata 被重置而 df-data 保留 —— 新版 `init-dataforge.sh` 会拿**旧 schema** 重新建库。
+- **已于 2026-10-12 根治**：镜像改为把 `sql/`、`scripts/` COPY 到 `/opt/dataforge-image/`
+  （不被任何卷挂载），新增 `build/scripts/docker-entrypoint.sh` 在每次启动时把它们同步进
+  `/opt/dataforge`，镜像版本永远胜出。**不必再"重建镜像要连卷一起删"**，也不用 `clear-data.sh`。
+  （entrypoint 故意不覆盖 `dataforge-server.jar`，否则会把 `hot-update-dataforge-server.sh`
+  的热更新在下次重启时回退。）
+
+## init 脚本自带「既有库自愈」段（2026-10-12 落地）
+
+**背景**：`sql/init/` 是 schema 唯一来源且没有迁移机制，但原先 `init-dataforge.sh` 第 63 行
+「`sys_user` 存在就整段跳过 schema 导入」+ 建表只写 `CREATE TABLE IF NOT EXISTS`（只补表不补列），
+老库升级新镜像后新列永远补不上 → 线上报 `column "xxx" does not exist`。
+
+**现在的机制**（4 份 `sql/init/dataforge-*.sql` 都带，勿手改这一段）：
+- 生成器：`build/gen_init_schema_sync.py`（`--check` 供 CI 用）。它从各文件**自身的建表段**解析出
+  全部列与约束，生成幂等补齐 SQL，挂在 `BEGIN/END AUTO-GENERATED SCHEMA SYNC` 标记之间。
+  **改完 DDL 必须重跑生成器**（38 表 / 472 列 / 约束数 PG 25、MySQL 88、H2 2）。
+- 方言写法：PG 用 `DO $$ ... information_schema + pg_constraint 存在性判断 + 动态 ALTER`；
+  MySQL 用存储过程 `df_sync_add_column` / `df_sync_add_index` + `CALL` 列表（含 DELIMITER，
+  必须 mysql CLI 执行）；H2 用 `ALTER TABLE **IF EXISTS** t ADD COLUMN IF NOT EXISTS ...`
+  （H2 的 `IF NOT EXISTS` 不保护缺表，漏了 `IF EXISTS` 会因 Table not found 中断整个脚本）。
+- **三个不能改的约束**：
+  1. **位置必须建表段之前**。`COMMENT ON` / `CREATE INDEX` 紧跟各表建表，老库缺列时它们先报错，
+     PG 里会 abort 整个事务，把后续语句全部带没（踩过：补齐段放文件末尾＝永远执行不到）。
+  2. **PG 的补齐段必须在 `BEGIN;` 之前**（事务之外），否则后面任何错误回滚会把补好的列一起撤销。
+  3. **每条 ALTER 各自兜异常**（PG `EXCEPTION WHEN OTHERS` → `RAISE WARNING`），单列失败不 abort 脚本。
+- `init-dataforge.sh` 第 4 步已去掉跳过守卫，**每次启动都全量执行 schema 脚本**，并把
+  `ERROR:` 计数打出来（有错就 WARN + 前 20 行），替代原先 `>/dev/null 2>&1` 的静默吞错。
+- 配套：种子 INSERT 全部改成幂等（PG `ON CONFLICT DO NOTHING`、MySQL/MariaDB `INSERT IGNORE`、
+  H2 `INSERT ... SELECT ... WHERE NOT EXISTS`）。**这是一条硬约束**：脚本每次启动都跑，
+  不幂等的 INSERT 会让 `asset_category` / `asset_tag` 这类参考数据静默插重复行（它们当时还没唯一键）。
+- 已验证：全新库、幂等重跑、以及「2026-09-23 前老库 → 跑新脚本」三种场景，4 种方言全部 0 错误；
+  老库补齐后覆盖脚本声明的全部 38 表 / 472 列 / 约束（只多出 13 个历史遗留 `deleted` 列，应用已不映射）。
+
+## ⚠ 增量构建必须送 sql/（2026-10-12 修掉的真根因）
+
+`build/build-lib.sh` 的 `build_jar_only()`（＝ `./build.sh` 默认路径）用的是**临时生成的
+精简 Dockerfile**，只 COPY `dataforge-server.jar` / `spark-defaults.conf` / `spark-listeners/` /
+`scripts/`，**没有 `sql/`** → 镜像里的建表脚本会永远停留在上一次 `FULL=1` 时的版本。
+实测：镜像里 `dataforge-postgresql.sql` 是 **2026-09-03** 的 21KB 旧版（25 表、无治理列），
+而 `scripts/` 是当天的新版 —— 于是"改了 init 脚本 + 重建镜像"完全无效，
+新建的库只有 25 张表，报 `column "business_owner" does not exist`，且极易被误判成"镜像没重建"。
+
+- **已修**：`build_jar_only()` 的 staging 与临时 Dockerfile 现在一并送
+  `sql/dataforge-postgresql.sql`、`sql/testdata/*`、`sql/dolphinscheduler-init-data.sql`，
+  COPY 到 `/opt/dataforge-image/sql/`；最后一行提示也加上了"初始化 SQL"。
+  代价：增量构建上下文 +126MB（testdata 的 test_db 转储），实测多花约 1.3 秒，可接受。
+- **踩坑记录（改这个 staging Dockerfile 时务必注意）**：
+  1. **一旦在里面写 `ENTRYPOINT`，基础镜像继承来的 `CMD` 会被清空**（Docker 明确行为），
+     必须同时重新声明 `CMD ["/usr/bin/supervisord","-c","/etc/supervisor/supervisord.conf"]`，
+     否则容器起来就跑完 entrypoint 直接退出（实测 `CMD=null`）。
+  2. entrypoint 里 **不能写 `local name="$1" src="$X/$name"`** —— bash 的 `local` 会先把这些
+     变量整体置空再求值右侧，配合 `set -u` 直接 `name: unbound variable` 退出，容器起不来。
+     要拆成多行 `local`。
+- 全量构建路径（`build/Dockerfile`，`FULL=1`）同样已改为 COPY 到 `/opt/dataforge-image/`
+  + 声明 `ENTRYPOINT`/`CMD`，两条路径行为一致。
+- 宿主机 `docker build`/`buildx` 仍受 buildx 状态目录问题影响，用
+  `DOCKER_CONFIG=/tmp/dkcfg ./build/build.sh`（该目录需存在，否则 `docker compose` 也找不到插件）。
+  另外：在受沙箱限制的自动化环境里，`build.sh` 内部的递归 `cp build/scripts` 可能被文件策略拦截，
+  必要时手动复现 staging 步骤。
+
