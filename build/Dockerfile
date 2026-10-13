@@ -40,9 +40,24 @@ WORKDIR /opt/marquez-src
 # 直接用 base 镜像自带的 Gradle(base=gradle:8.7-jdk17,版本与 wrapper 要求的
 # gradle-8.7-bin.zip 一致),不走 ./gradlew:本机出网极慢(~0.2MB/s),wrapper 的
 # networkTimeout=10000 会在下载发行包时直接用超时中断构建。
+#
+# 依赖仓库统一改走阿里云镜像(见 build/conf/gradle-init-mirror.gradle 顶部说明):
+# 容器内直连 repo.maven.apache.org / plugins.gradle.org 会 TLS 握手失败,报
+#   Could not resolve io.dropwizard:dropwizard-json-logging:2.1.12
+#     > Remote host terminated the handshake
+# 且 Java/Gradle **不读** http_proxy/https_proxy 环境变量,靠上面的构建期代理参数
+# 兜不住这一步,只能从仓库层面改写。临时绕开可 --build-arg GRADLE_MIRROR=off。
+# 超时参数顺带放大,避免慢链路下握手被服务端提前断掉。
 # /root/.gradle 缓存挂载:缓存依赖与发行包,避免层失效后重下
+ARG GRADLE_MIRROR=aliyun
+ENV GRADLE_MIRROR=${GRADLE_MIRROR}
+COPY build/conf/gradle-init-mirror.gradle /opt/gradle-init/mirror.gradle
 RUN --mount=type=cache,target=/root/.gradle \
-    gradle --no-daemon -q :api:shadowJar -x test
+    gradle --no-daemon -q \
+      --init-script /opt/gradle-init/mirror.gradle \
+      -Dorg.gradle.internal.http.connectionTimeout=60000 \
+      -Dorg.gradle.internal.http.socketTimeout=180000 \
+      :api:shadowJar -x test
 
 # ---------- Stage 2: Marquez Web(源码构建,不依赖官方镜像) ----------
 FROM node:18-bullseye AS marquez-web-builder
@@ -80,11 +95,58 @@ ENV http_proxy=${BUILD_HTTP_PROXY} \
     NO_PROXY=127.0.0.1,localhost
 
 # 系统依赖:PostgreSQL14 / Nginx / Supervisor / sudo / 常用工具
-RUN apt-get update && apt-get install -y --no-install-recommends \
+#
+# ⚠ apt 源必须走 https,且换国内镜像 —— 实测本机所在网络对**明文 http(80) 限速/阻断**:
+#   同一个阿里云 ubuntu-ports,http 只有 56~141kB/s(容器内多次直接 0 字节/Connection failed),
+#   https 稳定 7~9MB/s(宿主与容器各 3/3 全通)。原始的 ports.ubuntu.com(http) 也因此只有
+#   ~598kB/s 并报 502 Bad Gateway,apt 直接失败退出("Unable to fetch some archives")。
+#   故这里先按目标架构把 sources.list 换成 https 国内镜像,再 update/install:
+#     amd64(原 archive.ubuntu.com / security.ubuntu.com) -> mirrors.aliyun.com/ubuntu
+#     其余 (原 ports.ubuntu.com/ubuntu-ports,jammy 的 arm64 属此类) -> mirrors.aliyun.com/ubuntu-ports
+#   基础镜像已自带 ca-certificates + apt>=1.5,https 源开箱可用,无需额外装包。
+#   APT_MIRROR 传 off / 空 则不改写(回退发行版自带源,需自备可用代理);
+#   也可传别的镜像域名(实测 mirrors.tuna.tsinghua.edu.cn / mirrors.ustc.edu.cn 亦可用)。
+#
+# apt 下载缓存:本机链路整体很慢(实测换成 https 源后 apt 聚合仍有 ~175kB/s,
+# 索引 48MB 要 4.6 分钟,整套索引+包 100MB+),而构建经常在后续步骤失败后重跑。
+# 故把 apt 的下载目录与索引目录挂成 cache mount:
+#   - 失败重跑时已下载的 .deb 与索引会被复用(已实测:失败构建后挂载内容仍保留),
+#     不必从零再拉一遍;
+#   - sharing=locked 让两个平台的 apt 步骤串行,既避免并发挤这条脆弱链路,也避免互相覆盖;
+#   - 因此这里**不能再写 `rm -rf /var/lib/apt/lists/*`**:它是挂载点,删掉等于清缓存;
+#     挂载内容本来也不会进镜像层,不会让镜像变大。
+ARG APT_MIRROR=mirrors.aliyun.com
+ARG TARGETARCH
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    set -eu; \
+    if [ -n "${APT_MIRROR}" ] && [ "${APT_MIRROR}" != "off" ]; then \
+      if [ "${TARGETARCH}" = "amd64" ]; then _dir=ubuntu; else _dir=ubuntu-ports; fi; \
+      _mirror="https://${APT_MIRROR}/${_dir}"; \
+      for _f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
+        [ -f "$_f" ] || continue; \
+        sed -i \
+          -e "s|http://ports.ubuntu.com/ubuntu-ports|${_mirror}|g" \
+          -e "s|http://archive.ubuntu.com/ubuntu|${_mirror}|g" \
+          -e "s|http://security.ubuntu.com/ubuntu|${_mirror}|g" \
+          -e "s|https://ports.ubuntu.com/ubuntu-ports|${_mirror}|g" \
+          -e "s|https://archive.ubuntu.com/ubuntu|${_mirror}|g" \
+          -e "s|https://security.ubuntu.com/ubuntu|${_mirror}|g" \
+          "$_f"; \
+      done; \
+      echo "==> apt 源已切换到 ${_mirror} (targetarch=${TARGETARCH})"; \
+      grep -hE '^(deb|URIs)' /etc/apt/sources.list 2>/dev/null | head -2; \
+    else \
+      echo "==> APT_MIRROR=off, 使用发行版自带 apt 源"; \
+    fi; \
+    apt-get -o Acquire::Retries=5 \
+            -o Acquire::http::Timeout=60 \
+            -o Acquire::https::Timeout=60 \
+            update \
+ && apt-get install -y --no-install-recommends \
         postgresql-14 postgresql-client \
         nginx supervisor sudo \
-        curl ca-certificates netcat-openbsd procps vim \
-    && rm -rf /var/lib/apt/lists/*
+        curl ca-certificates netcat-openbsd procps vim
 
 # 目录结构(注意:spark/dolphinscheduler 由下方解压 mv 时创建,不能预建,
 # 否则 mv 会把解压目录嵌套移入已存在的同名空目录)
