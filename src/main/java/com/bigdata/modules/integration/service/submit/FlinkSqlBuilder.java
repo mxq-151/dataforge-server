@@ -368,6 +368,28 @@ public final class FlinkSqlBuilder {
         SourceConnection.Endpoint endpoint = SourceConnection.endpoint(kind, c);
         Map<String, String> options = new LinkedHashMap<>();
         options.put("connector", cdcConnector(kind));
+        if (kind == DataSourceKind.MONGODB) {
+            // mongodb-cdc 使用 hosts / database / collection，没有 hostname/port/table-name
+            options.put("hosts", endpoint.host());
+            options.put("database", endpoint.database());
+            options.put("collection", tableName);
+            putIfPresent(options, "username", str(c, "username"));
+            putIfPresent(options, "password", str(c, "password"));
+            putIfPresent(options, "connection.options", str(c, "connectionOptions"));
+            options.put("scan.startup.mode", startup.mode());
+            if (startup.timestampMillis() != null) {
+                options.put("scan.startup.timestamp-millis", String.valueOf(startup.timestampMillis()));
+            }
+            return options;
+        }
+        if (kind == DataSourceKind.TIDB) {
+            // tidb-cdc 通过 PD 发现 TiKV，host/port 只用于平台读取字段元数据
+            options.put("pd-addresses", required(c, "pdAddresses", "PD 地址"));
+            options.put("database-name", endpoint.database());
+            options.put("table-name", tableName);
+            options.put("scan.startup.mode", startup.mode());
+            return options;
+        }
         options.put("hostname", endpoint.host());
         options.put("port", String.valueOf(endpoint.port()));
         options.put("database-name", endpoint.database());

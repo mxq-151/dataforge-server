@@ -286,6 +286,111 @@ class MultiTableMappingConfigBuilderTest {
     }
 
     @Test
+    void mongoCdcUsesHostsDatabaseAndCollection() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("hosts", "10.0.0.12:27017,10.0.0.13:27017");
+        source.put("database", "order_db");
+        source.put("username", "root");
+        source.put("password", "secret");
+        source.put("connectionOptions", "replicaSet=rs0&authSource=admin");
+        source.put("startupMode", "timestamp");
+        source.put("startupTimestamp", "1700000000000");
+        DataIntegrationSubmitter.SubmitContext ctx = context("mongodb", source, "kafka", kafkaTarget(),
+                List.of(table("orders")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 2, 1);
+        System.out.println("===== MongoDB CDC SQL =====\n" + sql);
+
+        assertTrue(sql.contains("'connector' = 'mongodb-cdc'"), sql);
+        assertTrue(sql.contains("'hosts' = '10.0.0.12:27017,10.0.0.13:27017'"), sql);
+        assertTrue(sql.contains("'database' = 'order_db'"), sql);
+        assertTrue(sql.contains("'collection' = 'orders'"), sql);
+        assertTrue(sql.contains("'connection.options' = 'replicaSet=rs0&authSource=admin'"), sql);
+        assertTrue(sql.contains("'scan.startup.mode' = 'timestamp'"), sql);
+        assertTrue(sql.contains("'scan.startup.timestamp-millis' = '1700000000000'"), sql);
+        assertFalse(sql.contains("'hostname'"), sql);
+        assertFalse(sql.contains("'table-name'"), sql);
+        assertFalse(sql.contains("'server-id'"), sql);
+    }
+
+    @Test
+    void tidbCdcUsesPdAddressesAndSqlEndpointForMetadata() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("pdAddresses", "10.0.0.14:2379");
+        source.put("host", "10.0.0.14");
+        source.put("port", "4000");
+        source.put("database", "order_db");
+        source.put("username", "root");
+        source.put("password", "secret");
+        source.put("startupMode", "latest-offset");
+        DataIntegrationSubmitter.SubmitContext ctx = context("tidb", source, "kafka", kafkaTarget(),
+                List.of(table("orders"), table("users")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 2, 1);
+        assertTrue(sql.contains("'connector' = 'tidb-cdc'"), sql);
+        assertTrue(sql.contains("'pd-addresses' = '10.0.0.14:2379'"), sql);
+        assertTrue(sql.contains("'database-name' = 'order_db'"), sql);
+        assertTrue(sql.contains("'table-name' = 'orders'"), sql);
+        assertTrue(sql.contains("'scan.startup.mode' = 'latest-offset'"), sql);
+        // tidb-cdc 不使用 hostname/port/username/password，SQL 端点仅用于平台读取字段
+        assertFalse(sql.contains("'hostname'"), sql);
+        assertFalse(sql.contains("'username'"), sql);
+        assertFalse(sql.contains("'server-id'"), sql);
+    }
+
+    @Test
+    void tidbRejectsTimestampStartup() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("pdAddresses", "10.0.0.14:2379");
+        source.put("host", "10.0.0.14");
+        source.put("database", "order_db");
+        source.put("username", "root");
+        source.put("password", "secret");
+        source.put("startupMode", "timestamp");
+        source.put("startupTimestamp", "1700000000000");
+        DataIntegrationSubmitter.SubmitContext ctx = context("tidb", source, "kafka", kafkaTarget(),
+                List.of(table("orders")));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 1, 1));
+        assertTrue(error.getMessage().contains("不支持 timestamp"), error.getMessage());
+    }
+
+    @Test
+    void mongoSamplesInferColumnsAndPrimaryKey() {
+        List<org.bson.Document> samples = List.of(
+                new org.bson.Document("_id", new org.bson.types.ObjectId())
+                        .append("name", "alpha")
+                        .append("amount", 12.5)
+                        .append("created", new java.util.Date()),
+                new org.bson.Document("_id", new org.bson.types.ObjectId())
+                        .append("name", "beta")
+                        .append("amount", 13)
+                        .append("active", true));
+
+        List<ColumnDef> columns = MongoSchemaSampler.inferColumns(samples, "orders");
+        assertEquals("_id", columns.get(0).getName());
+        assertTrue(columns.get(0).isPrimaryKey());
+        assertEquals("STRING", columns.get(0).getFlinkType());
+        // amount 在不同样本里是 Double / Int32，类型冲突退化为 STRING
+        ColumnDef amount = columns.stream().filter(c -> "amount".equals(c.getName())).findFirst().orElseThrow();
+        assertEquals("STRING", amount.getFlinkType());
+        ColumnDef created = columns.stream().filter(c -> "created".equals(c.getName())).findFirst().orElseThrow();
+        assertEquals("TIMESTAMP(3)", created.getFlinkType());
+        ColumnDef active = columns.stream().filter(c -> "active".equals(c.getName())).findFirst().orElseThrow();
+        assertEquals("BOOLEAN", active.getFlinkType());
+    }
+
+    @Test
+    void mongoNestedFieldIsRejected() {
+        List<org.bson.Document> samples = List.of(new org.bson.Document("_id", "1")
+                .append("profile", new org.bson.Document("city", "hz")));
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> MongoSchemaSampler.inferColumns(samples, "users"));
+        assertTrue(error.getMessage().contains("嵌套文档或数组"), error.getMessage());
+    }
+
+    @Test
     void newSourcesParseLegacyJdbcUrls() {
         Map<String, Object> oracle = new LinkedHashMap<>();
         oracle.put("url", "jdbc:oracle:thin:@//db.local:1521/ORCLCDB");

@@ -109,6 +109,28 @@ public enum DataSourceKind {
                     "connectionPoolSize", "连接池大小（可选）", false, "20", "text"),
             fields()),
 
+    MONGODB("mongodb", "MongoDB", true, false,
+            fields("hosts", "连接地址（必填）", true, "127.0.0.1:27017（多个用逗号分隔）", "text",
+                    "database", "数据库（必填）", true, "order_db", "text",
+                    "username", "用户名", false, "root", "text",
+                    "password", "密码", false, "******", "password",
+                    "connectionOptions", "连接参数（可选）", false, "replicaSet=rs0&authSource=admin", "text",
+                    "where", "过滤条件（对所有集合生效）", false, "status = 'PAID'", "text",
+                    "startupMode", "启动模式", false, "initial / latest-offset / timestamp", "text",
+                    "startupTimestamp", "启动时间戳（毫秒，timestamp 模式用）", false, "1700000000000", "text"),
+            fields()),
+
+    TIDB("tidb", "TiDB", true, false,
+            fields("pdAddresses", "PD 地址（必填）", true, "127.0.0.1:2379", "text",
+                    "host", "SQL 地址（读字段用）", true, "127.0.0.1", "text",
+                    "port", "SQL 端口", true, "4000", "text",
+                    "database", "数据库", true, "order_db", "text",
+                    "username", "用户名", true, "root", "text",
+                    "password", "密码", true, "******", "password",
+                    "where", "过滤条件（对所有表生效）", false, "id > 100", "text",
+                    "startupMode", "启动模式", false, "initial / latest-offset", "text"),
+            fields()),
+
     KAFKA("kafka", "Kafka", false, true,
             fields(),
             fields("bootstrapServers", "Broker 地址", true, "127.0.0.1:9092", "text",
@@ -227,7 +249,7 @@ public enum DataSourceKind {
     /** 是否为 CDC 源端 */
     public boolean isCdcSource() {
         return switch (this) {
-            case MYSQL, POSTGRESQL, ORACLE, SQLSERVER, DB2, OCEANBASE -> true;
+            case MYSQL, POSTGRESQL, ORACLE, SQLSERVER, DB2, OCEANBASE, MONGODB, TIDB -> true;
             default -> false;
         };
     }
@@ -241,6 +263,8 @@ public enum DataSourceKind {
             case SQLSERVER -> "sqlserver-cdc";
             case DB2 -> "db2-cdc";
             case OCEANBASE -> "oceanbase-cdc";
+            case MONGODB -> "mongodb-cdc";
+            case TIDB -> "tidb-cdc";
             default -> null;
         };
     }
@@ -253,8 +277,14 @@ public enum DataSourceKind {
             case ORACLE -> 1521;
             case SQLSERVER -> 1433;
             case DB2 -> 50000;
+            case TIDB -> 4000;
             default -> 0;
         };
+    }
+
+    /** 字段清单是否可以通过 JDBC 元数据读取；MongoDB 只能从集合样本推断 */
+    public boolean supportsJdbcMetadata() {
+        return isCdcSource() && this != MONGODB;
     }
 
     /**
@@ -265,7 +295,7 @@ public enum DataSourceKind {
      */
     public TableQualifier tableQualifier() {
         return switch (this) {
-            case MYSQL, POSTGRESQL, OCEANBASE -> TableQualifier.DATABASE;
+            case MYSQL, POSTGRESQL, OCEANBASE, MONGODB, TIDB -> TableQualifier.DATABASE;
             case SQLSERVER, DB2 -> TableQualifier.SCHEMA;
             default -> TableQualifier.NONE;
         };

@@ -36,6 +36,17 @@ public final class SourceConnection {
      */
     public static Endpoint endpoint(DataSourceKind kind, Map<String, Object> config) {
         Map<String, Object> normalized = normalize(kind, config);
+        if (kind == DataSourceKind.MONGODB) {
+            String hosts = str(normalized, "hosts");
+            String database = str(normalized, "database");
+            if (hosts.isEmpty() || database.isEmpty()) {
+                throw new BusinessException(400, "MongoDB 源端缺少连接参数：hosts / database 必填");
+            }
+            return new Endpoint(hosts, 0, database, "");
+        }
+        if (kind == DataSourceKind.TIDB && str(normalized, "pdAddresses").isEmpty()) {
+            throw new BusinessException(400, "TiDB 源端缺少连接参数：pd-addresses 必填（如 127.0.0.1:2379）");
+        }
         String host = str(normalized, "host");
         String database = str(normalized, "database");
         if (host.isEmpty() || database.isEmpty()) {
@@ -70,6 +81,10 @@ public final class SourceConnection {
         if (!kind.isCdcSource()) {
             return result;
         }
+        if (kind == DataSourceKind.MONGODB) {
+            // MongoDB 使用 hosts + database，不存在可以解析的 JDBC URL
+            return result;
+        }
         if (!str(result, "host").isEmpty() && !str(result, "database").isEmpty()) {
             result.remove("url");
             return result;
@@ -97,10 +112,13 @@ public final class SourceConnection {
 
     /** 从显式字段拼回 JDBC URL（读取字段清单时连源库使用） */
     public static String jdbcUrl(DataSourceKind kind, Map<String, Object> config) {
+        if (kind == DataSourceKind.MONGODB) {
+            throw new BusinessException(400, "MongoDB 没有 JDBC 元数据，字段清单由集合样本推断");
+        }
         Endpoint endpoint = endpoint(kind, config);
         String hostPort = endpoint.host() + ":" + endpoint.port();
         return switch (kind) {
-            case MYSQL, OCEANBASE -> "jdbc:mysql://" + hostPort + "/" + endpoint.database();
+            case MYSQL, OCEANBASE, TIDB -> "jdbc:mysql://" + hostPort + "/" + endpoint.database();
             case POSTGRESQL -> "jdbc:postgresql://" + hostPort + "/" + endpoint.database()
                     + "?currentSchema=" + endpoint.schema();
             case ORACLE -> "jdbc:oracle:thin:@//" + hostPort + "/" + endpoint.database();
@@ -146,13 +164,13 @@ public final class SourceConnection {
 
     private static boolean supportsTimestamp(DataSourceKind kind) {
         return kind == DataSourceKind.MYSQL || kind == DataSourceKind.POSTGRESQL
-                || kind == DataSourceKind.OCEANBASE;
+                || kind == DataSourceKind.OCEANBASE || kind == DataSourceKind.MONGODB;
     }
 
     private static String allowedModes(DataSourceKind kind) {
         return switch (kind) {
             case ORACLE -> "可选 initial / latest-offset / specific-offset";
-            case SQLSERVER, DB2 -> "可选 initial / latest-offset";
+            case SQLSERVER, DB2, TIDB -> "可选 initial / latest-offset";
             default -> "可选 initial / latest-offset / timestamp";
         };
     }
@@ -192,7 +210,7 @@ public final class SourceConnection {
         String lower = url.toLowerCase(Locale.ROOT);
         try {
             return switch (kind) {
-                case MYSQL, OCEANBASE -> parseUrlWithScheme(url, "jdbc:mysql://", kind.defaultPort());
+                case MYSQL, OCEANBASE, TIDB -> parseUrlWithScheme(url, "jdbc:mysql://", kind.defaultPort());
                 case POSTGRESQL -> {
                     Parsed parsed = parseUrlWithScheme(url, "jdbc:postgresql://", 5432);
                     yield parsed == null ? null

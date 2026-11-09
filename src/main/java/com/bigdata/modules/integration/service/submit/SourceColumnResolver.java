@@ -44,7 +44,10 @@ public final class SourceColumnResolver {
                                                           List<TableSpec> tables) {
         if (!kind.isCdcSource()) {
             throw new BusinessException(400, "源端类型 " + (kind == null ? "" : kind.getLabel())
-                    + " 无法自动读取字段清单：只有 CDC 源端（MySQL / PostgreSQL / Oracle / SQL Server / Db2 / OceanBase）支持按表清单从库表元数据取列");
+                    + " 无法自动读取字段清单：只有 CDC 源端支持按表清单从库表元数据取列");
+        }
+        if (kind == DataSourceKind.MONGODB) {
+            return MongoSchemaSampler.resolveAll(config, tables);
         }
         SourceConnection.Endpoint endpoint = SourceConnection.endpoint(kind, config);
         String url = SourceConnection.jdbcUrl(kind, config);

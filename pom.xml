@@ -109,6 +109,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- MongoDB 驱动：用于从集合样本推断 CDC 建表所需的字段清单（MongoDB 无 JDBC 元数据） -->
+        <dependency>
+            <groupId>org.mongodb</groupId>
+            <artifactId>mongodb-driver-sync</artifactId>
+            <version>4.11.2</version>
+        </dependency>
+
         <!-- Apache HttpClient (Kyuubi/Hive JDBC 驱动运行时依赖,通过 /jars/ 外部驱动 Class.forName 反射加载) -->
         <dependency>
             <groupId>org.apache.httpcomponents</groupId>
