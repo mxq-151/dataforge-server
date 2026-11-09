@@ -42,7 +42,7 @@ DIST_DIR="$BUILD_DIR/dist"
 # Spark 写入合规监听器(spark-write-compliance)源码目录, 默认与 dataforge-docker 同级:
 #   <父目录>/spark-listener
 # 可用 SPARK_LISTENER_DIR 覆盖; SKIP_SPARK_LISTENER=1 可跳过构建(沿用 build/dist/spark-listeners 中已有 jar)。
-SPARK_LISTENER_DIR="${SPARK_LISTENER_DIR:-$(cd "$SERVER_DIR/../.." && pwd)/spark-listener}"
+SPARK_LISTENER_DIR="${SPARK_LISTENER_DIR:-$(cd "$SERVER_DIR/.." && pwd)/spark-listener}"
 SPARK_LISTENER_JARS_DIR="$DIST_DIR/spark-listeners"
 # 只构建容器内 Spark 版本需要的模块: core(纯 Java 引擎) + spark-3.5 适配层
 SPARK_LISTENER_MODULES="${SPARK_LISTENER_MODULES:-core,spark-3.5}"

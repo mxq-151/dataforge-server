@@ -1,0 +1,84 @@
+// ============================================================
+// Gradle 仓库镜像初始化脚本(镜像构建期专用,见 build/Dockerfile 的 marquez-builder 阶段)
+//
+// 为什么需要
+//   容器内直连 repo.maven.apache.org / plugins.gradle.org 会 TLS 握手失败,报
+//     Could not resolve io.dropwizard:dropwizard-json-logging:2.1.12
+//       > Remote host terminated the handshake
+//   而 Java/Gradle **不读** http_proxy/https_proxy 环境变量,Dockerfile 的构建期代理
+//   参数兜不住依赖解析,只能在仓库层面把地址改写掉。
+//
+// 怎么用
+//   gradle --init-script /opt/gradle-init/mirror.gradle ...
+//   由环境变量 GRADLE_MIRROR 控制:aliyun(默认)=改写为阿里云镜像;off / 空=完全不动,
+//   保持项目自带的仓库地址(网络直连可用时用这个排查"到底是网络还是镜像问题")。
+//
+// 覆盖范围
+//   * 每个工程的 buildscript.repositories(插件/构建脚本 classpath 解析)
+//   * 每个工程的 repositories(依赖解析)
+//   * settings.pluginManagement / dependencyResolutionManagement(启用了 plugins DSL 的工程)
+//   只改写已知上游域名,其余仓库(私有源 / mavenLocal / 本地文件仓库)原样保留。
+//
+// marquez 0.51.1 的实际用法(改本文件前先看这里):
+//   * 根 build.gradle 的 buildscript.repositories 只声明 plugins.gradle.org/m2
+//   * allprojects.repositories 声明 mavenLocal() + mavenCentral()
+//   * 没有 plugins {} DSL,所以 pluginManagement 不是必需项,保留只为通用性
+// ============================================================
+
+import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+import org.gradle.api.artifacts.dsl.RepositoryHandler
+
+def mirrorMode = ((System.getenv('GRADLE_MIRROR') ?: 'aliyun') as String).trim().toLowerCase()
+if (mirrorMode == 'off' || mirrorMode.isEmpty()) {
+    println('[gradle-mirror] GRADLE_MIRROR=off, 不做改写,使用项目自带仓库地址')
+    return
+}
+
+def MIRROR_CENTRAL = 'https://maven.aliyun.com/repository/public'
+def MIRROR_PLUGIN = 'https://maven.aliyun.com/repository/gradle-plugin'
+def MIRROR_GOOGLE = 'https://maven.aliyun.com/repository/google'
+
+// 只认已知上游域名:未命中返回 null,调用方据此决定"不动"
+def mirrorOf = { String rawUrl ->
+    if (rawUrl == null) {
+        return null
+    }
+    if (rawUrl.contains('plugins.gradle.org')) {
+        return MIRROR_PLUGIN
+    }
+    if (rawUrl.contains('dl.google.com') || rawUrl.contains('maven.google.com')) {
+        return MIRROR_GOOGLE
+    }
+    if (rawUrl.contains('repo.maven.apache.org') || rawUrl.contains('repo1.maven.org')
+            || rawUrl.contains('jcenter.bintray.com')) {
+        return MIRROR_CENTRAL
+    }
+    return null
+}
+
+def applyMirror = { RepositoryHandler repositories ->
+    // 用 all 而不是 each:build.gradle 里的 repositories {} 是在本脚本之后才执行的,
+    // all 对"之后添加的仓库"同样生效(见 build.gradle 的 buildscript / allprojects)
+    repositories.all { repo ->
+        if (repo instanceof MavenArtifactRepository) {
+            def target = mirrorOf(repo.url?.toString())
+            if (target != null && target != repo.url?.toString()) {
+                repo.url = target
+            }
+        }
+    }
+}
+
+beforeSettings { settings ->
+    applyMirror(settings.pluginManagement.repositories)
+    try {
+        applyMirror(settings.dependencyResolutionManagement.repositories)
+    } catch (Throwable ignored) {
+        // Gradle 6.x 之前没有 dependencyResolutionManagement,忽略即可
+    }
+}
+
+allprojects { project ->
+    applyMirror(project.buildscript.repositories)
+    applyMirror(project.repositories)
+}
