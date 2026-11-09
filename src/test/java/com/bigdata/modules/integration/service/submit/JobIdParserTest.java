@@ -36,6 +36,15 @@ class JobIdParserTest {
     }
 
     @Test
+    void 从flink18列表格式里解析状态() {
+        String output = "Waiting for response...\n"
+                + "------------------ Running/Restarting Jobs -------------------\n"
+                + "09.11.2026 13:36:00 : " + FLINK_ID + " : order-sync (RUNNING)\n"
+                + "--------------------------------------------------------------";
+        assertEquals("RUNNING", JobIdParser.findFlinkState(output, FLINK_ID));
+    }
+
+    @Test
     void 解析通用状态字段() {
         assertEquals("RUNNING", JobIdParser.findGenericState("status: running"));
         assertEquals("FAILED", JobIdParser.findGenericState("state=FAILED"));

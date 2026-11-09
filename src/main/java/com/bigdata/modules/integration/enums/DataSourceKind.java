@@ -56,6 +56,59 @@ public enum DataSourceKind {
                     "schema", "目标 Schema（可选）", false, "public", "text",
                     "nameTemplate", "命名模板", false, "{table}（默认），可用 {db}_{table}", "text")),
 
+    ORACLE("oracle", "Oracle", true, false,
+            fields("host", "主机", true, "127.0.0.1", "text",
+                    "port", "端口", true, "1521", "text",
+                    "database", "服务名 / SID", true, "ORCLCDB", "text",
+                    "schema", "模式名（Schema，必填）", true, "INVENTORY", "text",
+                    "username", "用户名", true, "flinkuser", "text",
+                    "password", "密码", true, "******", "password",
+                    "where", "过滤条件（对所有表生效）", false, "ID > 100", "text",
+                    "startupMode", "启动模式", false, "initial / latest-offset / specific-offset", "text",
+                    "startupScn", "启动 SCN（specific-offset 模式用）", false, "2384593", "text",
+                    "connectionPoolSize", "连接池大小（可选）", false, "20", "text"),
+            fields()),
+
+    SQLSERVER("sqlserver", "SQL Server", true, false,
+            fields("host", "主机", true, "127.0.0.1", "text",
+                    "port", "端口", true, "1433", "text",
+                    "database", "数据库", true, "inventory", "text",
+                    "schema", "模式名（默认 dbo）", false, "dbo", "text",
+                    "username", "用户名", true, "sa", "text",
+                    "password", "密码", true, "******", "password",
+                    "where", "过滤条件（对所有表生效）", false, "id > 100", "text",
+                    "startupMode", "启动模式", false, "initial / latest-offset", "text",
+                    "serverTimezone", "时区", false, "UTC", "text",
+                    "connectionPoolSize", "连接池大小（可选）", false, "20", "text"),
+            fields()),
+
+    DB2("db2", "Db2", true, false,
+            fields("host", "主机", true, "127.0.0.1", "text",
+                    "port", "端口", true, "50000", "text",
+                    "database", "数据库", true, "TESTDB", "text",
+                    "schema", "模式名（Schema，必填）", true, "DB2INST1", "text",
+                    "username", "用户名", true, "db2inst1", "text",
+                    "password", "密码", true, "******", "password",
+                    "where", "过滤条件（对所有表生效）", false, "ID > 100", "text",
+                    "startupMode", "启动模式", false, "initial / latest-offset", "text",
+                    "serverTimezone", "时区", false, "UTC", "text",
+                    "connectionPoolSize", "连接池大小（可选）", false, "20", "text"),
+            fields()),
+
+    OCEANBASE("oceanbase", "OceanBase", true, false,
+            fields("host", "主机", true, "127.0.0.1", "text",
+                    "port", "端口", true, "2881", "text",
+                    "database", "数据库", true, "order_db", "text",
+                    "username", "用户名（可带 @租户）", true, "root@test", "text",
+                    "password", "密码", true, "******", "password",
+                    "where", "过滤条件（对所有表生效）", false, "id > 100", "text",
+                    "serverId", "server-id 基数（可选）", false, "5400（每表 +1）", "text",
+                    "startupMode", "启动模式", false, "initial / latest-offset / timestamp", "text",
+                    "startupTimestamp", "启动时间戳（毫秒，timestamp 模式用）", false, "1700000000000", "text",
+                    "serverTimezone", "时区", false, "Asia/Shanghai", "text",
+                    "connectionPoolSize", "连接池大小（可选）", false, "20", "text"),
+            fields()),
+
     KAFKA("kafka", "Kafka", false, true,
             fields(),
             fields("bootstrapServers", "Broker 地址", true, "127.0.0.1:9092", "text",
@@ -84,6 +137,23 @@ public enum DataSourceKind {
                     "username", "用户名", false, "elastic", "text",
                     "password", "密码", false, "******", "password",
                     "nameTemplate", "索引命名模板", false, "{table}（默认），可用 {db}_{table}", "text")),
+
+    DORIS("doris", "Apache Doris", false, false,
+            fields(),
+            fields("fenodes", "FE 地址", true, "127.0.0.1:8030", "text",
+                    "database", "目标库", true, "dwd", "text",
+                    "username", "用户名", true, "root", "text",
+                    "password", "密码", true, "******", "password",
+                    "nameTemplate", "表名模板", false, "{table}（默认），可用 {db}_{table}", "text")),
+
+    STARROCKS("starrocks", "StarRocks", false, false,
+            fields(),
+            fields("jdbcUrl", "FE JDBC 地址", true, "jdbc:mysql://127.0.0.1:9030", "text",
+                    "loadUrl", "FE HTTP 地址（导入）", true, "http://127.0.0.1:8030", "text",
+                    "database", "目标库", true, "dwd", "text",
+                    "username", "用户名", true, "root", "text",
+                    "password", "密码", true, "******", "password",
+                    "nameTemplate", "表名模板", false, "{table}（默认），可用 {db}_{table}", "text")),
 
     /**
      * Hive 表（仅作为目标端）。
@@ -154,9 +224,77 @@ public enum DataSourceKind {
         return null;
     }
 
-    /** 是否为 CDC 源端（只有 MySQL / PostgreSQL） */
+    /** 是否为 CDC 源端 */
     public boolean isCdcSource() {
-        return this == MYSQL || this == POSTGRESQL;
+        return switch (this) {
+            case MYSQL, POSTGRESQL, ORACLE, SQLSERVER, DB2, OCEANBASE -> true;
+            default -> false;
+        };
+    }
+
+    /** Flink CDC Table/SQL 连接器标识；非 CDC 源端返回 null */
+    public String cdcConnector() {
+        return switch (this) {
+            case MYSQL -> "mysql-cdc";
+            case POSTGRESQL -> "postgres-cdc";
+            case ORACLE -> "oracle-cdc";
+            case SQLSERVER -> "sqlserver-cdc";
+            case DB2 -> "db2-cdc";
+            case OCEANBASE -> "oceanbase-cdc";
+            default -> null;
+        };
+    }
+
+    /** CDC 源端读取字段元数据时使用的默认端口 */
+    public int defaultPort() {
+        return switch (this) {
+            case MYSQL, OCEANBASE -> 3306;
+            case POSTGRESQL -> 5432;
+            case ORACLE -> 1521;
+            case SQLSERVER -> 1433;
+            case DB2 -> 50000;
+            default -> 0;
+        };
+    }
+
+    /**
+     * 源表清单里前缀的含义：
+     * DATABASE=库名（MySQL/PG/OceanBase，前缀必须等于源端 database）；
+     * SCHEMA=模式名（SQL Server / Db2，允许 schema.table，可跨 schema）；
+     * NONE=不填前缀（Oracle 的 schema 由连接参数单独指定）。
+     */
+    public TableQualifier tableQualifier() {
+        return switch (this) {
+            case MYSQL, POSTGRESQL, OCEANBASE -> TableQualifier.DATABASE;
+            case SQLSERVER, DB2 -> TableQualifier.SCHEMA;
+            default -> TableQualifier.NONE;
+        };
+    }
+
+    /** 连接参数里的默认 schema；空串表示必填或无默认值 */
+    public String defaultSchema() {
+        return switch (this) {
+            case POSTGRESQL -> "public";
+            case SQLSERVER -> "dbo";
+            default -> "";
+        };
+    }
+
+    /** 连接器是否使用 server-id 区分实例（MySQL / OceanBase） */
+    public boolean needsServerId() {
+        return this == MYSQL || this == OCEANBASE;
+    }
+
+    /** 目标端是否支持 upsert（写入 DDL 需要声明主键） */
+    public boolean supportsUpsertSink() {
+        return this == MYSQL || this == POSTGRESQL || this == DORIS || this == STARROCKS;
+    }
+
+    /** 表清单前缀语义 */
+    public enum TableQualifier {
+        DATABASE,
+        SCHEMA,
+        NONE
     }
 
     private static List<ConnectorField> fields(Object... raw) {

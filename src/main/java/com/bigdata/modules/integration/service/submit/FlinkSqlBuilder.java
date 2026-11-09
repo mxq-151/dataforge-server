@@ -44,7 +44,7 @@ public final class FlinkSqlBuilder {
                                int readParallelism, int writeParallelism) {
         DataSourceKind sourceKind = requireKind(ctx.getSourceType(), "源端");
         if (!sourceKind.isCdcSource()) {
-            throw new BusinessException(400, "源端仅支持 MySQL / PostgreSQL（Flink CDC）：当前为 "
+            throw new BusinessException(400, "源端仅支持 CDC 数据源（MySQL / PostgreSQL / Oracle / SQL Server / Db2 / OceanBase）：当前为 "
                     + sourceKind.getLabel());
         }
         DataSourceKind targetKind = requireKind(ctx.getTargetType(), "目标端");
@@ -55,8 +55,8 @@ public final class FlinkSqlBuilder {
         int read = Math.max(1, readParallelism);
         int write = Math.max(1, writeParallelism);
         long serverIdBase = serverIdBase(sourceKind, sourceConfig, ctx.getTaskId(), tables.size());
-        String startupMode = SourceConnection.startupMode(sourceConfig);
-        Long startupTimestamp = SourceConnection.startupTimestamp(startupMode, sourceConfig);
+        SourceConnection.Startup startup = SourceConnection.startup(sourceKind, sourceConfig);
+        String startupMode = startup.mode();
         String where = str(sourceConfig, "where");
 
         StringBuilder sql = new StringBuilder();
@@ -93,10 +93,10 @@ public final class FlinkSqlBuilder {
             List<ColumnDef> projection = table.projection();
             projections.add(projection);
             appendSource(sql, sourceKind, sourceConfig, table, projection, "src_" + i, read,
-                    serverIdFor(sourceKind, serverIdBase, i), startupMode, startupTimestamp,
+                    serverIdFor(sourceKind, serverIdBase, i), startup,
                     ctx.getTaskCode());
             appendSink(sql, targetKind, ctx.getTargetConfig(), identifiers.get(table.getSourceTable()),
-                    projection, "snk_" + i, write);
+                    projection, "snk_" + i, write, ctx.getTaskCode());
         }
 
         for (int i = 0; i < tables.size(); i++) {
@@ -107,27 +107,68 @@ public final class FlinkSqlBuilder {
     }
 
     /**
-     * 表清单统一成「库.表」：CDC 连接的 database-name 是显式参数，
-     * 因此表清单只填表名即可，库名自动取源端 database；老数据带库名前缀时要求与源端一致，
-     * 避免「连接一个库、同步另一个库」这种在 CDC 下无法成立的配置。
+     * 表清单归一化：
+     * <ul>
+     *   <li>MySQL / PostgreSQL / OceanBase：表清单只填表名，库名统一取源端 database；
+     *       老数据带「库.表」时库名必须与源端一致；</li>
+     *   <li>SQL Server / Db2：允许「schema.table」，只填表名时补源端 schema（SQL Server 默认 dbo）；</li>
+     *   <li>Oracle：只填表名，schema 由连接参数单独指定。</li>
+     * </ul>
      */
     private static List<TableSpec> normalizeTables(DataSourceKind kind, Map<String, Object> config,
                                                   List<TableSpec> tables) {
-        String database = SourceConnection.endpoint(kind, config).database();
+        SourceConnection.Endpoint endpoint = SourceConnection.endpoint(kind, config);
         List<TableSpec> result = new ArrayList<>(tables.size());
-        for (TableSpec table : tables) {
-            String db = table.database();
-            if (db.isEmpty()) {
-                result.add(new TableSpec(database + "." + table.getSourceTable(), table.getExcludeColumns(),
-                        table.getSortNo(), table.getColumns()));
-                continue;
+        switch (kind.tableQualifier()) {
+            case DATABASE -> {
+                String database = endpoint.database();
+                for (TableSpec table : tables) {
+                    String db = table.database();
+                    if (db.isEmpty()) {
+                        result.add(new TableSpec(database + "." + table.getSourceTable(),
+                                table.getExcludeColumns(), table.getSortNo(), table.getColumns()));
+                        continue;
+                    }
+                    if (!db.equalsIgnoreCase(database)) {
+                        throw new BusinessException(400, "表清单里的「" + table.getSourceTable()
+                                + "」属于库「" + db + "」，与源端数据库「" + database + "」不一致；"
+                                + "CDC 一份源连接只能读一个库，表清单请只填表名，或拆分任务");
+                    }
+                    result.add(table);
+                }
             }
-            if (!db.equalsIgnoreCase(database)) {
-                throw new BusinessException(400, "表清单里的「" + table.getSourceTable()
-                        + "」属于库「" + db + "」，与源端数据库「" + database + "」不一致；"
-                        + "CDC 一份源连接只能读一个库，表清单请只填表名，或拆分任务");
+            case SCHEMA -> {
+                String schema = str(config, "schema");
+                if (schema.isEmpty()) {
+                    schema = kind.defaultSchema();
+                }
+                for (TableSpec table : tables) {
+                    String prefix = table.database();
+                    if (!prefix.isEmpty()) {
+                        if (table.table().isEmpty()) {
+                            throw new BusinessException(400, "表「" + table.getSourceTable()
+                                    + "」缺少表名，请填写「schema.表名」或只填表名");
+                        }
+                        result.add(table);
+                        continue;
+                    }
+                    if (schema.isEmpty()) {
+                        throw new BusinessException(400, kind.getLabel()
+                                + " 表「" + table.getSourceTable() + "」需要 schema：请填写「schema.表名」或在源端配置 schema");
+                    }
+                    result.add(new TableSpec(schema + "." + table.getSourceTable(),
+                            table.getExcludeColumns(), table.getSortNo(), table.getColumns()));
+                }
             }
-            result.add(table);
+            default -> {
+                for (TableSpec table : tables) {
+                    if (!table.database().isEmpty()) {
+                        throw new BusinessException(400, kind.getLabel() + " 的表清单只填表名（如 "
+                                + table.table() + "），schema 请在源端连接的 schema 参数里指定");
+                    }
+                    result.add(table);
+                }
+            }
         }
         return result;
     }
@@ -158,9 +199,9 @@ public final class FlinkSqlBuilder {
         return tables;
     }
 
-    /** MySQL 需要按表分配 server-id；PostgreSQL 用复制槽，不占 server-id */
+    /** MySQL / OceanBase 需要按表分配 server-id；PostgreSQL 用复制槽、Oracle/SQL Server/Db2 走各自日志，不占 server-id */
     public static long serverIdBase(DataSourceKind kind, Map<String, Object> config, Long taskId, int tableCount) {
-        if (kind != DataSourceKind.MYSQL) {
+        if (!kind.needsServerId()) {
             return 0L;
         }
         String raw = str(config, "serverId");
@@ -186,7 +227,7 @@ public final class FlinkSqlBuilder {
     }
 
     private static long serverIdFor(DataSourceKind kind, long base, int index) {
-        return kind == DataSourceKind.MYSQL ? base + index : 0L;
+        return kind.needsServerId() ? base + index : 0L;
     }
 
     private static void appendHeader(StringBuilder sql, DataIntegrationSubmitter.SubmitContext ctx,
@@ -198,7 +239,7 @@ public final class FlinkSqlBuilder {
         sql.append("-- source: ").append(sourceKind.getLabel()).append(" / connector=")
                 .append(cdcConnector(sourceKind)).append(", startup-mode=").append(startupMode)
                 .append(", tables=").append(tables.size()).append('\n');
-        if (sourceKind == DataSourceKind.MYSQL) {
+        if (sourceKind.needsServerId()) {
             sql.append("-- server-id：每表一个 CDC source，按基数递增分配（基数 ")
                     .append(serverIdBase).append("）\n");
         }
@@ -225,13 +266,20 @@ public final class FlinkSqlBuilder {
 
     private static void appendSource(StringBuilder sql, DataSourceKind kind, Map<String, Object> config,
                                      TableSpec table, List<ColumnDef> columns, String name, int parallelism,
-                                     long serverId, String startupMode, Long startupTimestamp,
+                                     long serverId, SourceConnection.Startup startup,
                                      String taskCode) {
+        // SQL Server / Db2 的 table-name 必须是 schema.table；其余连接器 schema 单独传或不需要
+        String tableName = kind.tableQualifier() == DataSourceKind.TableQualifier.SCHEMA
+                ? table.getSourceTable() : table.table();
+        if (kind == DataSourceKind.DB2) {
+            // Db2 未加引号的对象默认大写
+            tableName = tableName.toUpperCase(Locale.ROOT);
+        }
         sql.append("CREATE TABLE `").append(name).append("` (\n");
-        appendColumns(sql, columns);
+        appendColumns(sql, columns, true);
         sql.append(") WITH (\n")
-                .append(renderOptions(sourceOptions(kind, config, table.table(), parallelism, serverId,
-                        startupMode, startupTimestamp, taskCode, indexOf(name))))
+                .append(renderOptions(sourceOptions(kind, config, tableName, parallelism, serverId,
+                        startup, taskCode, indexOf(name))))
                 .append(");\n\n");
     }
 
@@ -242,13 +290,14 @@ public final class FlinkSqlBuilder {
     }
 
     private static void appendSink(StringBuilder sql, DataSourceKind kind, Map<String, Object> config,
-                                   String identifier, List<ColumnDef> columns, String name, int writeParallelism) {
+                                   String identifier, List<ColumnDef> columns, String name,
+                                   int writeParallelism, String taskCode) {
         if (kind == DataSourceKind.HIVE) {
             String database = identifier.substring(0, identifier.indexOf('.'));
             String table = identifier.substring(identifier.indexOf('.') + 1);
             sql.append("CREATE TABLE IF NOT EXISTS `hive`.").append(SqlDialect.FLINK.quote(database))
                     .append('.').append(SqlDialect.FLINK.quote(table)).append(" (\n");
-            appendColumns(sql, columns);
+            appendColumns(sql, columns, false);
             Map<String, String> options = new LinkedHashMap<>();
             options.put("sink.parallelism", String.valueOf(writeParallelism));
             putIfPresent(options, "sink.partition-commit.policy.kind",
@@ -257,9 +306,9 @@ public final class FlinkSqlBuilder {
             return;
         }
         sql.append("CREATE TABLE `").append(name).append("` (\n");
-        appendColumns(sql, columns);
+        appendColumns(sql, columns, kind.supportsUpsertSink());
         sql.append(") WITH (\n")
-                .append(renderOptions(sinkOptions(kind, config, identifier, writeParallelism)))
+                .append(renderOptions(sinkOptions(kind, config, identifier, writeParallelism, taskCode)))
                 .append(");\n\n");
     }
 
@@ -282,21 +331,39 @@ public final class FlinkSqlBuilder {
                 + " FROM `src_" + index + "`" + filter + ";";
     }
 
-    private static void appendColumns(StringBuilder sql, List<ColumnDef> columns) {
+    private static void appendColumns(StringBuilder sql, List<ColumnDef> columns, boolean withPrimaryKey) {
+        List<String> primaryKeys = new ArrayList<>();
         for (int i = 0; i < columns.size(); i++) {
             ColumnDef column = columns.get(i);
             sql.append("  `").append(column.getName()).append("` ").append(column.getFlinkType());
-            sql.append(i == columns.size() - 1 ? "\n" : ",\n");
+            if (column.isPrimaryKey()) {
+                primaryKeys.add(column.getName());
+            }
+            boolean last = i == columns.size() - 1;
+            boolean primaryKeyLine = withPrimaryKey && !primaryKeys.isEmpty();
+            sql.append(last && !primaryKeyLine ? "\n" : ",\n");
+        }
+        if (withPrimaryKey && !primaryKeys.isEmpty()) {
+            List<String> quoted = new ArrayList<>(primaryKeys.size());
+            for (String key : primaryKeys) {
+                quoted.add("`" + key + "`");
+            }
+            sql.append("  PRIMARY KEY (").append(String.join(", ", quoted)).append(") NOT ENFORCED\n");
         }
     }
 
+    /** Flink CDC Table/SQL 连接器标识 */
     static String cdcConnector(DataSourceKind kind) {
-        return kind == DataSourceKind.MYSQL ? "mysql-cdc" : "postgres-cdc";
+        String connector = kind.cdcConnector();
+        if (connector == null) {
+            throw new BusinessException(400, "源端类型不是 CDC 数据源: " + kind.getLabel());
+        }
+        return connector;
     }
 
     private static Map<String, String> sourceOptions(DataSourceKind kind, Map<String, Object> c,
                                                      String tableName, int parallelism, long serverId,
-                                                     String startupMode, Long startupTimestamp,
+                                                     SourceConnection.Startup startup,
                                                      String taskCode, int index) {
         SourceConnection.Endpoint endpoint = SourceConnection.endpoint(kind, c);
         Map<String, String> options = new LinkedHashMap<>();
@@ -304,24 +371,42 @@ public final class FlinkSqlBuilder {
         options.put("hostname", endpoint.host());
         options.put("port", String.valueOf(endpoint.port()));
         options.put("database-name", endpoint.database());
-        if (kind == DataSourceKind.POSTGRESQL) {
-            options.put("schema-name", endpoint.schema());
-            options.put("slot.name", slotName(taskCode, index));
-            options.put("decoding.plugin.name", "pgoutput");
-        } else {
-            options.put("server-id", String.valueOf(serverId));
+        switch (kind) {
+            case POSTGRESQL -> {
+                options.put("schema-name", endpoint.schema());
+                options.put("slot.name", slotName(taskCode, index));
+                options.put("decoding.plugin.name", "pgoutput");
+            }
+            case ORACLE -> options.put("schema-name", endpoint.schema().toUpperCase(Locale.ROOT));
+            case MYSQL, OCEANBASE -> options.put("server-id", String.valueOf(serverId));
+            default -> {
+                // SQL Server / Db2 的 schema 已包含在 table-name 里
+            }
         }
         options.put("table-name", tableName);
         putIfPresent(options, "username", str(c, "username"));
         putIfPresent(options, "password", str(c, "password"));
-        options.put("scan.startup.mode", startupMode);
-        if (startupTimestamp != null) {
-            options.put("scan.startup.timestamp-millis", String.valueOf(startupTimestamp));
+        options.put("scan.startup.mode", startup.mode());
+        if (startup.timestampMillis() != null) {
+            options.put("scan.startup.timestamp-millis", String.valueOf(startup.timestampMillis()));
         }
-        putIfPresent(options, "server-time-zone", str(c, "serverTimezone"));
-        putIfPresent(options, "connection.pool.size", str(c, "connectionPoolSize"));
-        // 读并行度：Flink 作业级并行度 + CDC 增量快照并行度
-        options.put("scan.incremental.snapshot.parallelism", String.valueOf(Math.max(1, parallelism)));
+        if (startup.scn() != null) {
+            options.put("scan.startup.specific-offset.scn", String.valueOf(startup.scn()));
+        }
+        switch (kind) {
+            case MYSQL -> {
+                putIfPresent(options, "server-time-zone", str(c, "serverTimezone"));
+                options.put("scan.incremental.snapshot.parallelism", String.valueOf(Math.max(1, parallelism)));
+            }
+            case OCEANBASE, SQLSERVER, DB2 -> putIfPresent(options, "server-time-zone", str(c, "serverTimezone"));
+            default -> {
+                // PostgreSQL / Oracle 不支持 server-time-zone
+            }
+        }
+        if (kind == DataSourceKind.MYSQL || kind == DataSourceKind.POSTGRESQL
+                || kind == DataSourceKind.ORACLE || kind == DataSourceKind.OCEANBASE) {
+            putIfPresent(options, "connection.pool.size", str(c, "connectionPoolSize"));
+        }
         return options;
     }
 
@@ -334,13 +419,32 @@ public final class FlinkSqlBuilder {
     }
 
     private static Map<String, String> sinkOptions(DataSourceKind kind, Map<String, Object> c,
-                                                   String identifier, int writeParallelism) {
+                                                   String identifier, int writeParallelism, String taskCode) {
         Map<String, String> options = new LinkedHashMap<>();
         switch (kind) {
             case MYSQL, POSTGRESQL -> {
                 options.put("connector", "jdbc");
                 options.put("url", required(c, "url", "JDBC URL"));
                 options.put("table-name", jdbcTableName(c, identifier));
+                putIfPresent(options, "username", str(c, "username"));
+                putIfPresent(options, "password", str(c, "password"));
+            }
+            case DORIS -> {
+                options.put("connector", "doris");
+                options.put("fenodes", required(c, "fenodes", "FE 地址"));
+                options.put("table.identifier", required(c, "database", "目标库") + "." + identifier);
+                putIfPresent(options, "username", str(c, "username"));
+                putIfPresent(options, "password", str(c, "password"));
+                // CDC 需要跟随源端的删除；label 前缀保证同一 Flink 作业内导入事务唯一
+                options.put("sink.enable-delete", "true");
+                options.put("sink.label-prefix", dorisLabelPrefix(taskCode, identifier));
+            }
+            case STARROCKS -> {
+                options.put("connector", "starrocks");
+                options.put("jdbc-url", required(c, "jdbcUrl", "FE JDBC 地址"));
+                options.put("load-url", required(c, "loadUrl", "FE HTTP 地址"));
+                options.put("database-name", required(c, "database", "目标库"));
+                options.put("table-name", identifier);
                 putIfPresent(options, "username", str(c, "username"));
                 putIfPresent(options, "password", str(c, "password"));
             }
@@ -383,6 +487,13 @@ public final class FlinkSqlBuilder {
     private static String jdbcTableName(Map<String, Object> c, String identifier) {
         String schema = str(c, "schema");
         return schema.isEmpty() ? identifier : schema + "." + identifier;
+    }
+
+    /** Doris 导入 label 前缀：只允许字母、数字、下划线、短横线，长度不超过 128 */
+    private static String dorisLabelPrefix(String taskCode, String identifier) {
+        String prefix = "df_" + (taskCode == null ? "job" : taskCode) + "_" + identifier;
+        String sanitized = prefix.replaceAll("[^A-Za-z0-9_-]", "_");
+        return sanitized.length() <= 128 ? sanitized : sanitized.substring(0, 128);
     }
 
     private static String renderOptions(Map<String, String> options) {

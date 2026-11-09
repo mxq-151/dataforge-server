@@ -367,7 +367,10 @@ public class IntegrationTaskService {
                     .map(f -> new DataSourceTypeVO.FieldVO(f.getKey(), f.getLabel(), f.isRequired(),
                             f.getPlaceholder(), f.getType()))
                     .collect(Collectors.toList()));
-            targets.add(type);
+            // 只有声明了写参数的连接器才能作为目标端（CDC 源端如 Oracle / SQL Server / Db2 / OceanBase 仅支持读取）
+            if (!kind.getWriteFields().isEmpty()) {
+                targets.add(type);
+            }
             // 只有声明了读参数的连接器才能作为源端（例如 Hive 目前仅支持作为目标）
             if (!kind.getReadFields().isEmpty()) {
                 sources.add(type);
@@ -407,8 +410,7 @@ public class IntegrationTaskService {
         if (source.isCdcSource()) {
             Map<String, Object> sourceConfig = SourceConnection.normalize(source, dto.getSourceConfig());
             SourceConnection.endpoint(source, sourceConfig);
-            String startupMode = SourceConnection.startupMode(sourceConfig);
-            SourceConnection.startupTimestamp(startupMode, sourceConfig);
+            SourceConnection.startup(source, sourceConfig);
         }
     }
 
@@ -419,8 +421,7 @@ public class IntegrationTaskService {
             throw new BusinessException(400, "至少需要配置一张需要同步的表");
         }
         DataSourceKind sourceKind = DataSourceKind.fromCode(dto.getSourceType());
-        boolean multiTableSource = sourceKind == DataSourceKind.MYSQL
-                || sourceKind == DataSourceKind.POSTGRESQL;
+        boolean multiTableSource = sourceKind != null && sourceKind.isCdcSource();
         if (!multiTableSource && list.size() > 1) {
             throw new BusinessException(400, "源端类型 " + sourceKind.getLabel()
                     + " 不支持一次同步多张表，请只保留一张表");
@@ -475,8 +476,11 @@ public class IntegrationTaskService {
     /**
      * CDC 表清单校验：
      * <ul>
-     *   <li>表清单只填表名，库名统一由源端 database 决定；兼容老数据里的「库.表」，但库名必须一致；</li>
-     *   <li>每张表一个 CDC source，MySQL 的 server-id 按「基数 + 序号」分配，保存时校验基数与范围。</li>
+     *   <li>MySQL / PostgreSQL / OceanBase：表清单只填表名，库名统一由源端 database 决定；
+     *       兼容老数据里的「库.表」，但库名必须一致；</li>
+     *   <li>SQL Server / Db2：允许「schema.table」，只填表名时使用源端 schema；</li>
+     *   <li>Oracle：表清单只填表名，schema 由连接参数指定；</li>
+     *   <li>每张表一个 CDC source，MySQL / OceanBase 的 server-id 按「基数 + 序号」分配。</li>
      * </ul>
      */
     private void validateCdcTables(DataSourceKind sourceKind, Map<String, Object> sourceConfig,
@@ -486,17 +490,26 @@ public class IntegrationTaskService {
         for (IntegrationTableDTO table : tables) {
             String name = table.getSourceTable();
             int dot = name.indexOf('.');
-            if (dot < 0) {
-                continue;
-            }
-            String tableDb = name.substring(0, dot).trim();
-            if (name.substring(dot + 1).trim().isEmpty()) {
-                throw new BusinessException(400, "表「" + name + "」缺少表名，请填写「库名.表名」或只填表名");
-            }
-            if (!tableDb.equalsIgnoreCase(database)) {
-                throw new BusinessException(400, "表「" + name + "」的库名 " + tableDb
-                        + " 与源端数据库 " + database + " 不一致；CDC 一份源连接只能读一个库，"
-                        + "表清单请只填表名，或按库拆分任务");
+            if (sourceKind.tableQualifier() == DataSourceKind.TableQualifier.DATABASE) {
+                if (dot < 0) {
+                    continue;
+                }
+                String tableDb = name.substring(0, dot).trim();
+                if (name.substring(dot + 1).trim().isEmpty()) {
+                    throw new BusinessException(400, "表「" + name + "」缺少表名，请填写「库名.表名」或只填表名");
+                }
+                if (!tableDb.equalsIgnoreCase(database)) {
+                    throw new BusinessException(400, "表「" + name + "」的库名 " + tableDb
+                            + " 与源端数据库 " + database + " 不一致；CDC 一份源连接只能读一个库，"
+                            + "表清单请只填表名，或按库拆分任务");
+                }
+            } else if (sourceKind.tableQualifier() == DataSourceKind.TableQualifier.SCHEMA) {
+                if (dot >= 0 && name.substring(dot + 1).trim().isEmpty()) {
+                    throw new BusinessException(400, "表「" + name + "」缺少表名，请填写「schema.表名」或只填表名");
+                }
+            } else if (dot >= 0) {
+                throw new BusinessException(400, sourceKind.getLabel()
+                        + " 的表清单只填表名（如 orders），schema 请在源端连接的 schema 参数里指定");
             }
         }
         FlinkSqlBuilder.serverIdBase(sourceKind, config, null, tables.size());

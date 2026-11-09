@@ -89,6 +89,26 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- 以下 JDBC 驱动用于 CDC 源端读取表字段元数据（Oracle / SQL Server / Db2） -->
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc8</artifactId>
+            <version>21.9.0.0</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <version>9.4.1.jre8</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.ibm.db2</groupId>
+            <artifactId>jcc</artifactId>
+            <version>11.5.0.0</version>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Apache HttpClient (Kyuubi/Hive JDBC 驱动运行时依赖,通过 /jars/ 外部驱动 Class.forName 反射加载) -->
         <dependency>
             <groupId>org.apache.httpcomponents</groupId>

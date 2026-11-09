@@ -33,14 +33,21 @@ public final class JobIdParser {
 
     /**
      * 从 {@code flink list} 输出里找指定作业的状态。
-     * 典型行：{@code : 8a1b... : RUNNING : job-name}
+     * 典型行（Flink 1.18，-r）：{@code 09.11.2026 13:36:00 : <id> : job-name (RUNNING)}；
+     * 老版本格式：{@code : <id> : RUNNING : job-name}。
      */
     public static String findFlinkState(String output, String jobId) {
         if (output == null || jobId == null || jobId.isBlank()) {
             return null;
         }
-        Pattern line = Pattern.compile(":\\s*" + Pattern.quote(jobId) + "\\s*:\\s*([A-Z_]+)\\s*:");
-        Matcher matcher = line.matcher(output);
+        Pattern withStateInParens = Pattern.compile(
+                ":\\s*" + Pattern.quote(jobId) + "\\s*:.*?\\(([A-Z_]+)\\)");
+        Matcher matcher = withStateInParens.matcher(output);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        Pattern legacy = Pattern.compile(":\\s*" + Pattern.quote(jobId) + "\\s*:\\s*([A-Z_]+)\\s*:");
+        matcher = legacy.matcher(output);
         if (matcher.find()) {
             return matcher.group(1);
         }

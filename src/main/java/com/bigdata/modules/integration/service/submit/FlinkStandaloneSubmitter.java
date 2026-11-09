@@ -81,7 +81,7 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
         if (submitArgs.isEmpty()) {
             if (!isSqlClient(bin)) {
                 throw new BusinessException(503,
-                        "使用非 sql-client 的可执行文件提交 Flink SQL 时，必须显式配置 integration.cluster.flink.submit-args"
+                        "使用非 sql-client 的可执行文件提交 Flink SQL 时，必须显式配置 integration.flink.submit-args"
                                 + "（当前可执行文件：" + bin + "）");
             }
             command.add("-f");
@@ -109,6 +109,14 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
         if (!result.isSuccess()) {
             throw new BusinessException(502, "Flink 作业提交失败：" + result.failureSummary(4000));
         }
+        // sql-client 在 -f 模式下遇到 SQL 语句错误（如 connector 参数不支持）仍会以退出码 0 结束，
+        // 必须显式识别，否则会把「一条语句都没提交」误判为上线成功。
+        String output = result.combinedOutput();
+        int sqlError = output.indexOf("Could not execute SQL statement");
+        if (sqlError >= 0) {
+            throw new BusinessException(502, "Flink SQL 执行失败："
+                    + output.substring(sqlError, Math.min(output.length(), sqlError + 1500)).trim());
+        }
         String jobId = JobIdParser.parseFlink(result.combinedOutput());
         if (jobId == null) {
             log.warn("Flink 提交命令执行成功，但未从输出解析到 jobId: task={}, cmd={}",
@@ -133,7 +141,7 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
         List<String> template = config.getCancelArgs() == null ? List.of() : config.getCancelArgs();
         if (template.isEmpty()) {
             throw new BusinessException(503,
-                    "未配置 Flink 取消命令参数（integration.cluster.flink.cancel-args），无法通过命令行取消作业");
+                    "未配置 Flink 取消命令参数（integration.flink.cancel-args），无法通过命令行取消作业");
         }
         Map<String, String> vars = Map.of("jobId", context.getJobId());
         List<String> args = CliCommandRunner.expand(template, vars);
@@ -143,8 +151,7 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
 
         List<String> command = new ArrayList<>();
         command.add(bin);
-        command.addAll(clusterManagerArgs(config));
-        command.addAll(args);
+        command.addAll(withClusterManager(config, args));
 
         CliResult result = runner.run(command, resolveWorkDir(config), config.getTimeoutMs());
         String logText = "===== 执行命令 =====\n" + result.getCommandLine() + "\n"
@@ -168,12 +175,12 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
         List<String> template = config.getStatusArgs() == null ? List.of() : config.getStatusArgs();
         if (template.isEmpty()) {
             return ClusterJobStatus.unreachable(
-                    "未配置 Flink 状态查询命令参数（integration.cluster.flink.status-args），无法查询运行状态");
+                    "未配置 Flink 状态查询命令参数（integration.flink.status-args），无法查询运行状态");
         }
         List<String> command = new ArrayList<>();
         command.add(bin);
-        command.addAll(clusterManagerArgs(config));
-        command.addAll(CliCommandRunner.expand(template, Map.of("jobId", context.getJobId())));
+        command.addAll(withClusterManager(config,
+                CliCommandRunner.expand(template, Map.of("jobId", context.getJobId()))));
 
         CliResult result = runner.run(command, resolveWorkDir(config), config.getTimeoutMs());
         if (!result.isStarted()) {
@@ -212,6 +219,23 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
         return args;
     }
 
+    /**
+     * flink CLI 要求第一个参数是动作（run/list/cancel/...），-m 必须放在动作之后，
+     * 否则会报「"-m" is not a valid action」。这里把 -m host:port 插到动作后面。
+     */
+    private List<String> withClusterManager(IntegrationClusterProperties.Flink config, List<String> actionArgs) {
+        List<String> managerArgs = clusterManagerArgs(config);
+        List<String> merged = new ArrayList<>();
+        if (actionArgs.isEmpty()) {
+            merged.addAll(managerArgs);
+            return merged;
+        }
+        merged.add(actionArgs.get(0));
+        merged.addAll(managerArgs);
+        merged.addAll(actionArgs.subList(1, actionArgs.size()));
+        return merged;
+    }
+
     /** flink cancel / list 通过 -m host:port 指定 JobManager */
     private List<String> clusterManagerArgs(IntegrationClusterProperties.Flink config) {
         if (isBlank(config.getRestUrl())) {
@@ -230,7 +254,7 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
             bin = Paths.get(config.getHome(), "bin", "sql-client.sh").toString();
         }
         return requireExecutable(bin,
-                "未配置 Flink 提交命令（integration.cluster.flink.submit-bin 或 integration.cluster.flink.home）");
+                "未配置 Flink 提交命令（integration.flink.submit-bin 或 integration.flink.home）");
     }
 
     private String resolveManageBin(IntegrationClusterProperties.Flink config) {
@@ -239,7 +263,7 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
             bin = Paths.get(config.getHome(), "bin", "flink").toString();
         }
         return requireExecutable(bin,
-                "未配置 Flink 管理命令（integration.cluster.flink.manage-bin 或 integration.cluster.flink.home）");
+                "未配置 Flink 管理命令（integration.flink.manage-bin 或 integration.flink.home）");
     }
 
     private String requireExecutable(String bin, String missingHint) {
@@ -249,7 +273,7 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
         Path path = Paths.get(bin);
         if (!Files.isExecutable(path)) {
             throw new BusinessException(503, "Flink 可执行文件不存在或不可执行：" + bin
-                    + "（请检查 integration.cluster.flink.home / submit-bin / manage-bin）");
+                    + "（请检查 integration.flink.home / submit-bin / manage-bin）");
         }
         return path.toString();
     }

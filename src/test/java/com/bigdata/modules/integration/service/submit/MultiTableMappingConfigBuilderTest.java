@@ -119,6 +119,195 @@ class MultiTableMappingConfigBuilderTest {
         assertTrue(sql.contains("'slot.name' = 'df_multi_sync_1'"));
         // PostgreSQL 不需要 server-id
         assertFalse(sql.contains("'server-id'"));
+        // MySQL CDC 专有参数不能出现在 PG source 上（否则 connector 报 Unsupported options）
+        assertFalse(sql.contains("'scan.incremental.snapshot.parallelism'"));
+        assertFalse(sql.contains("'server-time-zone'"));
+    }
+
+    @Test
+    void oracleCdcUsesSchemaAndScnStartup() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("host", "10.0.0.8");
+        source.put("port", "1521");
+        source.put("database", "ORCLCDB");
+        source.put("schema", "INVENTORY");
+        source.put("username", "flinkuser");
+        source.put("password", "secret");
+        source.put("startupMode", "specific-offset");
+        source.put("startupScn", "2384593");
+        source.put("connectionPoolSize", "15");
+        DataIntegrationSubmitter.SubmitContext ctx = context("oracle", source, "kafka", kafkaTarget(),
+                List.of(table("PRODUCTS")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 2, 1);
+        System.out.println("===== Oracle CDC SQL =====\n" + sql);
+
+        assertTrue(sql.contains("'connector' = 'oracle-cdc'"), sql);
+        assertTrue(sql.contains("'schema-name' = 'INVENTORY'"), sql);
+        assertTrue(sql.contains("'table-name' = 'PRODUCTS'"), sql);
+        assertTrue(sql.contains("'scan.startup.mode' = 'specific-offset'"), sql);
+        assertTrue(sql.contains("'scan.startup.specific-offset.scn' = '2384593'"), sql);
+        assertTrue(sql.contains("'connection.pool.size' = '15'"), sql);
+        assertFalse(sql.contains("'server-id'"), sql);
+    }
+
+    @Test
+    void oracleRejectsSchemaQualifiedTable() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("host", "10.0.0.8");
+        source.put("database", "ORCLCDB");
+        source.put("schema", "INVENTORY");
+        source.put("username", "flinkuser");
+        source.put("password", "secret");
+        DataIntegrationSubmitter.SubmitContext ctx = context("oracle", source, "kafka", kafkaTarget(),
+                List.of(table("INVENTORY.PRODUCTS")));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 1, 1));
+        assertTrue(error.getMessage().contains("只填表名"), error.getMessage());
+    }
+
+    @Test
+    void oracleRejectsTimestampStartup() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("host", "10.0.0.8");
+        source.put("database", "ORCLCDB");
+        source.put("schema", "INVENTORY");
+        source.put("username", "flinkuser");
+        source.put("password", "secret");
+        source.put("startupMode", "timestamp");
+        source.put("startupTimestamp", "1700000000000");
+        DataIntegrationSubmitter.SubmitContext ctx = context("oracle", source, "kafka", kafkaTarget(),
+                List.of(table("PRODUCTS")));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 1, 1));
+        assertTrue(error.getMessage().contains("不支持 timestamp"), error.getMessage());
+    }
+
+    @Test
+    void sqlServerCdcQualifiesTableWithSchema() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("host", "10.0.0.9");
+        source.put("port", "1433");
+        source.put("database", "inventory");
+        source.put("schema", "dbo");
+        source.put("username", "sa");
+        source.put("password", "secret");
+        source.put("startupMode", "latest-offset");
+        source.put("serverTimezone", "UTC");
+        DataIntegrationSubmitter.SubmitContext ctx = context("sqlserver", source, "kafka", kafkaTarget(),
+                List.of(table("orders"), table("users")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 2, 1);
+        assertTrue(sql.contains("'connector' = 'sqlserver-cdc'"), sql);
+        assertTrue(sql.contains("'database-name' = 'inventory'"), sql);
+        assertTrue(sql.contains("'table-name' = 'dbo.orders'"), sql);
+        assertTrue(sql.contains("'table-name' = 'dbo.users'"), sql);
+        assertTrue(sql.contains("'scan.startup.mode' = 'latest-offset'"), sql);
+        assertTrue(sql.contains("'server-time-zone' = 'UTC'"), sql);
+        assertFalse(sql.contains("'server-id'"), sql);
+    }
+
+    @Test
+    void db2CdcUsesConfiguredSchemaForPlainTable() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("host", "10.0.0.10");
+        source.put("port", "50000");
+        source.put("database", "TESTDB");
+        source.put("schema", "db2inst1");
+        source.put("username", "db2inst1");
+        source.put("password", "secret");
+        DataIntegrationSubmitter.SubmitContext ctx = context("db2", source, "kafka", kafkaTarget(),
+                List.of(table("PRODUCTS")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 1, 1);
+        assertTrue(sql.contains("'connector' = 'db2-cdc'"), sql);
+        assertTrue(sql.contains("'table-name' = 'DB2INST1.PRODUCTS'"), sql);
+        assertFalse(sql.contains("'server-id'"), sql);
+    }
+
+    @Test
+    void oceanBaseCdcAllocatesServerIds() {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("host", "10.0.0.11");
+        source.put("port", "2881");
+        source.put("database", "ods");
+        source.put("username", "root@test");
+        source.put("password", "secret");
+        source.put("serverTimezone", "Asia/Shanghai");
+        DataIntegrationSubmitter.SubmitContext ctx = context("oceanbase", source, "kafka", kafkaTarget(),
+                List.of(table("orders"), table("users")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 2, 1);
+        assertEquals(2, count(sql, "'connector' = 'oceanbase-cdc'"));
+        assertTrue(sql.contains("'server-id' = '5410'"), sql);
+        assertTrue(sql.contains("'server-id' = '5411'"), sql);
+        assertTrue(sql.contains("'server-time-zone' = 'Asia/Shanghai'"), sql);
+        assertFalse(sql.contains("'scan.incremental.snapshot.parallelism'"), sql);
+    }
+
+    @Test
+    void dorisSinkUsesDatabaseAndLabelPrefix() {
+        Map<String, Object> target = new LinkedHashMap<>();
+        target.put("fenodes", "127.0.0.1:8030");
+        target.put("database", "dwd");
+        target.put("username", "root");
+        target.put("password", "123456");
+        DataIntegrationSubmitter.SubmitContext ctx = context("mysql", mysqlSource(), "doris", target,
+                List.of(table("orders")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 2, 3);
+        assertTrue(sql.contains("'connector' = 'doris'"), sql);
+        assertTrue(sql.contains("'fenodes' = '127.0.0.1:8030'"), sql);
+        assertTrue(sql.contains("'table.identifier' = 'dwd.orders'"), sql);
+        assertTrue(sql.contains("'sink.enable-delete' = 'true'"), sql);
+        assertTrue(sql.contains("'sink.label-prefix' = 'df_multi-sync_orders'"), sql);
+        assertTrue(sql.contains("'sink.parallelism' = '3'"), sql);
+    }
+
+    @Test
+    void starRocksSinkUsesDatabaseAndTable() {
+        Map<String, Object> target = new LinkedHashMap<>();
+        target.put("jdbcUrl", "jdbc:mysql://127.0.0.1:9030");
+        target.put("loadUrl", "http://127.0.0.1:8030");
+        target.put("database", "dwd");
+        target.put("username", "root");
+        target.put("password", "123456");
+        DataIntegrationSubmitter.SubmitContext ctx = context("mysql", mysqlSource(), "starrocks", target,
+                List.of(table("orders")));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 2, 2);
+        assertTrue(sql.contains("'connector' = 'starrocks'"), sql);
+        assertTrue(sql.contains("'jdbc-url' = 'jdbc:mysql://127.0.0.1:9030'"), sql);
+        assertTrue(sql.contains("'load-url' = 'http://127.0.0.1:8030'"), sql);
+        assertTrue(sql.contains("'database-name' = 'dwd'"), sql);
+        assertTrue(sql.contains("'table-name' = 'orders'"), sql);
+    }
+
+    @Test
+    void newSourcesParseLegacyJdbcUrls() {
+        Map<String, Object> oracle = new LinkedHashMap<>();
+        oracle.put("url", "jdbc:oracle:thin:@//db.local:1521/ORCLCDB");
+        Map<String, Object> oracleParsed = SourceConnection.normalize(DataSourceKind.ORACLE, oracle);
+        assertEquals("db.local", oracleParsed.get("host"));
+        assertEquals("1521", oracleParsed.get("port"));
+        assertEquals("ORCLCDB", oracleParsed.get("database"));
+        assertFalse(oracleParsed.containsKey("url"));
+
+        Map<String, Object> sqlserver = new LinkedHashMap<>();
+        sqlserver.put("url", "jdbc:sqlserver://db.local:1433;databaseName=inventory;encrypt=false");
+        Map<String, Object> sqlserverParsed = SourceConnection.normalize(DataSourceKind.SQLSERVER, sqlserver);
+        assertEquals("db.local", sqlserverParsed.get("host"));
+        assertEquals("1433", sqlserverParsed.get("port"));
+        assertEquals("inventory", sqlserverParsed.get("database"));
+
+        Map<String, Object> db2 = new LinkedHashMap<>();
+        db2.put("url", "jdbc:db2://db.local:50000/TESTDB");
+        Map<String, Object> db2Parsed = SourceConnection.normalize(DataSourceKind.DB2, db2);
+        assertEquals("db.local", db2Parsed.get("host"));
+        assertEquals("50000", db2Parsed.get("port"));
+        assertEquals("TESTDB", db2Parsed.get("database"));
     }
 
     @Test
@@ -242,6 +431,23 @@ class MultiTableMappingConfigBuilderTest {
 
         assertTrue(sql.contains("'path' = 'hdfs://nn:8020/dwd/orders'"), sql);
         assertTrue(sql.contains("'path' = 'hdfs://nn:8020/dwd/users'"), sql);
+    }
+
+    @Test
+    void primaryKeyIsRenderedForCdcSourceAndJdbcSink() {
+        Map<String, Object> target = new LinkedHashMap<>();
+        target.put("url", "jdbc:mysql://127.0.0.1:3306/dw");
+        target.put("username", "root");
+        target.put("password", "123456");
+        TableSpec withKey = new TableSpec("orders", List.of(), 0, List.of(
+                new ColumnDef("id", "BIGINT", true),
+                new ColumnDef("name", "STRING")));
+        DataIntegrationSubmitter.SubmitContext ctx = context("mysql", mysqlSource(), "mysql", target,
+                List.of(withKey));
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 1, 1);
+        // CDC 源 + JDBC Sink 都要声明主键，否则 Sink 无法处理 -U/+D 记录
+        assertEquals(2, count(sql, "PRIMARY KEY (`id`) NOT ENFORCED"), sql);
     }
 
     @Test

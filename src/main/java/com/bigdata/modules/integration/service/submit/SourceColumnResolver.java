@@ -11,11 +11,13 @@ import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * 从源库元数据读取表清单中每张表的字段清单。
@@ -40,10 +42,9 @@ public final class SourceColumnResolver {
     public static Map<String, List<ColumnDef>> resolveAll(DataSourceKind kind,
                                                           Map<String, Object> config,
                                                           List<TableSpec> tables) {
-        if (kind != DataSourceKind.MYSQL && kind != DataSourceKind.POSTGRESQL) {
+        if (!kind.isCdcSource()) {
             throw new BusinessException(400, "源端类型 " + (kind == null ? "" : kind.getLabel())
-                    + " 无法自动读取字段清单：只有 MySQL / PostgreSQL 支持按表清单从库表元数据取列，"
-                    + "请改用 JDBC 源端");
+                    + " 无法自动读取字段清单：只有 CDC 源端（MySQL / PostgreSQL / Oracle / SQL Server / Db2 / OceanBase）支持按表清单从库表元数据取列");
         }
         SourceConnection.Endpoint endpoint = SourceConnection.endpoint(kind, config);
         String url = SourceConnection.jdbcUrl(kind, config);
@@ -69,13 +70,14 @@ public final class SourceColumnResolver {
         if (!password.isEmpty()) {
             props.setProperty("password", password);
         }
-        if (kind == DataSourceKind.MYSQL) {
-            props.setProperty("connectTimeout", String.valueOf(MYSQL_CONNECT_TIMEOUT_MS));
-            props.setProperty("socketTimeout", String.valueOf(MYSQL_SOCKET_TIMEOUT_MS));
-        } else {
-            props.setProperty("connectTimeout", String.valueOf(POSTGRES_TIMEOUT_SECONDS));
-            props.setProperty("loginTimeout", String.valueOf(POSTGRES_TIMEOUT_SECONDS));
-            props.setProperty("socketTimeout", String.valueOf(POSTGRES_TIMEOUT_SECONDS * 6));
+        if (kind == DataSourceKind.MYSQL || kind == DataSourceKind.POSTGRESQL) {
+            props.setProperty("connectTimeout", String.valueOf(kind == DataSourceKind.MYSQL
+                    ? MYSQL_CONNECT_TIMEOUT_MS : POSTGRES_TIMEOUT_SECONDS));
+            props.setProperty("socketTimeout", String.valueOf(kind == DataSourceKind.MYSQL
+                    ? MYSQL_SOCKET_TIMEOUT_MS : POSTGRES_TIMEOUT_SECONDS * 6));
+            if (kind == DataSourceKind.POSTGRESQL) {
+                props.setProperty("loginTimeout", String.valueOf(POSTGRES_TIMEOUT_SECONDS));
+            }
         }
         return props;
     }
@@ -83,10 +85,32 @@ public final class SourceColumnResolver {
     private static List<ColumnDef> loadColumns(DataSourceKind kind, DatabaseMetaData meta,
                                                SourceConnection.Endpoint endpoint, TableSpec table)
             throws SQLException {
-        String catalog = kind == DataSourceKind.MYSQL
-                ? firstNonEmpty(table.database(), endpoint.database()) : null;
-        String schema = kind == DataSourceKind.POSTGRESQL
-                ? firstNonEmpty(table.database(), endpoint.schema()) : null;
+        String catalog;
+        String schema;
+        switch (kind) {
+            case MYSQL, OCEANBASE -> {
+                catalog = firstNonEmpty(table.database(), endpoint.database());
+                schema = null;
+            }
+            case POSTGRESQL -> {
+                catalog = null;
+                schema = endpoint.schema();
+            }
+            case ORACLE, DB2 -> {
+                // 表清单前缀对 Oracle/Db2 不是库名；schema 统一取连接参数，Db2 允许表清单里写 schema.table
+                String configured = kind == DataSourceKind.DB2 ? table.database() : "";
+                catalog = null;
+                schema = firstNonEmpty(configured, endpoint.schema()).toUpperCase(Locale.ROOT);
+            }
+            case SQLSERVER -> {
+                catalog = endpoint.database();
+                schema = firstNonEmpty(table.database(), endpoint.schema());
+            }
+            default -> {
+                catalog = null;
+                schema = null;
+            }
+        }
         List<OrdinalColumn> columns = new ArrayList<>();
         try (ResultSet rs = meta.getColumns(catalog, schema, table.table(), null)) {
             while (rs.next()) {
@@ -104,9 +128,20 @@ public final class SourceColumnResolver {
                     + "」在源库中没有读到字段；请确认「库名.表名」是否正确、连接账号是否有访问权限");
         }
         columns.sort(Comparator.comparingInt(OrdinalColumn::ordinal));
+        Set<String> primaryKeys = new HashSet<>();
+        try (ResultSet rs = meta.getPrimaryKeys(catalog, schema, table.table())) {
+            while (rs.next()) {
+                String name = rs.getString("COLUMN_NAME");
+                if (name != null && !name.trim().isEmpty()) {
+                    primaryKeys.add(name.trim().toLowerCase(Locale.ROOT));
+                }
+            }
+        }
         List<ColumnDef> result = new ArrayList<>(columns.size());
         for (OrdinalColumn column : columns) {
-            result.add(column.column());
+            ColumnDef def = column.column();
+            boolean pk = primaryKeys.contains(def.getName().toLowerCase(Locale.ROOT));
+            result.add(pk ? new ColumnDef(def.getName(), def.getFlinkType(), true) : def);
         }
         return result;
     }
