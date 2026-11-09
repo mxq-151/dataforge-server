@@ -264,6 +264,9 @@ COPY build/conf/marquez-web-nginx.conf /etc/nginx/conf.d/marquez-web.conf
 # ---------- dataforge-server ----------
 # jar 由宿主机 mvn 打好后落在 build/dist/(见 build/build.sh build_server_jar),此处只做拷贝
 COPY build/dist/dataforge-server.jar /opt/dataforge/dataforge-server.jar
+# 同时放一份到不被命名卷挂载的 /opt/dataforge-image：entrypoint 启动时按"大小+SHA256"
+# 校验并同步到 /opt/dataforge，避免持久化卷里的旧 jar 遮住镜像新 jar（表现为接口 404）。
+COPY build/dist/dataforge-server.jar /opt/dataforge-image/dataforge-server.jar
 COPY build/dist/postgresql-42.7.12.jar /opt/dataforge/jars/postgresql-42.7.12.jar
 
 # ---------- 初始化 SQL 与容器脚本：放镜像专属目录，由 entrypoint 启动时同步 ----------

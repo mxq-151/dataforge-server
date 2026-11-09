@@ -86,3 +86,37 @@ scheduler:
 # 质检告警投递配置（alert.webhook.url）已随「告警订阅」页签与告警链路一并删除
 # （2026-10-09）：DqAlertSender / dq_alert_log / dq_alert_subscription 均不再存在。
 
+# 数据集成（Data Integration）集群连接配置。
+# 任务统一提交为 Flink CDC 作业（clusterType 仅保留 flink-standalone → Flink sql-client.sh）。
+# 提交 / 取消 / 状态查询全部通过命令行执行：可执行文件路径、启动参数、工作目录都在这里配置，
+# 代码中没有硬编码路径；home 留空且未显式配置 bin 时，上线会返回明确的「未配置」错误。
+# 参数模板占位符：提交 {sqlFile}、取消/状态 {jobId}。
+integration:
+  flink:
+    # Flink 安装目录，如 /opt/flink；用于推导 bin/sql-client.sh、bin/flink 与默认工作目录 {home}/tmp
+    home: ''
+    # 提交用可执行文件；留空取 {home}/bin/sql-client.sh
+    submit-bin: ''
+    # 取消 / 状态查询用可执行文件；留空取 {home}/bin/flink
+    manage-bin: ''
+    # 生成的 .sql 落盘目录；留空取 {home}/tmp 或系统临时目录
+    work-dir: ''
+    # 提交参数模板（可覆盖）；留空且使用 sql-client 时默认 -f {sqlFile}
+    submit-args: []
+    # 取消参数模板；默认 cancel，末尾会自动补 jobId
+    cancel-args: ['cancel']
+    # 状态查询参数模板；默认 list -r（列出运行中的作业）
+    status-args: ['list', '-r']
+    # sql-client 提交目标的 execution.target，远端集群用 remote
+    execution-target: remote
+    # JobManager REST 地址，用于推导 sql-client 的 -Drest.address/port 与 flink 的 -m host:port
+    rest-url: http://127.0.0.1:8081
+    default-parallelism: 1
+    # checkpoint 间隔（毫秒），仅流模式生效；<=0 关闭
+    checkpoint-interval: 30000
+    # 取消 / 状态查询命令超时
+    timeout-ms: 30000
+    # 提交命令超时
+    submit-timeout-ms: 120000
+
+

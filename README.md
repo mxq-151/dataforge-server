@@ -151,6 +151,25 @@ curl -X POST http://localhost:8083/api/system/auth/login \
 | `aes.key`                                                          | 数据源等敏感配置的加解密密钥                          |
 | `engine.spark.home` / `engine.flink.home` / `engine.jar.base-path` | 提交执行时使用的引擎安装路径与 jar 存放根目录               |
 
+### 数据集成作业提交（命令行）
+
+数据集成任务**不再调用集群 REST / Hazelcast 接口**，统一改为在服务所在机器上执行命令行工具。
+可执行文件、启动参数、工作目录全部由 `integration.*` 配置，代码中不含硬编码路径：
+
+| 配置 | 说明 |
+| --- | --- |
+| `integration.flink.home` / `submit-bin` / `manage-bin` / `work-dir` | Flink 安装目录，以及提交（默认 `bin/sql-client.sh`）与管理（默认 `bin/flink`）可执行文件、生成的 `.sql` 落盘目录 |
+| `integration.flink.submit-args` / `cancel-args` / `status-args` | 参数模板；占位符 `{sqlFile}`、`{jobId}`，提交默认 `-f {sqlFile}`，取消默认 `cancel`，状态默认 `list -r` |
+| `integration.flink.execution-target` / `rest-url` | sql-client 的 `-Dexecution.target`（远端用 `remote`）与 JobManager 地址，用于推导 `-Drest.address/port` 和 `-m host:port` |
+| `integration.seatunnel.home` / `submit-bin` / `work-dir` | SeaTunnel 安装目录、可执行文件（默认 `bin/seatunnel.sh`）、生成的 `.conf` 落盘目录 |
+| `integration.seatunnel.submit-args` / `cancel-args` / `status-args` | 参数模板；占位符 `{configFile}`、`{jobName}`、`{jobId}`，提交默认 `--config {configFile} -m cluster -n {jobName}` |
+
+行为约定：
+
+- **安全**：命令以 argv 列表直接 `exec`，不经过 shell，任务参数中的 `;`、`|`、`$()` 不会被解释；可执行文件路径只来自配置，任务参数无法覆盖。
+- **日志**：命令、退出码、耗时与 stdout / stderr 全部写入提交日志；失败时抛出的错误信息包含命令、退出码与关键输出，成功时从输出解析 jobId 并落库（解析不到会明确提示，不伪造）。
+- **能力边界（命令行做不到的）**：SeaTunnel 2.3.x 客户端没有稳定的状态查询子命令，`status-args` 默认留空，此时状态查询返回明确的「不支持」提示；替代方案是升级客户端后配置 `status-args`，或在集群侧使用 Zeta REST 的 `job-info` / `stop-job`。Flink 的 `flink list` 只能看到会话 / 远端集群上的作业，application 模式需在 `status-args`、`cancel-args` 中补充 `-t yarn-application` 等参数。
+
 ## 容器化部署（All-in-One）
 
 `build/` 与 `startup/` 提供单容器一体镜像：镜像内以 supervisord 托管 **PostgreSQL 14 + dataforge-server + DolphinScheduler + Marquez（API 与 Web）**，另预置 Spark 3.5.9 与 OpenLineage Spark 插件。
@@ -207,6 +226,27 @@ REGISTRY=<仓库前缀> ./build/build-all.sh
 ./startup/macos/clear-data.sh     # 停止并删除数据卷（不可恢复）
 ./startup/macos/e2e-test.sh       # 端到端自检
 ```
+
+### 持久化卷下的 jar 自动同步（entrypoint）
+
+挂载命名卷 `df-data` 时 `/opt/dataforge` 会被卷覆盖，卷内旧 `dataforge-server.jar` 会遮住镜像新 jar，
+典型症状是重建镜像并重启后接口仍然 404（例如 `/api/integration/*`）。因此 entrypoint 在启动前会：
+
+1. 对比 `/opt/dataforge-image/dataforge-server.jar`（镜像权威副本）与 `/opt/dataforge/dataforge-server.jar`（卷内）；
+2. 先比大小，大小相同再比 SHA256（`sha256sum` 不可用时退化为大小判断）；
+3. 一致 → 只打印一行 `jar 已一致(...)，跳过同步`，不重复拷贝；不一致/缺失 → 备份为
+   `dataforge-server.jar.bak.<时间戳>` 后用「临时文件 + mv」原子替换，失败自动回滚并打印 `ERROR`；
+4. 无卷模式（两者同设备）直接跳过，不产生额外 IO。
+
+相关环境变量（`startup/compose/docker-compose.yml` 的 `environment` 或 `docker run -e` 均可设置）：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `DATAFORGE_JAR_SYNC` | `auto` | `auto` 仅不一致时替换；`force` 每次都用镜像 jar 覆盖（仍备份）；`off` 关闭同步，完全沿用卷内 jar |
+| `DATAFORGE_JAR_BACKUP_KEEP` | `3` | 保留最近 N 份 `.bak`，更早的自动清理 |
+
+`build/hot-update-dataforge-server.sh` 会同时更新容器内 `/opt/dataforge` 与 `/opt/dataforge-image`
+两份 jar，保证热更新在下次重启后仍然生效；若只想手动控制，可设置 `DATAFORGE_JAR_SYNC=off`。
 
 容器端口映射与访问地址：
 

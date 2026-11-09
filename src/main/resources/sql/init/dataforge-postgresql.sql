@@ -1538,3 +1538,69 @@ SELECT setval(pg_get_serial_sequence('sys_role','id'), (SELECT COALESCE(MAX(id),
 
 COMMIT;
 
+-- ============================================================
+-- 数据集成（Data Integration）
+-- 已有库升级：把下面两段 CREATE TABLE 单独执行一次即可
+-- ============================================================
+CREATE TABLE IF NOT EXISTS integration_task (
+  id BIGSERIAL,
+  task_name VARCHAR(200) NOT NULL,
+  task_code VARCHAR(100) NOT NULL,
+  description VARCHAR(500),
+  source_type VARCHAR(50) NOT NULL,
+  source_config TEXT,
+  target_type VARCHAR(50) NOT NULL,
+  target_config TEXT,
+  cluster_type VARCHAR(50) NOT NULL,
+  read_parallelism INT NOT NULL DEFAULT 1,
+  write_parallelism INT NOT NULL DEFAULT 1,
+  job_mode VARCHAR(20) NOT NULL DEFAULT 'BATCH',
+  trigger_type VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
+  trigger_config VARCHAR(500),
+  extra_params TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  job_id VARCHAR(200),
+  last_submit_time TIMESTAMP,
+  last_offline_time TIMESTAMP,
+  last_error VARCHAR(500),
+  create_by BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_integration_task_code UNIQUE (task_code)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_task_status ON integration_task (status);
+CREATE INDEX IF NOT EXISTS idx_integration_task_cluster ON integration_task (cluster_type);
+
+CREATE TABLE IF NOT EXISTS integration_task_table (
+  id BIGSERIAL,
+  task_id BIGINT NOT NULL,
+  source_table VARCHAR(200) NOT NULL,
+  exclude_columns VARCHAR(2000),
+  sort_no INT NOT NULL DEFAULT 0,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_integration_table_source UNIQUE (task_id, source_table)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_table_task ON integration_task_table (task_id);
+
+CREATE TABLE IF NOT EXISTS integration_submit_log (
+  id BIGSERIAL,
+  task_id BIGINT NOT NULL,
+  action VARCHAR(20) NOT NULL,
+  cluster_type VARCHAR(50),
+  job_id VARCHAR(200),
+  result_status VARCHAR(20) NOT NULL,
+  params_snapshot TEXT,
+  log_content TEXT,
+  error_message VARCHAR(1000),
+  operator_id BIGINT,
+  operator_name VARCHAR(100),
+  duration_ms BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_log_task ON integration_submit_log (task_id);
+

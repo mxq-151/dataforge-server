@@ -13,6 +13,9 @@
 # 说明:
 #   * 热替换只写入容器可写层, 不会固化进镜像;
 #     之后重建镜像(build.sh)会覆盖, 需要重新执行本脚本
+#   * 必须同时更新 /opt/dataforge 与 /opt/dataforge-image 两个路径:
+#     entrypoint 启动时以 /opt/dataforge-image 为准做 SHA256 同步,
+#     只替换前者会在下次重启时被回退成镜像里的旧 jar
 #   * 替换前自动备份容器内旧 jar 到容器 /opt/dataforge/ 下(带时间戳)
 #   * 重启容器会连带重启 PostgreSQL / Marquez / DolphinScheduler 等进程
 # ============================================================
@@ -22,6 +25,7 @@ SERVER_DIR="$(cd "$(dirname "$0")/.." && pwd)"     # 项目根 dataforge-server/
 
 CONTAINER="${CONTAINER:-dataforge-allinone}"
 CONTAINER_JAR_PATH="${CONTAINER_JAR_PATH:-/opt/dataforge/dataforge-server.jar}"
+CONTAINER_IMAGE_JAR_PATH="${CONTAINER_IMAGE_JAR_PATH:-/opt/dataforge-image/dataforge-server.jar}"
 SKIP_TESTS="${SKIP_TESTS:-true}"
 JAR_NAME="dataforge-server-1.0.0-SNAPSHOT.jar"
 HOST_JAR="$SERVER_DIR/target/$JAR_NAME"
@@ -47,6 +51,9 @@ docker exec "$CONTAINER" sh -c "cp -f $CONTAINER_JAR_PATH ${CONTAINER_JAR_PATH}.
 
 echo "==> 4/5 热替换 jar 并重启容器"
 docker cp "$HOST_JAR" "$CONTAINER:$CONTAINER_JAR_PATH"
+# 同步刷新镜像侧的"权威副本"，否则 entrypoint 下次启动会按它把卷内 jar 回退
+docker exec "$CONTAINER" sh -c "mkdir -p $(dirname "$CONTAINER_IMAGE_JAR_PATH")" || true
+docker cp "$HOST_JAR" "$CONTAINER:$CONTAINER_IMAGE_JAR_PATH"
 docker restart "$CONTAINER"
 
 echo "==> 5/5 等待 dataforge-server 启动 (端口 $PORT)"

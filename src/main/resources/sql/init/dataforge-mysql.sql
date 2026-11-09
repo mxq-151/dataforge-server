@@ -1526,3 +1526,73 @@ CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `knowledge_document`);
 
+-- ============================================================
+-- 数据集成（Data Integration）
+-- 已有库升级：把下面两段 CREATE TABLE 单独执行一次即可（sql.init.mode=never 不会自动执行）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS `integration_task` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_name` varchar(200) NOT NULL COMMENT '任务名称',
+  `task_code` varchar(100) NOT NULL COMMENT '任务编码',
+  `description` varchar(500) DEFAULT NULL COMMENT '描述',
+  `source_type` varchar(50) NOT NULL COMMENT '源端类型(mysql/postgresql，Flink CDC)',
+  `source_config` text COMMENT '源端连接参数(JSON)',
+  `target_type` varchar(50) NOT NULL COMMENT '目标端类型',
+  `target_config` text COMMENT '目标端连接参数(JSON)，可含命名模板 nameTemplate',
+  `cluster_type` varchar(50) NOT NULL COMMENT '运行集群(flink-standalone，任务统一为 Flink CDC)',
+  `read_parallelism` int NOT NULL DEFAULT '1' COMMENT '读并行度',
+  `write_parallelism` int NOT NULL DEFAULT '1' COMMENT '写并行度',
+  `job_mode` varchar(20) NOT NULL DEFAULT 'BATCH' COMMENT '作业模式(BATCH/STREAM)',
+  `trigger_type` varchar(20) NOT NULL DEFAULT 'MANUAL' COMMENT '触发方式(MANUAL/CRON)',
+  `trigger_config` varchar(500) DEFAULT NULL COMMENT '调度配置',
+  `extra_params` text COMMENT '额外透传参数(JSON)',
+  `status` varchar(20) NOT NULL DEFAULT 'DRAFT' COMMENT '状态(DRAFT/PUBLISHED/RUNNING/FAILED/OFFLINE)',
+  `job_id` varchar(200) DEFAULT NULL COMMENT '集群返回的作业ID',
+  `last_submit_time` datetime DEFAULT NULL COMMENT '最后上线时间',
+  `last_offline_time` datetime DEFAULT NULL COMMENT '最后下线时间',
+  `last_error` varchar(500) DEFAULT NULL COMMENT '最后一次失败原因',
+  `create_by` bigint DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_integration_task_code` (`task_code`),
+  KEY `idx_integration_task_status` (`status`),
+  KEY `idx_integration_task_cluster` (`cluster_type`),
+  KEY `idx_integration_task_source` (`source_type`),
+  KEY `idx_integration_task_target` (`target_type`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据集成任务表';
+
+CREATE TABLE IF NOT EXISTS `integration_task_table` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_id` bigint NOT NULL COMMENT '任务ID',
+  `source_table` varchar(200) NOT NULL COMMENT '源表(库.表)',
+  `exclude_columns` varchar(2000) DEFAULT NULL COMMENT '排除字段(逗号分隔)',
+  `sort_no` int NOT NULL DEFAULT '0' COMMENT '排序号',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_integration_table_source` (`task_id`, `source_table`),
+  KEY `idx_integration_table_task` (`task_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据集成任务需要同步的表';
+
+CREATE TABLE IF NOT EXISTS `integration_submit_log` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `task_id` bigint NOT NULL COMMENT '任务ID',
+  `action` varchar(20) NOT NULL COMMENT '操作(SUBMIT/OFFLINE/STATUS)',
+  `cluster_type` varchar(50) DEFAULT NULL COMMENT '运行集群',
+  `job_id` varchar(200) DEFAULT NULL COMMENT '集群作业ID',
+  `result_status` varchar(20) NOT NULL COMMENT '结果(SUCCESS/FAILED)',
+  `params_snapshot` text COMMENT '本次提交生效的参数快照(JSON)',
+  `log_content` longtext COMMENT '生成的作业配置与集群返回内容',
+  `error_message` varchar(1000) DEFAULT NULL COMMENT '失败原因',
+  `operator_id` bigint DEFAULT NULL COMMENT '操作人ID',
+  `operator_name` varchar(100) DEFAULT NULL COMMENT '操作人',
+  `duration_ms` bigint DEFAULT NULL COMMENT '耗时(毫秒)',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_integration_log_task` (`task_id`),
+  KEY `idx_integration_log_action` (`action`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据集成提交记录表';
+
+

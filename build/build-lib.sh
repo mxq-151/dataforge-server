@@ -277,6 +277,9 @@ build_jar_only() {
 ARG BASE_IMAGE=dataforge-allinone:1.0
 FROM ${BASE_IMAGE}
 COPY dataforge-server.jar /opt/dataforge/dataforge-server.jar
+# /opt/dataforge-image 不被命名卷挂载，entrypoint 启动时用它按 SHA256 校验并同步
+# 到 /opt/dataforge，避免持久化卷里的旧 jar 遮住镜像新 jar。
+COPY dataforge-server.jar /opt/dataforge-image/dataforge-server.jar
 COPY spark-defaults.conf /opt/spark/conf/spark-defaults.conf
 COPY spark-listeners/ /opt/spark/jars/
 COPY scripts/ /opt/dataforge/scripts/
