@@ -22,6 +22,7 @@ import com.bigdata.modules.integration.mapper.IntegrationTaskTableMapper;
 import com.bigdata.modules.integration.service.submit.ClusterJobStatus;
 import com.bigdata.modules.integration.service.submit.ClusterSubmitterFactory;
 import com.bigdata.modules.integration.service.submit.DataIntegrationSubmitter;
+import com.bigdata.modules.integration.service.submit.FileSinkOptions;
 import com.bigdata.modules.integration.service.submit.FlinkSqlBuilder;
 import com.bigdata.modules.integration.service.submit.SourceConnection;
 import com.bigdata.modules.integration.service.submit.SubmitResult;
@@ -373,11 +374,11 @@ public class IntegrationTaskService {
             type.setStreamSink(kind.isStreamSink());
             type.setReadFields(kind.getReadFields().stream()
                     .map(f -> new DataSourceTypeVO.FieldVO(f.getKey(), f.getLabel(), f.isRequired(),
-                            f.getPlaceholder(), f.getType()))
+                            f.getPlaceholder(), f.getType(), f.getOptions()))
                     .collect(Collectors.toList()));
             type.setWriteFields(kind.getWriteFields().stream()
                     .map(f -> new DataSourceTypeVO.FieldVO(f.getKey(), f.getLabel(), f.isRequired(),
-                            f.getPlaceholder(), f.getType()))
+                            f.getPlaceholder(), f.getType(), f.getOptions()))
                     .collect(Collectors.toList()));
             // 只有声明了写参数的连接器才能作为目标端（CDC 源端如 Oracle / SQL Server / Db2 / OceanBase 仅支持读取）
             if (!kind.getWriteFields().isEmpty()) {
@@ -409,6 +410,16 @@ public class IntegrationTaskService {
         if (source.getReadFields().isEmpty()) {
             throw new BusinessException(400, "该连接器暂不支持作为源端: " + source.getLabel());
         }
+        DataSourceKind target = DataSourceKind.fromCode(dto.getTargetType());
+        if (target == null) {
+            throw new BusinessException(400, "不支持的目标端类型: " + dto.getTargetType());
+        }
+        if (target.getWriteFields().isEmpty()) {
+            throw new BusinessException(400, "该连接器暂不支持作为目标端: " + target.getLabel());
+        }
+        validateRequiredFields(target, dto.getTargetConfig());
+        // 文件系统目标端：保存时就校验格式白名单与压缩算法兼容性
+        FileSinkOptions.validate(target, dto.getTargetConfig());
         if (ClusterType.fromCode(dto.getClusterType()) == null) {
             throw new BusinessException(400, "不支持的运行集群: " + dto.getClusterType());
         }
@@ -423,6 +434,21 @@ public class IntegrationTaskService {
             Map<String, Object> sourceConfig = SourceConnection.normalize(source, dto.getSourceConfig());
             SourceConnection.endpoint(source, sourceConfig);
             SourceConnection.startup(source, sourceConfig);
+        }
+    }
+
+    /**
+     * 目标端必填参数校验（与 GET /integration/options 下发的 required 保持一致）。
+     * 文件系统目标端的「文件格式」为必填，压缩算法可选。
+     */
+    private void validateRequiredFields(DataSourceKind kind, Map<String, Object> config) {
+        Map<String, Object> safe = config == null ? Map.of() : config;
+        for (DataSourceKind.ConnectorField field : kind.getWriteFields()) {
+            Object value = safe.get(field.getKey());
+            if (field.isRequired() && (value == null || String.valueOf(value).trim().isEmpty())) {
+                throw new BusinessException(400, "目标端「" + kind.getLabel()
+                        + "」缺少必填参数: " + field.getLabel());
+            }
         }
     }
 

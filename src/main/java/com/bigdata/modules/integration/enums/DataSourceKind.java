@@ -140,7 +140,11 @@ public enum DataSourceKind {
     HDFS("hdfs", "HDFS", false, false,
             fields(),
             fields("path", "基础路径", false, "hdfs://namenode:8020/dwd（默认 /user/dataforge）", "text",
-                    "format", "文件格式", false, "parquet", "text",
+                    select("format", "文件格式", true, "请选择文件格式",
+                            "parquet", "orc", "avro", "csv", "json"),
+                    select("compression", "压缩算法", false,
+                            "默认随格式：parquet=snappy，orc=zlib，avro/csv/json=不压缩",
+                            "none", "snappy", "gzip", "zlib", "zstd", "lz4"),
                     "nameTemplate", "目录命名模板", false, "{table}（默认），可用 {db}_{table}", "text")),
 
     S3("s3", "S3 / 对象存储", false, false,
@@ -150,8 +154,37 @@ public enum DataSourceKind {
                     "path", "对象前缀", false, "dwd（默认 dataforge）", "text",
                     "accessKey", "AccessKey", true, "minioadmin", "text",
                     "secretKey", "SecretKey", true, "******", "password",
-                    "format", "文件格式", false, "parquet", "text",
+                    select("format", "文件格式", true, "请选择文件格式",
+                            "parquet", "orc", "avro", "csv", "json"),
+                    select("compression", "压缩算法", false,
+                            "默认随格式：parquet=snappy，orc=zlib，avro/csv/json=不压缩",
+                            "none", "snappy", "gzip", "zlib", "zstd", "lz4"),
                     "nameTemplate", "对象命名模板", false, "{table}（默认），可用 {db}_{table}", "text")),
+
+    /**
+     * Apache Hudi 目标端：支持 CDC 的 UPDATE / DELETE（按源表主键 upsert）。
+     * 表由 Flink Hudi connector 在 path 下自动创建，主键来自源库元数据。
+     */
+    HUDI("hudi", "Apache Hudi", false, true,
+            fields(),
+            fields("path", "数仓路径", true, "file:///warehouse/hudi 或 hdfs://namenode:8020/warehouse/hudi", "text",
+                    select("tableType", "表类型", true, "MERGE_ON_READ",
+                            "MERGE_ON_READ", "COPY_ON_WRITE"),
+                    "precombineField", "预合并字段（可选）", false, "ts（用于同主键多版本去重）", "text",
+                    "nameTemplate", "表目录模板", false, "{table}（默认），可用 {db}_{table}", "text")),
+
+    /**
+     * Apache Iceberg 目标端：format-version=2 + 主键 upsert，支持 CDC 的 UPDATE / DELETE。
+     * 通过 Iceberg Catalog 建表，主键来自源库元数据。
+     */
+    ICEBERG("iceberg", "Apache Iceberg", false, true,
+            fields(),
+            fields(select("catalogType", "Catalog 类型", true, "hadoop", "hadoop", "hive"),
+                    "warehouse", "Warehouse 路径", true,
+                    "file:///warehouse/iceberg 或 hdfs://namenode:8020/warehouse/iceberg", "text",
+                    "uri", "Hive Metastore URI（hive 模式）", false, "thrift://127.0.0.1:9083", "text",
+                    "database", "数据库", true, "default", "text",
+                    "nameTemplate", "表名模板", false, "{table}（默认），可用 {db}_{table}", "text")),
 
     ELASTICSEARCH("elasticsearch", "Elasticsearch", false, false,
             fields(),
@@ -317,7 +350,8 @@ public enum DataSourceKind {
 
     /** 目标端是否支持 upsert（写入 DDL 需要声明主键） */
     public boolean supportsUpsertSink() {
-        return this == MYSQL || this == POSTGRESQL || this == DORIS || this == STARROCKS;
+        return this == MYSQL || this == POSTGRESQL || this == DORIS || this == STARROCKS
+                || this == HUDI || this == ICEBERG;
     }
 
     /** 表清单前缀语义 */
@@ -329,12 +363,25 @@ public enum DataSourceKind {
 
     private static List<ConnectorField> fields(Object... raw) {
         List<ConnectorField> list = new ArrayList<>();
-        for (int i = 0; i + 4 < raw.length; i += 5) {
+        for (int i = 0; i < raw.length; ) {
+            // 下拉字段直接以 ConnectorField 形式混在五元组里，便于声明可选项
+            if (raw[i] instanceof ConnectorField field) {
+                list.add(field);
+                i++;
+                continue;
+            }
             list.add(new ConnectorField(String.valueOf(raw[i]), String.valueOf(raw[i + 1]),
                     Boolean.parseBoolean(String.valueOf(raw[i + 2])),
                     String.valueOf(raw[i + 3]), String.valueOf(raw[i + 4])));
+            i += 5;
         }
         return list;
+    }
+
+    /** 下拉选择字段：type=select，options 为可选值（值即展示文本） */
+    private static ConnectorField select(String key, String label, boolean required,
+                                         String placeholder, String... options) {
+        return new ConnectorField(key, label, required, placeholder, "select", List.of(options));
     }
 
     /** 单个连接参数字段的表单描述 */
@@ -344,13 +391,20 @@ public enum DataSourceKind {
         private final boolean required;
         private final String placeholder;
         private final String type;
+        private final List<String> options;
 
         public ConnectorField(String key, String label, boolean required, String placeholder, String type) {
+            this(key, label, required, placeholder, type, List.of());
+        }
+
+        public ConnectorField(String key, String label, boolean required, String placeholder, String type,
+                              List<String> options) {
             this.key = key;
             this.label = label;
             this.required = required;
             this.placeholder = placeholder;
             this.type = type;
+            this.options = options == null ? List.of() : options;
         }
 
         public String getKey() {
@@ -371,6 +425,10 @@ public enum DataSourceKind {
 
         public String getType() {
             return type;
+        }
+
+        public List<String> getOptions() {
+            return options;
         }
     }
 }

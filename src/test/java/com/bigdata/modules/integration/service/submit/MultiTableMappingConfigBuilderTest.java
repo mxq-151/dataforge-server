@@ -30,6 +30,13 @@ class MultiTableMappingConfigBuilderTest {
             new ColumnDef("amount", "DECIMAL(18,2)"),
             new ColumnDef("etl_time", "TIMESTAMP(3)"));
 
+    /** 带主键的列清单（Hudi / Iceberg upsert 依赖源表主键） */
+    private static final List<ColumnDef> PK_COLUMNS = List.of(
+            new ColumnDef("id", "BIGINT", true),
+            new ColumnDef("name", "STRING"),
+            new ColumnDef("amount", "DECIMAL(18,2)"),
+            new ColumnDef("etl_time", "TIMESTAMP(3)"));
+
     @Test
     void mysqlCdcGeneratesPerTableSourceWithProjectionAndServerIds() {
         DataIntegrationSubmitter.SubmitContext ctx = context("mysql", mysqlSource(), "kafka", kafkaTarget(),
@@ -689,6 +696,151 @@ class MultiTableMappingConfigBuilderTest {
 
         assertFalse(sql.contains("openlineage."), sql);
         assertFalse(sql.contains("job-status-changed-listeners"), sql);
+    }
+
+    @Test
+    void 文件系统目标端按格式生成压缩参数() {
+        Map<String, Object> hdfs = new LinkedHashMap<>();
+        hdfs.put("path", "hdfs://namenode:8020/dwd");
+        hdfs.put("format", "orc");
+        hdfs.put("compression", "zlib");
+        String orcSql = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hdfs", hdfs,
+                List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1);
+        assertTrue(orcSql.contains("'connector' = 'filesystem'"), orcSql);
+        assertTrue(orcSql.contains("'format' = 'orc'"), orcSql);
+        assertTrue(orcSql.contains("'orc.compress' = 'ZLIB'"), orcSql);
+        assertTrue(orcSql.contains("'path' = 'hdfs://namenode:8020/dwd/orders'"), orcSql);
+
+        Map<String, Object> s3 = new LinkedHashMap<>();
+        s3.put("endpoint", "http://127.0.0.1:9000");
+        s3.put("bucket", "dataforge");
+        s3.put("accessKey", "minioadmin");
+        s3.put("secretKey", "minioadmin");
+        s3.put("format", "parquet");
+        s3.put("compression", "zstd");
+        String parquetSql = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "s3", s3,
+                List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1);
+        assertTrue(parquetSql.contains("'format' = 'parquet'"), parquetSql);
+        assertTrue(parquetSql.contains("'parquet.compression' = 'zstd'"), parquetSql);
+        assertTrue(parquetSql.contains("'s3.endpoint' = 'http://127.0.0.1:9000'"), parquetSql);
+    }
+
+    @Test
+    void avro压缩算法映射为avroCodec() {
+        Map<String, Object> hdfs = new LinkedHashMap<>();
+        hdfs.put("format", "avro");
+        hdfs.put("compression", "zstd");
+        String sql = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hdfs", hdfs,
+                List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1);
+        assertTrue(sql.contains("'avro.codec' = 'zstandard'"), sql);
+    }
+
+    @Test
+    void 未指定压缩算法时沿用文件格式默认值() {
+        Map<String, Object> hdfs = new LinkedHashMap<>();
+        hdfs.put("format", "parquet");
+        String sql = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hdfs", hdfs,
+                List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1);
+        assertTrue(sql.contains("'format' = 'parquet'"), sql);
+        // 不写压缩项，由 Flink / 格式自身使用默认值（parquet 默认 snappy）
+        assertFalse(sql.contains("parquet.compression"), sql);
+    }
+
+    @Test
+    void csv格式允许显式选择不压缩() {
+        Map<String, Object> hdfs = new LinkedHashMap<>();
+        hdfs.put("format", "csv");
+        hdfs.put("compression", "none");
+        String sql = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hdfs", hdfs,
+                List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1);
+        assertTrue(sql.contains("'format' = 'csv'"), sql);
+        // csv 本身不支持压缩选项，none 只是显式声明不压缩
+        assertFalse(sql.contains("compression"), sql);
+    }
+
+    @Test
+    void 文件格式与压缩算法不兼容时拒绝() {
+        Map<String, Object> hdfs = new LinkedHashMap<>();
+        hdfs.put("format", "csv");
+        hdfs.put("compression", "snappy");
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hdfs", hdfs,
+                        List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1));
+        assertEquals(400, error.getCode());
+        assertTrue(error.getMessage().contains("不支持压缩算法"), error.getMessage());
+    }
+
+    @Test
+    void 不支持的文件格式被拒绝() {
+        Map<String, Object> hdfs = new LinkedHashMap<>();
+        hdfs.put("format", "text");
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hdfs", hdfs,
+                        List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1));
+        assertEquals(400, error.getCode());
+        assertTrue(error.getMessage().contains("不支持的文件格式"), error.getMessage());
+    }
+
+    @Test
+    void Hudi目标端生成主键upsert建表() {
+        Map<String, Object> hudi = new LinkedHashMap<>();
+        hudi.put("path", "file:///warehouse/hudi");
+        hudi.put("tableType", "MERGE_ON_READ");
+        hudi.put("precombineField", "etl_time");
+        String sql = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hudi", hudi,
+                List.of(new TableSpec("orders", List.of(), 0, PK_COLUMNS))),
+                new IntegrationClusterProperties.Flink(), 1, 2);
+
+        assertTrue(sql.contains("'connector' = 'hudi'"), sql);
+        assertTrue(sql.contains("'path' = 'file:///warehouse/hudi/orders'"), sql);
+        assertTrue(sql.contains("'table.type' = 'MERGE_ON_READ'"), sql);
+        assertTrue(sql.contains("'write.operation' = 'upsert'"), sql);
+        assertTrue(sql.contains("'hoodie.datasource.write.recordkey.field' = 'id'"), sql);
+        assertTrue(sql.contains("'write.precombine.field' = 'etl_time'"), sql);
+        assertTrue(sql.contains("`id` BIGINT NOT NULL"), sql);
+        assertTrue(sql.contains("PRIMARY KEY (`id`) NOT ENFORCED"), sql);
+        assertTrue(sql.contains("'sink.parallelism' = '2'"), sql);
+    }
+
+    @Test
+    void Iceberg目标端生成v2主键upsert建表() {
+        Map<String, Object> iceberg = new LinkedHashMap<>();
+        iceberg.put("catalogType", "hadoop");
+        iceberg.put("warehouse", "file:///warehouse/iceberg");
+        iceberg.put("database", "dwd");
+        String sql = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "iceberg", iceberg,
+                List.of(new TableSpec("orders", List.of(), 0, PK_COLUMNS))),
+                new IntegrationClusterProperties.Flink(), 1, 2);
+
+        assertTrue(sql.contains("CREATE CATALOG IF NOT EXISTS `iceberg` WITH ("), sql);
+        assertTrue(sql.contains("'type' = 'iceberg'"), sql);
+        assertTrue(sql.contains("'catalog-type' = 'hadoop'"), sql);
+        assertTrue(sql.contains("'warehouse' = 'file:///warehouse/iceberg'"), sql);
+        assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS `iceberg`.`dwd`.`orders`"), sql);
+        assertTrue(sql.contains("`id` BIGINT NOT NULL"), sql);
+        assertTrue(sql.contains("PRIMARY KEY (`id`) NOT ENFORCED"), sql);
+        assertTrue(sql.contains("'format-version' = '2'"), sql);
+        assertTrue(sql.contains("'write.upsert.enabled' = 'true'"), sql);
+        assertTrue(sql.contains("INSERT INTO `iceberg`.`dwd`.`orders` SELECT"), sql);
+    }
+
+    @Test
+    void Hudi和Iceberg缺少主键时拒绝() {
+        Map<String, Object> hudi = new LinkedHashMap<>();
+        hudi.put("path", "file:///warehouse/hudi");
+        BusinessException hudiError = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(context("mysql", mysqlSource(), "hudi", hudi,
+                        List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1));
+        assertEquals(400, hudiError.getCode());
+        assertTrue(hudiError.getMessage().contains("未检测到主键"), hudiError.getMessage());
+
+        Map<String, Object> iceberg = new LinkedHashMap<>();
+        iceberg.put("warehouse", "file:///warehouse/iceberg");
+        BusinessException icebergError = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(context("mysql", mysqlSource(), "iceberg", iceberg,
+                        List.of(table("orders"))), new IntegrationClusterProperties.Flink(), 1, 1));
+        assertEquals(400, icebergError.getCode());
+        assertTrue(icebergError.getMessage().contains("未检测到主键"), icebergError.getMessage());
     }
 
     // ---------------------------------------------------------------- helpers

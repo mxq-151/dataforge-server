@@ -32,6 +32,8 @@ public final class TargetNaming {
     public static final String DEFAULT_HDFS_BASE = "/user/dataforge";
     /** S3 未配置对象前缀时的默认值 */
     public static final String DEFAULT_S3_PREFIX = "dataforge";
+    /** Hudi 未配置仓库路径时的默认前缀 */
+    public static final String DEFAULT_HUDI_BASE = "/user/dataforge/hudi";
 
     private TargetNaming() {
     }
@@ -80,6 +82,14 @@ public final class TargetNaming {
                 String prefix = join(str(config, "path"), DEFAULT_S3_PREFIX);
                 String key = join(prefix, rendered);
                 return "s3://" + bucket + "/" + key;
+            }
+            case HUDI -> {
+                // Hudi 的表目录直接落在仓库路径下，主键 upsert 由 connector 处理
+                return join(basePath(config, DEFAULT_HUDI_BASE), rendered);
+            }
+            case ICEBERG -> {
+                String database = str(config, "database");
+                return (database.isEmpty() ? "default" : database) + "." + rendered;
             }
             case HIVE -> {
                 String database = str(config, "database");

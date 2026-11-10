@@ -90,6 +90,9 @@ public final class FlinkSqlBuilder {
         if (targetKind == DataSourceKind.HIVE) {
             appendHiveCatalog(sql, ctx.getTargetConfig());
         }
+        if (targetKind == DataSourceKind.ICEBERG) {
+            appendIcebergCatalog(sql, ctx.getTargetConfig());
+        }
 
         List<List<ColumnDef>> projections = new ArrayList<>();
         for (int i = 0; i < tables.size(); i++) {
@@ -268,6 +271,17 @@ public final class FlinkSqlBuilder {
         sql.append("\n);\n\n");
     }
 
+    /** Iceberg Catalog：hadoop 模式直接用 warehouse 路径，hive 模式额外接 Metastore URI */
+    private static void appendIcebergCatalog(StringBuilder sql, Map<String, Object> targetConfig) {
+        Map<String, String> options = new LinkedHashMap<>();
+        options.put("type", "iceberg");
+        options.put("catalog-type", defaultValue(str(targetConfig, "catalogType"), "hadoop"));
+        options.put("warehouse", required(targetConfig, "warehouse", "Warehouse 路径"));
+        putIfPresent(options, "uri", str(targetConfig, "uri"));
+        sql.append("CREATE CATALOG IF NOT EXISTS `iceberg` WITH (\n")
+                .append(renderOptions(options)).append(");\n\n");
+    }
+
     /**
      * 作业级数据血缘配置：Flink 2.x 的 JobStatusChangedListener 通过 OpenLineage
      * 把 source / sink 血缘上报到 Marquez，不需要改动同步 SQL 本身。
@@ -337,6 +351,7 @@ public final class FlinkSqlBuilder {
     private static void appendSink(StringBuilder sql, DataSourceKind kind, Map<String, Object> config,
                                    String identifier, List<ColumnDef> columns, String name,
                                    int writeParallelism, String taskCode) {
+        requirePrimaryKeyForUpsertSink(kind, identifier, columns);
         if (kind == DataSourceKind.HIVE) {
             String database = identifier.substring(0, identifier.indexOf('.'));
             String table = identifier.substring(identifier.indexOf('.') + 1);
@@ -350,20 +365,48 @@ public final class FlinkSqlBuilder {
             sql.append(") WITH (\n").append(renderOptions(options)).append(");\n\n");
             return;
         }
+        if (kind == DataSourceKind.ICEBERG) {
+            // Iceberg 必须通过 Catalog 建表：format-version=2 + 主键 upsert 才能消费 CDC 的 -U/+U/-D
+            String database = identifier.substring(0, identifier.indexOf('.'));
+            String table = identifier.substring(identifier.indexOf('.') + 1);
+            sql.append("CREATE TABLE IF NOT EXISTS `iceberg`.").append(SqlDialect.FLINK.quote(database))
+                    .append('.').append(SqlDialect.FLINK.quote(table)).append(" (\n");
+            appendColumns(sql, columns, true);
+            Map<String, String> options = new LinkedHashMap<>();
+            options.put("format-version", "2");
+            options.put("write.upsert.enabled", "true");
+            options.put("sink.parallelism", String.valueOf(writeParallelism));
+            sql.append(") WITH (\n").append(renderOptions(options)).append(");\n\n");
+            return;
+        }
         sql.append("CREATE TABLE `").append(name).append("` (\n");
         appendColumns(sql, columns, kind.supportsUpsertSink());
         sql.append(") WITH (\n")
-                .append(renderOptions(sinkOptions(kind, config, identifier, writeParallelism, taskCode)))
+                .append(renderOptions(sinkOptions(kind, config, identifier, columns, writeParallelism, taskCode)))
                 .append(");\n\n");
+    }
+
+    /** Hudi / Iceberg 依靠源表主键做 upsert；没有主键（或被排除）时直接拒绝，避免生成无法消费 changelog 的作业 */
+    private static void requirePrimaryKeyForUpsertSink(DataSourceKind kind, String identifier, List<ColumnDef> columns) {
+        if (kind != DataSourceKind.HUDI && kind != DataSourceKind.ICEBERG) {
+            return;
+        }
+        boolean hasPrimaryKey = columns.stream().anyMatch(ColumnDef::isPrimaryKey);
+        if (!hasPrimaryKey) {
+            throw new BusinessException(400, "目标端 " + kind.getLabel() + " 依赖源表主键做 upsert，"
+                    + "但表「" + identifier + "」未检测到主键（或主键列被排除），无法消费 CDC 的更新/删除流");
+        }
     }
 
     private static String insertStatement(DataSourceKind kind, String identifier, List<ColumnDef> columns,
                                           int index, String where) {
         String targetName;
-        if (kind == DataSourceKind.HIVE) {
+        if (kind == DataSourceKind.HIVE || kind == DataSourceKind.ICEBERG) {
+            String catalog = kind == DataSourceKind.HIVE ? "hive" : "iceberg";
             String database = identifier.substring(0, identifier.indexOf('.'));
             String table = identifier.substring(identifier.indexOf('.') + 1);
-            targetName = "`hive`." + SqlDialect.FLINK.quote(database) + "." + SqlDialect.FLINK.quote(table);
+            targetName = "`" + catalog + "`." + SqlDialect.FLINK.quote(database)
+                    + "." + SqlDialect.FLINK.quote(table);
         } else {
             targetName = "`snk_" + index + "`";
         }
@@ -383,6 +426,10 @@ public final class FlinkSqlBuilder {
             sql.append("  `").append(column.getName()).append("` ").append(column.getFlinkType());
             if (column.isPrimaryKey()) {
                 primaryKeys.add(column.getName());
+                if (withPrimaryKey) {
+                    // Iceberg 的 identifier field 必须非空；upsert sink 的主键列也应显式声明 NOT NULL
+                    sql.append(" NOT NULL");
+                }
             }
             boolean last = i == columns.size() - 1;
             boolean primaryKeyLine = withPrimaryKey && !primaryKeys.isEmpty();
@@ -486,7 +533,8 @@ public final class FlinkSqlBuilder {
     }
 
     private static Map<String, String> sinkOptions(DataSourceKind kind, Map<String, Object> c,
-                                                   String identifier, int writeParallelism, String taskCode) {
+                                                   String identifier, List<ColumnDef> columns,
+                                                   int writeParallelism, String taskCode) {
         Map<String, String> options = new LinkedHashMap<>();
         switch (kind) {
             case MYSQL, POSTGRESQL -> {
@@ -525,17 +573,27 @@ public final class FlinkSqlBuilder {
                 options.put("connector", "filesystem");
                 // 目标标识已由 TargetNaming 拼上基础路径（base + 模板），此处直接使用避免重复拼接
                 options.put("path", identifier);
-                options.put("format", defaultValue(str(c, "format"), "parquet"));
+                // 文件格式 + 压缩算法（parquet.compression / orc.compress / avro.codec）
+                options.putAll(FileSinkOptions.resolve(c));
             }
             case S3 -> {
                 options.put("connector", "filesystem");
                 // 目标标识已包含 s3://bucket/prefix/模板 的完整路径，这里只做必填校验
                 required(c, "bucket", "Bucket");
                 options.put("path", identifier);
-                options.put("format", defaultValue(str(c, "format"), "parquet"));
+                options.putAll(FileSinkOptions.resolve(c));
                 putIfPresent(options, "s3.endpoint", str(c, "endpoint"));
                 putIfPresent(options, "s3.access-key", str(c, "accessKey"));
                 putIfPresent(options, "s3.secret-key", str(c, "secretKey"));
+            }
+            case HUDI -> {
+                options.put("connector", "hudi");
+                options.put("path", identifier);
+                options.put("table.type", defaultValue(str(c, "tableType"), "MERGE_ON_READ"));
+                // 主键 upsert：Hudi 按 recordkey 合并，可消费 CDC 的 -U/+U/-D
+                options.put("write.operation", "upsert");
+                options.put("hoodie.datasource.write.recordkey.field", primaryKeyNames(columns));
+                putIfPresent(options, "write.precombine.field", str(c, "precombineField"));
             }
             case ELASTICSEARCH -> {
                 options.put("connector", defaultValue(str(c, "connector"), "elasticsearch-7"));
@@ -548,6 +606,14 @@ public final class FlinkSqlBuilder {
         }
         options.put("sink.parallelism", String.valueOf(Math.max(1, writeParallelism)));
         return options;
+    }
+
+    /** 源表主键列名，逗号分隔（Hudi recordkey 支持多字段组合） */
+    private static String primaryKeyNames(List<ColumnDef> columns) {
+        return columns.stream()
+                .filter(ColumnDef::isPrimaryKey)
+                .map(ColumnDef::getName)
+                .collect(Collectors.joining(","));
     }
 
     /** JDBC 目标可选 schema 前缀：schema 存在时写成 schema.table */

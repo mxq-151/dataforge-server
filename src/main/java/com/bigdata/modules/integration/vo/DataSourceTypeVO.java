@@ -69,16 +69,24 @@ public class DataSourceTypeVO {
         private boolean required;
         private String placeholder;
         private String type;
+        /** type=select 时的可选值 */
+        private List<String> options;
 
         public FieldVO() {
         }
 
         public FieldVO(String key, String label, boolean required, String placeholder, String type) {
+            this(key, label, required, placeholder, type, List.of());
+        }
+
+        public FieldVO(String key, String label, boolean required, String placeholder, String type,
+                       List<String> options) {
             this.key = key;
             this.label = label;
             this.required = required;
             this.placeholder = placeholder;
             this.type = type;
+            this.options = options == null ? List.of() : options;
         }
 
         public String getKey() {
@@ -119,6 +127,14 @@ public class DataSourceTypeVO {
 
         public void setType(String type) {
             this.type = type;
+        }
+
+        public List<String> getOptions() {
+            return options;
+        }
+
+        public void setOptions(List<String> options) {
+            this.options = options;
         }
     }
 }
