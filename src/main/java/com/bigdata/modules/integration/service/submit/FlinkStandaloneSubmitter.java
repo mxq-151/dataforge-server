@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -44,6 +45,10 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
     private static final Logger log = LoggerFactory.getLogger(FlinkStandaloneSubmitter.class);
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
     private static final String SQL_CLIENT = "sql-client";
+    /** 数据集成要求的最低 Flink 版本：原生作业血缘接口（FLIP-314）依赖 Flink 2.x */
+    private static final String DEFAULT_MIN_FLINK_VERSION = "2.2.0";
+    /** 数据血缘 Agent：需要位于 Flink 的 classpath（$FLINK_HOME/lib） */
+    private static final String LINEAGE_JAR_PATTERN = "openlineage-flink-*.jar";
 
     @Autowired
     private IntegrationClusterProperties properties;
@@ -59,12 +64,15 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
     @Override
     public SubmitResult submit(SubmitContext context) {
         IntegrationClusterProperties.Flink config = properties.getFlink();
+        String bin = resolveSubmitBin(config);
+        checkFlinkVersion(config);
+        checkLineage(config, context);
+
         int readParallelism = resolveParallelism(context.getReadParallelism(), config.getDefaultParallelism());
         int writeParallelism = resolveParallelism(context.getWriteParallelism(), config.getDefaultParallelism());
         String sql = FlinkSqlBuilder.build(context, config, readParallelism, writeParallelism);
         context.setGeneratedConfig(sql);
 
-        String bin = resolveSubmitBin(config);
         Path workDir = resolveWorkDir(config);
         Path sqlFile = workDir.resolve("dataforge-" + safeName(context.getTaskCode()) + "-"
                 + LocalDateTime.now().format(TS) + ".sql");
@@ -246,6 +254,109 @@ public class FlinkStandaloneSubmitter implements DataIntegrationSubmitter {
             return List.of();
         }
         return List.of("-m", uri.getPort() > 0 ? uri.getHost() + ":" + uri.getPort() : uri.getHost());
+    }
+
+    /**
+     * 校验 Flink 版本：数据集成生成的作业依赖 Flink 2.x 的原生作业血缘接口（FLIP-314），
+     * 版本从安装目录的 lib/flink-dist-*.jar 读取，低于要求时直接拒绝提交。
+     */
+    private void checkFlinkVersion(IntegrationClusterProperties.Flink config) {
+        String raw = isBlank(config.getMinVersion())
+                ? DEFAULT_MIN_FLINK_VERSION : config.getMinVersion().trim();
+        FlinkVersion required = FlinkVersion.parse(raw);
+        if (required == null) {
+            throw new BusinessException(503, "integration.flink.min-version 不是合法版本号: " + raw);
+        }
+        Path home = resolveFlinkHome(config);
+        FlinkVersion actual = FlinkVersion.detect(home);
+        if (actual == null) {
+            throw new BusinessException(503, "无法确认 Flink 版本：未在 "
+                    + (home == null ? "Flink 安装目录" : home) + " 的 lib 下找到 flink-dist-*.jar。"
+                    + "数据集成要求 Flink " + required + " 及以上，请检查 integration.flink.home");
+        }
+        if (!actual.isAtLeast(required)) {
+            throw new BusinessException(503, "数据集成要求 Flink " + required + " 及以上，当前版本为 "
+                    + actual + "（" + home + "），请升级 Flink 后再提交");
+        }
+    }
+
+    /** 数据血缘校验：项目编码（namespace）、上报地址与 openlineage-flink jar 缺一不可 */
+    private void checkLineage(IntegrationClusterProperties.Flink config,
+                              DataIntegrationSubmitter.SubmitContext context) {
+        IntegrationClusterProperties.Lineage lineage = config.getLineage();
+        if (lineage == null || !lineage.isEnabled()) {
+            return;
+        }
+        String namespace = context.getProjectCode() == null ? "" : context.getProjectCode().trim();
+        if (namespace.isEmpty()) {
+            throw new BusinessException(400,
+                    "任务缺少所属项目，无法确定数据血缘 namespace；请编辑任务选择项目后重新上线");
+        }
+        if (isBlank(lineage.getTransportUrl())) {
+            throw new BusinessException(503,
+                    "已启用数据血缘但未配置上报地址（integration.flink.lineage.transport-url）");
+        }
+        Path jar = resolveLineageJar(config);
+        log.info("数据集成作业将携带数据血缘: task={}, jar={}, transport={}, namespace={}(项目编码)",
+                context.getTaskCode(), jar, lineage.getTransportUrl().trim(), namespace);
+    }
+
+    private Path resolveLineageJar(IntegrationClusterProperties.Flink config) {
+        String explicit = config.getLineage().getJar();
+        if (!isBlank(explicit)) {
+            Path path = Paths.get(explicit.trim());
+            if (!Files.isRegularFile(path)) {
+                throw new BusinessException(503, "数据血缘 jar 不存在或不可读: " + path
+                        + "（integration.flink.lineage.jar）");
+            }
+            return path;
+        }
+        Path home = resolveFlinkHome(config);
+        Path found = home == null ? null : findLineageJar(home.resolve("lib"));
+        if (found == null) {
+            throw new BusinessException(503, "未找到数据血缘 Agent（" + LINEAGE_JAR_PATTERN
+                    + "）：请把 openlineage-flink jar 放入 "
+                    + (home == null ? "{flink.home}/lib" : home.resolve("lib"))
+                    + "，或配置 integration.flink.lineage.jar");
+        }
+        return found;
+    }
+
+    private Path findLineageJar(Path lib) {
+        if (!Files.isDirectory(lib)) {
+            return null;
+        }
+        Path selected = null;
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(lib, LINEAGE_JAR_PATTERN)) {
+            for (Path jar : stream) {
+                if (selected == null || jar.getFileName().toString()
+                        .compareTo(selected.getFileName().toString()) > 0) {
+                    selected = jar;
+                }
+            }
+        } catch (IOException e) {
+            return null;
+        }
+        return selected;
+    }
+
+    /** 本地 Flink 安装目录：优先 integration.flink.home，其次由提交 / 管理命令的 bin 目录上溯（解析软链） */
+    private Path resolveFlinkHome(IntegrationClusterProperties.Flink config) {
+        if (!isBlank(config.getHome())) {
+            return Paths.get(config.getHome().trim()).toAbsolutePath().normalize();
+        }
+        String bin = !isBlank(config.getSubmitBin()) ? config.getSubmitBin() : config.getManageBin();
+        if (isBlank(bin)) {
+            return null;
+        }
+        try {
+            Path real = Paths.get(bin.trim()).toRealPath();
+            Path binDir = real.getParent();
+            Path candidate = binDir == null ? null : binDir.getParent();
+            return candidate != null && Files.isDirectory(candidate.resolve("lib")) ? candidate : null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     private String resolveSubmitBin(IntegrationClusterProperties.Flink config) {

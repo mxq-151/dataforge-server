@@ -33,6 +33,8 @@ public interface DataIntegrationSubmitter {
         private final Long taskId;
         private final String taskName;
         private final String taskCode;
+        /** 所属项目编码：数据血缘的作业 namespace，提交时必须非空 */
+        private final String projectCode;
         private final String jobMode;
         private final String sourceType;
         private final Map<String, Object> sourceConfig;
@@ -47,7 +49,7 @@ public interface DataIntegrationSubmitter {
         /** 本次生成的作业配置（Flink CDC SQL），失败时也用于落日志 */
         private String generatedConfig;
 
-        public SubmitContext(Long taskId, String taskName, String taskCode, String jobMode,
+        public SubmitContext(Long taskId, String taskName, String taskCode, String projectCode, String jobMode,
                              String sourceType, Map<String, Object> sourceConfig,
                              String targetType, Map<String, Object> targetConfig,
                              List<TableSpec> tables, Map<String, Object> extraParams,
@@ -55,6 +57,7 @@ public interface DataIntegrationSubmitter {
             this.taskId = taskId;
             this.taskName = taskName;
             this.taskCode = taskCode;
+            this.projectCode = projectCode;
             this.jobMode = jobMode;
             this.sourceType = sourceType;
             this.sourceConfig = sourceConfig == null ? new LinkedHashMap<>() : sourceConfig;
@@ -76,6 +79,10 @@ public interface DataIntegrationSubmitter {
 
         public String getTaskCode() {
             return taskCode;
+        }
+
+        public String getProjectCode() {
+            return projectCode;
         }
 
         public String getJobMode() {

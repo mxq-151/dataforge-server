@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.utils.SecurityUtils;
+import com.bigdata.modules.development.entity.DevProject;
+import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.integration.dto.IntegrationParamsDTO;
 import com.bigdata.modules.integration.dto.IntegrationTableDTO;
 import com.bigdata.modules.integration.dto.IntegrationTaskDTO;
@@ -50,6 +52,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -88,6 +91,10 @@ public class IntegrationTaskService {
     @Autowired
     private ClusterSubmitterFactory submitterFactory;
 
+    /** 项目主数据与「开发助手」共用同一张 dev_project 表，不另建项目表 */
+    @Autowired
+    private DevProjectMapper devProjectMapper;
+
     // ---------------------------------------------------------------- CRUD
 
     public Page<IntegrationTaskVO> page(int current, int size, String keyword, String status,
@@ -110,15 +117,16 @@ public class IntegrationTaskService {
         Page<IntegrationTaskVO> voPage = new Page<>(result.getCurrent(), result.getSize(), result.getTotal());
         List<Long> ids = result.getRecords().stream().map(IntegrationTask::getId).collect(Collectors.toList());
         Map<Long, List<IntegrationTaskTable>> tableMap = loadTables(ids);
+        Map<Long, String> projectNames = loadProjectNames(result.getRecords());
         voPage.setRecords(result.getRecords().stream()
-                .map(task -> toVO(task, tableMap.get(task.getId())))
+                .map(task -> toVO(task, tableMap.get(task.getId()), projectNames))
                 .collect(Collectors.toList()));
         return voPage;
     }
 
     public IntegrationTaskVO detail(Long id) {
         IntegrationTask task = requireTask(id);
-        return toVO(task, tablesOf(id));
+        return toVO(task, tablesOf(id), loadProjectNames(List.of(task)));
     }
 
     @Transactional
@@ -136,7 +144,7 @@ public class IntegrationTaskService {
         task.setCreateBy(SecurityUtils.getCurrentUserId());
         taskMapper.insert(task);
         persistTables(task.getId(), normalizedTables);
-        return toVO(task, tablesOf(task.getId()));
+        return toVO(task, tablesOf(task.getId()), loadProjectNames(List.of(task)));
     }
 
     @Transactional
@@ -163,7 +171,8 @@ public class IntegrationTaskService {
         tableMapper.delete(new LambdaQueryWrapper<IntegrationTaskTable>()
                 .eq(IntegrationTaskTable::getTaskId, task.getId()));
         persistTables(task.getId(), normalizedTables);
-        return toVO(requireTask(task.getId()), tablesOf(task.getId()));
+        IntegrationTask saved = requireTask(task.getId());
+        return toVO(saved, tablesOf(task.getId()), loadProjectNames(List.of(saved)));
     }
 
     @Transactional
@@ -194,7 +203,8 @@ public class IntegrationTaskService {
             task.setWriteParallelism(dto.getWriteParallelism());
         }
         taskMapper.updateById(task);
-        return toVO(requireTask(id), tablesOf(id));
+        IntegrationTask saved = requireTask(id);
+        return toVO(saved, tablesOf(id), loadProjectNames(List.of(saved)));
     }
 
     // ------------------------------------------------------- 上线 / 下线 / 状态
@@ -207,6 +217,8 @@ public class IntegrationTaskService {
                 throw new BusinessException(409, "任务当前状态为「" + current.getLabel()
                         + "」，不可重复上线；如需变更参数请先下线");
             }
+            // 上线前刷新项目编码：项目改编码后，下一次上线即用新编码作为血缘 namespace
+            refreshProjectForSubmit(task);
             if (overrides != null) {
                 if (overrides.getExtraParams() != null) {
                     task.setExtraParams(toJson(overrides.getExtraParams()));
@@ -516,6 +528,7 @@ public class IntegrationTaskService {
     }
 
     private void applyDto(IntegrationTask task, IntegrationTaskDTO dto) {
+        applyProject(task, dto);
         task.setTaskName(dto.getTaskName());
         task.setDescription(dto.getDescription() == null ? "" : dto.getDescription());
         task.setSourceType(dto.getSourceType());
@@ -543,13 +556,70 @@ public class IntegrationTaskService {
         }
     }
 
+    /**
+     * 项目为必填：保存时按 project_id 回查 dev_project 并冗余写入当前 project_code。
+     * 历史任务允许 project_id 为空地读取，但编辑保存与上线都会强制补齐。
+     */
+    private void applyProject(IntegrationTask task, IntegrationTaskDTO dto) {
+        if (dto.getProjectId() == null) {
+            throw new BusinessException(400, "请选择所属项目");
+        }
+        DevProject project = devProjectMapper.selectById(dto.getProjectId());
+        if (project == null) {
+            throw new BusinessException(400, "所选项目不存在: " + dto.getProjectId());
+        }
+        if (!isNotBlank(project.getProjectCode())) {
+            throw new BusinessException(400, "项目「" + project.getProjectName() + "」未维护项目编码，"
+                    + "无法作为数据血缘 namespace，请先在项目管理中补充项目编码");
+        }
+        task.setProjectId(project.getId());
+        task.setProjectCode(project.getProjectCode().trim());
+    }
+
+    /**
+     * 上线前校验并刷新项目编码，返回实际使用的 namespace（项目编码）。
+     * 历史任务缺少项目、项目被删除或未维护编码时直接拒绝，避免血缘落到空 namespace / 固定值上。
+     */
+    private void refreshProjectForSubmit(IntegrationTask task) {
+        if (task.getProjectId() == null) {
+            throw new BusinessException(400,
+                    "任务未设置所属项目，无法上线；请编辑任务选择项目并保存后重试");
+        }
+        DevProject project = devProjectMapper.selectById(task.getProjectId());
+        if (project == null) {
+            throw new BusinessException(400, "任务所属项目不存在（id=" + task.getProjectId()
+                    + "），请编辑任务重新选择项目并保存");
+        }
+        if (!isNotBlank(project.getProjectCode())) {
+            throw new BusinessException(400, "项目「" + project.getProjectName() + "」未维护项目编码，"
+                    + "无法作为数据血缘 namespace，请先在项目管理中补充项目编码");
+        }
+        task.setProjectId(project.getId());
+        task.setProjectCode(project.getProjectCode().trim());
+    }
+
+    private Map<Long, String> loadProjectNames(List<IntegrationTask> tasks) {
+        Set<Long> projectIds = tasks.stream()
+                .map(IntegrationTask::getProjectId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (projectIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> names = new LinkedHashMap<>();
+        for (DevProject project : devProjectMapper.selectBatchIds(projectIds)) {
+            names.put(project.getId(), project.getProjectName());
+        }
+        return names;
+    }
+
     private DataIntegrationSubmitter.SubmitContext buildContext(IntegrationTask task) {
         List<TableSpec> tables = tablesOf(task.getId()).stream()
                 .map(t -> new TableSpec(t.getSourceTable(), splitColumns(t.getExcludeColumns()),
                         t.getSortNo() == null ? 0 : t.getSortNo()))
                 .collect(Collectors.toList());
         return new DataIntegrationSubmitter.SubmitContext(
-                task.getId(), task.getTaskName(), task.getTaskCode(), task.getJobMode(),
+                task.getId(), task.getTaskName(), task.getTaskCode(), task.getProjectCode(), task.getJobMode(),
                 task.getSourceType(), fromJson(task.getSourceConfig()),
                 task.getTargetType(), fromJson(task.getTargetConfig()),
                 tables, fromJson(task.getExtraParams()),
@@ -603,6 +673,8 @@ public class IntegrationTaskService {
                 .eq(IntegrationTask::getId, task.getId())
                 .set(IntegrationTask::getStatus, task.getStatus())
                 .set(IntegrationTask::getJobId, task.getJobId())
+                .set(IntegrationTask::getProjectId, task.getProjectId())
+                .set(IntegrationTask::getProjectCode, task.getProjectCode())
                 .set(IntegrationTask::getLastSubmitTime, task.getLastSubmitTime())
                 .set(IntegrationTask::getLastOfflineTime, task.getLastOfflineTime())
                 .set(IntegrationTask::getLastError, task.getLastError())
@@ -618,6 +690,9 @@ public class IntegrationTaskService {
         entity.setJobId(jobId);
         entity.setResultStatus(resultStatus);
         Map<String, Object> snapshot = new LinkedHashMap<>();
+        // 血缘 namespace 来源：任务所属项目的编码快照
+        snapshot.put("projectId", task.getProjectId());
+        snapshot.put("projectCode", task.getProjectCode());
         snapshot.put("sourceType", task.getSourceType());
         snapshot.put("sourceConfig", fromJson(task.getSourceConfig()));
         snapshot.put("targetType", task.getTargetType());
@@ -662,12 +737,17 @@ public class IntegrationTaskService {
         return vo;
     }
 
-    private IntegrationTaskVO toVO(IntegrationTask task, List<IntegrationTaskTable> tables) {
+    private IntegrationTaskVO toVO(IntegrationTask task, List<IntegrationTaskTable> tables,
+                                   Map<Long, String> projectNames) {
         IntegrationTaskVO vo = new IntegrationTaskVO();
         vo.setId(task.getId());
         vo.setTaskName(task.getTaskName());
         vo.setTaskCode(task.getTaskCode());
         vo.setDescription(task.getDescription());
+        vo.setProjectId(task.getProjectId());
+        vo.setProjectCode(task.getProjectCode());
+        // 项目被删除时仍返回编码快照，历史任务在列表/详情中可辨认
+        vo.setProjectName(task.getProjectId() == null ? null : projectNames.get(task.getProjectId()));
         vo.setSourceType(task.getSourceType());
         vo.setSourceTypeLabel(labelOfSource(task.getSourceType()));
         vo.setSourceConfig(visibleConfig(task.getSourceType(), fromJson(task.getSourceConfig()), true));

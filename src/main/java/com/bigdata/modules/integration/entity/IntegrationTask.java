@@ -18,6 +18,11 @@ public class IntegrationTask extends BaseEntity {
     private String taskCode;
     private String description;
 
+    /** 所属项目 ID（dev_project.id）；历史任务为空 */
+    private Long projectId;
+    /** 所属项目编码快照（来自 dev_project.project_code），上线时作为数据血缘 namespace */
+    private String projectCode;
+
     private String sourceType;
     private String sourceConfig;
 
@@ -68,6 +73,22 @@ public class IntegrationTask extends BaseEntity {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getProjectId() {
+        return projectId;
+    }
+
+    public void setProjectId(Long projectId) {
+        this.projectId = projectId;
+    }
+
+    public String getProjectCode() {
+        return projectCode;
+    }
+
+    public void setProjectCode(String projectCode) {
+        this.projectCode = projectCode;
     }
 
     public String getSourceType() {

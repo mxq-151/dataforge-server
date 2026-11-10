@@ -553,6 +553,52 @@ CALL df_sync_add_column('table_metadata', 'asset_level', 'varchar(16) DEFAULT NU
 CALL df_sync_add_column('table_metadata', 'create_by', 'bigint DEFAULT NULL', '创建人');
 CALL df_sync_add_column('table_metadata', 'create_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP', '创建时间');
 CALL df_sync_add_column('table_metadata', 'update_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP', '更新时间');
+CALL df_sync_add_column('integration_task', 'id', 'bigint NOT NULL AUTO_INCREMENT', '主键ID');
+CALL df_sync_add_column('integration_task', 'task_name', 'varchar(200) NOT NULL', '任务名称');
+CALL df_sync_add_column('integration_task', 'task_code', 'varchar(100) NOT NULL', '任务编码');
+CALL df_sync_add_column('integration_task', 'description', 'varchar(500) DEFAULT NULL', '描述');
+CALL df_sync_add_column('integration_task', 'project_id', 'bigint DEFAULT NULL', '所属项目ID(dev_project.id)');
+CALL df_sync_add_column('integration_task', 'project_code', 'varchar(100) DEFAULT NULL', '所属项目编码快照，上线时作为数据血缘 namespace');
+CALL df_sync_add_column('integration_task', 'source_type', 'varchar(50) NOT NULL', '源端类型(mysql/postgresql，Flink CDC)');
+CALL df_sync_add_column('integration_task', 'source_config', 'text', '源端连接参数(JSON)');
+CALL df_sync_add_column('integration_task', 'target_type', 'varchar(50) NOT NULL', '目标端类型');
+CALL df_sync_add_column('integration_task', 'target_config', 'text', '目标端连接参数(JSON)，可含命名模板 nameTemplate');
+CALL df_sync_add_column('integration_task', 'cluster_type', 'varchar(50) NOT NULL', '运行集群(flink-standalone，任务统一为 Flink CDC)');
+CALL df_sync_add_column('integration_task', 'read_parallelism', 'int NOT NULL DEFAULT ''1''', '读并行度');
+CALL df_sync_add_column('integration_task', 'write_parallelism', 'int NOT NULL DEFAULT ''1''', '写并行度');
+CALL df_sync_add_column('integration_task', 'job_mode', 'varchar(20) NOT NULL DEFAULT ''BATCH''', '作业模式(BATCH/STREAM)');
+CALL df_sync_add_column('integration_task', 'trigger_type', 'varchar(20) NOT NULL DEFAULT ''MANUAL''', '触发方式(MANUAL/CRON)');
+CALL df_sync_add_column('integration_task', 'trigger_config', 'varchar(500) DEFAULT NULL', '调度配置');
+CALL df_sync_add_column('integration_task', 'extra_params', 'text', '额外透传参数(JSON)');
+CALL df_sync_add_column('integration_task', 'status', 'varchar(20) NOT NULL DEFAULT ''DRAFT''', '状态(DRAFT/PUBLISHED/RUNNING/FAILED/OFFLINE)');
+CALL df_sync_add_column('integration_task', 'job_id', 'varchar(200) DEFAULT NULL', '集群返回的作业ID');
+CALL df_sync_add_column('integration_task', 'last_submit_time', 'datetime DEFAULT NULL', '最后上线时间');
+CALL df_sync_add_column('integration_task', 'last_offline_time', 'datetime DEFAULT NULL', '最后下线时间');
+CALL df_sync_add_column('integration_task', 'last_error', 'varchar(500) DEFAULT NULL', '最后一次失败原因');
+CALL df_sync_add_column('integration_task', 'create_by', 'bigint DEFAULT NULL', '创建人');
+CALL df_sync_add_column('integration_task', 'create_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP', '创建时间');
+CALL df_sync_add_column('integration_task', 'update_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP', '更新时间');
+CALL df_sync_add_column('integration_task_table', 'id', 'bigint NOT NULL AUTO_INCREMENT', '主键ID');
+CALL df_sync_add_column('integration_task_table', 'task_id', 'bigint NOT NULL', '任务ID');
+CALL df_sync_add_column('integration_task_table', 'source_table', 'varchar(200) NOT NULL', '源表(库.表)');
+CALL df_sync_add_column('integration_task_table', 'exclude_columns', 'varchar(2000) DEFAULT NULL', '排除字段(逗号分隔)');
+CALL df_sync_add_column('integration_task_table', 'sort_no', 'int NOT NULL DEFAULT ''0''', '排序号');
+CALL df_sync_add_column('integration_task_table', 'create_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP', '创建时间');
+CALL df_sync_add_column('integration_task_table', 'update_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP', '更新时间');
+CALL df_sync_add_column('integration_submit_log', 'id', 'bigint NOT NULL AUTO_INCREMENT', '主键ID');
+CALL df_sync_add_column('integration_submit_log', 'task_id', 'bigint NOT NULL', '任务ID');
+CALL df_sync_add_column('integration_submit_log', 'action', 'varchar(20) NOT NULL', '操作(SUBMIT/OFFLINE/STATUS)');
+CALL df_sync_add_column('integration_submit_log', 'cluster_type', 'varchar(50) DEFAULT NULL', '运行集群');
+CALL df_sync_add_column('integration_submit_log', 'job_id', 'varchar(200) DEFAULT NULL', '集群作业ID');
+CALL df_sync_add_column('integration_submit_log', 'result_status', 'varchar(20) NOT NULL', '结果(SUCCESS/FAILED)');
+CALL df_sync_add_column('integration_submit_log', 'params_snapshot', 'text', '本次提交生效的参数快照(JSON)');
+CALL df_sync_add_column('integration_submit_log', 'log_content', 'longtext', '生成的作业配置与集群返回内容');
+CALL df_sync_add_column('integration_submit_log', 'error_message', 'varchar(1000) DEFAULT NULL', '失败原因');
+CALL df_sync_add_column('integration_submit_log', 'operator_id', 'bigint DEFAULT NULL', '操作人ID');
+CALL df_sync_add_column('integration_submit_log', 'operator_name', 'varchar(100) DEFAULT NULL', '操作人');
+CALL df_sync_add_column('integration_submit_log', 'duration_ms', 'bigint DEFAULT NULL', '耗时(毫秒)');
+CALL df_sync_add_column('integration_submit_log', 'create_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP', '创建时间');
+CALL df_sync_add_column('integration_submit_log', 'update_time', 'datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP', '更新时间');
 
 CALL df_sync_add_index('asset_category', 'uk_asset_category_code', 1, '`category_code`');
 CALL df_sync_add_index('asset_category', 'idx_asset_category_kind', 0, '`category_kind`');
@@ -642,6 +688,16 @@ CALL df_sync_add_index('table_metadata', 'idx_database_name', 0, '`database_name
 CALL df_sync_add_index('table_metadata', 'idx_table_name', 0, '`table_name`');
 CALL df_sync_add_index('table_metadata', 'idx_table_metadata_owner', 0, '`business_owner`');
 CALL df_sync_add_index('table_metadata', 'idx_table_metadata_category', 0, '`category_code`');
+CALL df_sync_add_index('integration_task', 'uk_integration_task_code', 1, '`task_code`');
+CALL df_sync_add_index('integration_task', 'idx_integration_task_status', 0, '`status`');
+CALL df_sync_add_index('integration_task', 'idx_integration_task_cluster', 0, '`cluster_type`');
+CALL df_sync_add_index('integration_task', 'idx_integration_task_source', 0, '`source_type`');
+CALL df_sync_add_index('integration_task', 'idx_integration_task_target', 0, '`target_type`');
+CALL df_sync_add_index('integration_task', 'idx_integration_task_project', 0, '`project_id`');
+CALL df_sync_add_index('integration_task_table', 'uk_integration_table_source', 1, '`task_id`, `source_table`');
+CALL df_sync_add_index('integration_task_table', 'idx_integration_table_task', 0, '`task_id`');
+CALL df_sync_add_index('integration_submit_log', 'idx_integration_log_task', 0, '`task_id`');
+CALL df_sync_add_index('integration_submit_log', 'idx_integration_log_action', 0, '`action`');
 
 DROP PROCEDURE IF EXISTS df_sync_add_column;
 DROP PROCEDURE IF EXISTS df_sync_add_index;
@@ -1530,11 +1586,14 @@ WHERE NOT EXISTS (SELECT 1 FROM `knowledge_document`);
 -- 数据集成（Data Integration）
 -- 已有库升级：把下面两段 CREATE TABLE 单独执行一次即可（sql.init.mode=never 不会自动执行）
 -- ============================================================
+-- 增量同步：所属项目列由文件头部的 df_sync_add_column 补齐段处理
 CREATE TABLE IF NOT EXISTS `integration_task` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `task_name` varchar(200) NOT NULL COMMENT '任务名称',
   `task_code` varchar(100) NOT NULL COMMENT '任务编码',
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
+  `project_id` bigint DEFAULT NULL COMMENT '所属项目ID(dev_project.id)',
+  `project_code` varchar(100) DEFAULT NULL COMMENT '所属项目编码快照，上线时作为数据血缘 namespace',
   `source_type` varchar(50) NOT NULL COMMENT '源端类型(mysql/postgresql，Flink CDC)',
   `source_config` text COMMENT '源端连接参数(JSON)',
   `target_type` varchar(50) NOT NULL COMMENT '目标端类型',
@@ -1559,7 +1618,8 @@ CREATE TABLE IF NOT EXISTS `integration_task` (
   KEY `idx_integration_task_status` (`status`),
   KEY `idx_integration_task_cluster` (`cluster_type`),
   KEY `idx_integration_task_source` (`source_type`),
-  KEY `idx_integration_task_target` (`target_type`)
+  KEY `idx_integration_task_target` (`target_type`),
+  KEY `idx_integration_task_project` (`project_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='数据集成任务表';
 
 CREATE TABLE IF NOT EXISTS `integration_task_table` (

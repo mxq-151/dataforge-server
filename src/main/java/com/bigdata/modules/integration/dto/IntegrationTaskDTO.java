@@ -2,6 +2,7 @@ package com.bigdata.modules.integration.dto;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -26,6 +27,10 @@ public class IntegrationTaskDTO {
 
     @Size(max = 500, message = "描述不能超过500字符")
     private String description;
+
+    /** 所属项目（dev_project.id），上线时以其 project_code 作为血缘 namespace */
+    @NotNull(message = "请选择所属项目")
+    private Long projectId;
 
     @NotBlank(message = "源端类型不能为空")
     private String sourceType;
@@ -89,6 +94,14 @@ public class IntegrationTaskDTO {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getProjectId() {
+        return projectId;
+    }
+
+    public void setProjectId(Long projectId) {
+        this.projectId = projectId;
     }
 
     public String getSourceType() {

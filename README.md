@@ -161,11 +161,17 @@ curl -X POST http://localhost:8083/api/system/auth/login \
 | `integration.flink.home` / `submit-bin` / `manage-bin` / `work-dir` | Flink 安装目录，以及提交（默认 `bin/sql-client.sh`）与管理（默认 `bin/flink`）可执行文件、生成的 `.sql` 落盘目录 |
 | `integration.flink.submit-args` / `cancel-args` / `status-args` | 参数模板；占位符 `{sqlFile}`、`{jobId}`，提交默认 `-f {sqlFile}`，取消默认 `cancel`，状态默认 `list -r` |
 | `integration.flink.execution-target` / `rest-url` | sql-client 的 `-Dexecution.target`（远端用 `remote`）与 JobManager 地址，用于推导 `-Drest.address/port` 和 `-m host:port` |
+| `integration.flink.min-version` | 数据集成要求的最低 Flink 版本，默认 `2.2.0`；从 `{home}/lib/flink-dist-*.jar` 读取实际版本，低于该版本直接拒绝提交 |
+| `integration.flink.lineage.enabled` / `jar` | 是否随作业提交数据血缘配置；openlineage-flink jar 路径，留空取 `{home}/lib/openlineage-flink-*.jar` |
+| `integration.flink.lineage.transport-url` | OpenLineage 上报地址（默认 `http://127.0.0.1:5000`，即容器内 Marquez）；作业 namespace 取任务所属项目的项目编码，不再使用全局固定值 |
 | `integration.seatunnel.home` / `submit-bin` / `work-dir` | SeaTunnel 安装目录、可执行文件（默认 `bin/seatunnel.sh`）、生成的 `.conf` 落盘目录 |
 | `integration.seatunnel.submit-args` / `cancel-args` / `status-args` | 参数模板；占位符 `{configFile}`、`{jobName}`、`{jobId}`，提交默认 `--config {configFile} -m cluster -n {jobName}` |
 
 行为约定：
 
+- **Flink 版本要求**：数据集成生成的作业使用 Flink 2.x 的原生作业血缘接口（FLIP-314），要求 Flink **2.2.0 及以上**；上线前会校验安装目录 `lib/flink-dist-*.jar` 的版本，不满足直接报错，不会把不兼容作业提交到集群。
+- **数据血缘**：生成的 SQL 会带上 `execution.job-status-changed-listeners` 与 `openlineage.*` 配置，由 OpenLineage 把 source / sink 血缘上报 Marquez。作业 namespace 取任务「所属项目」的 `project_code`，job name 为任务编码，因此同一项目下多个任务可区分；空数据集 namespace 的兜底 resolver 也以项目编码命名。openlineage-flink jar 必须位于 `{flink.home}/lib`（或配置 `integration.flink.lineage.jar`），否则上线直接失败；任务级 `extraParams` 里的同名 SET 项可覆盖默认血缘参数。
+- **所属项目**：数据集成任务必须选择项目（`integration_task.project_id` + `project_code` 快照），项目列表复用开发助手的 `GET /api/development/project/list` 并沿用其 `projectCodes` 可见性规则。历史任务允许空项目读取，但编辑保存与上线会强制补齐；项目编码变更后，任务下次上线使用新编码作为 namespace。
 - **安全**：命令以 argv 列表直接 `exec`，不经过 shell，任务参数中的 `;`、`|`、`$()` 不会被解释；可执行文件路径只来自配置，任务参数无法覆盖。
 - **日志**：命令、退出码、耗时与 stdout / stderr 全部写入提交日志；失败时抛出的错误信息包含命令、退出码与关键输出，成功时从输出解析 jobId 并落库（解析不到会明确提示，不伪造）。
 - **能力边界（命令行做不到的）**：SeaTunnel 2.3.x 客户端没有稳定的状态查询子命令，`status-args` 默认留空，此时状态查询返回明确的「不支持」提示；替代方案是升级客户端后配置 `status-args`，或在集群侧使用 Zeta REST 的 `job-info` / `stop-job`。Flink 的 `flink list` 只能看到会话 / 远端集群上的作业，application 模式需在 `status-args`、`cancel-args` 中补充 `-t yarn-application` 等参数。

@@ -14,6 +14,11 @@ public class IntegrationTaskVO {
     private String taskCode;
     private String description;
 
+    /** 所属项目 */
+    private Long projectId;
+    private String projectCode;
+    private String projectName;
+
     private String sourceType;
     private String sourceTypeLabel;
     private Map<String, Object> sourceConfig;
@@ -78,6 +83,30 @@ public class IntegrationTaskVO {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getProjectId() {
+        return projectId;
+    }
+
+    public void setProjectId(Long projectId) {
+        this.projectId = projectId;
+    }
+
+    public String getProjectCode() {
+        return projectCode;
+    }
+
+    public void setProjectCode(String projectCode) {
+        this.projectCode = projectCode;
+    }
+
+    public String getProjectName() {
+        return projectName;
+    }
+
+    public void setProjectName(String projectName) {
+        this.projectName = projectName;
     }
 
     public String getSourceType() {

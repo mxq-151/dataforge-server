@@ -501,7 +501,53 @@ BEGIN
     ('table_metadata', 'asset_level', 'VARCHAR(16)'),
     ('table_metadata', 'create_by', 'BIGINT'),
     ('table_metadata', 'create_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'),
-    ('table_metadata', 'update_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP')
+    ('table_metadata', 'update_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'),
+    ('integration_task', 'id', 'BIGSERIAL'),
+    ('integration_task', 'task_name', 'VARCHAR(200) NOT NULL'),
+    ('integration_task', 'task_code', 'VARCHAR(100) NOT NULL'),
+    ('integration_task', 'description', 'VARCHAR(500)'),
+    ('integration_task', 'project_id', 'BIGINT'),
+    ('integration_task', 'project_code', 'VARCHAR(100)'),
+    ('integration_task', 'source_type', 'VARCHAR(50) NOT NULL'),
+    ('integration_task', 'source_config', 'TEXT'),
+    ('integration_task', 'target_type', 'VARCHAR(50) NOT NULL'),
+    ('integration_task', 'target_config', 'TEXT'),
+    ('integration_task', 'cluster_type', 'VARCHAR(50) NOT NULL'),
+    ('integration_task', 'read_parallelism', 'INT NOT NULL DEFAULT 1'),
+    ('integration_task', 'write_parallelism', 'INT NOT NULL DEFAULT 1'),
+    ('integration_task', 'job_mode', 'VARCHAR(20) NOT NULL DEFAULT ''BATCH'''),
+    ('integration_task', 'trigger_type', 'VARCHAR(20) NOT NULL DEFAULT ''MANUAL'''),
+    ('integration_task', 'trigger_config', 'VARCHAR(500)'),
+    ('integration_task', 'extra_params', 'TEXT'),
+    ('integration_task', 'status', 'VARCHAR(20) NOT NULL DEFAULT ''DRAFT'''),
+    ('integration_task', 'job_id', 'VARCHAR(200)'),
+    ('integration_task', 'last_submit_time', 'TIMESTAMP'),
+    ('integration_task', 'last_offline_time', 'TIMESTAMP'),
+    ('integration_task', 'last_error', 'VARCHAR(500)'),
+    ('integration_task', 'create_by', 'BIGINT'),
+    ('integration_task', 'create_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'),
+    ('integration_task', 'update_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'),
+    ('integration_task_table', 'id', 'BIGSERIAL'),
+    ('integration_task_table', 'task_id', 'BIGINT NOT NULL'),
+    ('integration_task_table', 'source_table', 'VARCHAR(200) NOT NULL'),
+    ('integration_task_table', 'exclude_columns', 'VARCHAR(2000)'),
+    ('integration_task_table', 'sort_no', 'INT NOT NULL DEFAULT 0'),
+    ('integration_task_table', 'create_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'),
+    ('integration_task_table', 'update_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'),
+    ('integration_submit_log', 'id', 'BIGSERIAL'),
+    ('integration_submit_log', 'task_id', 'BIGINT NOT NULL'),
+    ('integration_submit_log', 'action', 'VARCHAR(20) NOT NULL'),
+    ('integration_submit_log', 'cluster_type', 'VARCHAR(50)'),
+    ('integration_submit_log', 'job_id', 'VARCHAR(200)'),
+    ('integration_submit_log', 'result_status', 'VARCHAR(20) NOT NULL'),
+    ('integration_submit_log', 'params_snapshot', 'TEXT'),
+    ('integration_submit_log', 'log_content', 'TEXT'),
+    ('integration_submit_log', 'error_message', 'VARCHAR(1000)'),
+    ('integration_submit_log', 'operator_id', 'BIGINT'),
+    ('integration_submit_log', 'operator_name', 'VARCHAR(100)'),
+    ('integration_submit_log', 'duration_ms', 'BIGINT'),
+    ('integration_submit_log', 'create_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP'),
+    ('integration_submit_log', 'update_time', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP')
   ) AS t(tbl, col, defn) LOOP
     IF EXISTS (SELECT 1 FROM information_schema.tables
                 WHERE table_schema = current_schema() AND table_name = r.tbl)
@@ -545,7 +591,9 @@ BEGIN
     ('uk_user_id', 'sys_tenant_user', 'UNIQUE (user_id)'),
     ('uk_username', 'sys_user', 'UNIQUE (username)'),
     ('uk_table_storage', 'table_metadata', 'UNIQUE (storage_engine, database_name, table_name)'),
-    ('chk_table_metadata_visibility', 'table_metadata', 'CHECK (visibility IN (''public'',''internal'',''restricted''))')
+    ('chk_table_metadata_visibility', 'table_metadata', 'CHECK (visibility IN (''public'',''internal'',''restricted''))'),
+    ('uk_integration_task_code', 'integration_task', 'UNIQUE (task_code)'),
+    ('uk_integration_table_source', 'integration_task_table', 'UNIQUE (task_id, source_table)')
   ) AS t(cname, tbl, defn) LOOP
     IF r.cname IS NOT NULL
        AND to_regclass(format('%I.%I', current_schema(), r.tbl)) IS NOT NULL
@@ -1547,6 +1595,8 @@ CREATE TABLE IF NOT EXISTS integration_task (
   task_name VARCHAR(200) NOT NULL,
   task_code VARCHAR(100) NOT NULL,
   description VARCHAR(500),
+  project_id BIGINT,
+  project_code VARCHAR(100),
   source_type VARCHAR(50) NOT NULL,
   source_config TEXT,
   target_type VARCHAR(50) NOT NULL,
@@ -1571,6 +1621,7 @@ CREATE TABLE IF NOT EXISTS integration_task (
 );
 CREATE INDEX IF NOT EXISTS idx_integration_task_status ON integration_task (status);
 CREATE INDEX IF NOT EXISTS idx_integration_task_cluster ON integration_task (cluster_type);
+CREATE INDEX IF NOT EXISTS idx_integration_task_project ON integration_task (project_id);
 
 CREATE TABLE IF NOT EXISTS integration_task_table (
   id BIGSERIAL,

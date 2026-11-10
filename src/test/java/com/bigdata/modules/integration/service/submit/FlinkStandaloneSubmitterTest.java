@@ -152,9 +152,128 @@ class FlinkStandaloneSubmitterTest {
         assertFalse(ex.getMessage().contains("java.io.IOException"), ex.getMessage());
     }
 
-    private FlinkStandaloneSubmitter submitter(Path submitBin, Path manageBin, Path workDir) {
+    @Test
+    void 提交的作业SQL带上数据血缘配置(@TempDir Path dir) throws Exception {
+        Path bin = script(dir.resolve("sql-client.sh"),
+                "#!/bin/sh\necho \"Job has been submitted with JobID " + JOB_ID + "\"\nexit 0\n");
+        Path workDir = Files.createDirectories(dir.resolve("work"));
+
+        SubmitResult result = submitter(bin, bin, workDir).submit(context());
+
+        String log = result.getLog();
+        assertTrue(log.contains("execution.job-status-changed-listeners"), log);
+        assertTrue(log.contains("OpenLineageJobStatusChangedListenerFactory"), log);
+        assertTrue(log.contains("openlineage.transport.type"), log);
+        assertTrue(log.contains("openlineage.transport.url"), log);
+        assertTrue(log.contains("http://127.0.0.1:5000"), log);
+        assertTrue(log.contains("openlineage.job.namespace"), log);
+        assertTrue(log.contains("openlineage.job.name"), log);
+        assertTrue(log.contains("SET 'openlineage.job.namespace' = 'order-platform'"), log);
+        assertTrue(log.contains("openlineage.dataset.namespaceResolvers.order-platform.type"), log);
+        assertTrue(log.contains("openlineage.flink.enableDetachedJobTracking"), log);
+        assertTrue(log.contains("order-sync"), log);
+        assertFalse(log.contains("namespaceResolvers.dataforge"), log);
+        // 生成配置里能看到 namespace 来源（项目编码）
+        assertTrue(log.contains("namespace = 项目编码 order-platform"), log);
+    }
+
+    @Test
+    void 任务缺少项目时拒绝提交并提示补齐(@TempDir Path dir) throws Exception {
+        Path bin = script(dir.resolve("sql-client.sh"), "#!/bin/sh\nexit 0\n");
+        Path workDir = Files.createDirectories(dir.resolve("work"));
+
+        FlinkStandaloneSubmitter submitter = submitter(bin, bin, workDir);
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> submitter.submit(context(null)));
+
+        assertEquals(400, ex.getCode());
+        assertTrue(ex.getMessage().contains("所属项目"), ex.getMessage());
+    }
+
+    @Test
+    void 低于要求的Flink版本拒绝提交(@TempDir Path dir) throws Exception {
+        Path bin = script(dir.resolve("sql-client.sh"), "#!/bin/sh\nexit 0\n");
+        Path workDir = Files.createDirectories(dir.resolve("work"));
+        Path home = Files.createDirectories(dir.resolve("flink-home"));
+        Path lib = Files.createDirectories(home.resolve("lib"));
+        Files.createFile(lib.resolve("flink-dist-2.1.3.jar"));
+        Files.createFile(lib.resolve("openlineage-flink-1.55.0.jar"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> submitter(bin, bin, workDir, home).submit(context()));
+
+        assertEquals(503, ex.getCode());
+        assertTrue(ex.getMessage().contains("Flink 2.2.0"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("2.1.3"), ex.getMessage());
+    }
+
+    @Test
+    void 无法识别Flink版本时拒绝提交(@TempDir Path dir) throws Exception {
+        Path bin = script(dir.resolve("sql-client.sh"), "#!/bin/sh\nexit 0\n");
+        Path workDir = Files.createDirectories(dir.resolve("work"));
+        Path home = Files.createDirectories(dir.resolve("flink-home"));
+        Files.createDirectories(home.resolve("lib"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> submitter(bin, bin, workDir, home).submit(context()));
+
+        assertEquals(503, ex.getCode());
+        assertTrue(ex.getMessage().contains("flink-dist"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("integration.flink.home"), ex.getMessage());
+    }
+
+    @Test
+    void 缺少血缘Agent时拒绝提交(@TempDir Path dir) throws Exception {
+        Path bin = script(dir.resolve("sql-client.sh"), "#!/bin/sh\nexit 0\n");
+        Path workDir = Files.createDirectories(dir.resolve("work"));
+        Path home = Files.createDirectories(dir.resolve("flink-home"));
+        Path lib = Files.createDirectories(home.resolve("lib"));
+        Files.createFile(lib.resolve("flink-dist-2.2.0.jar"));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> submitter(bin, bin, workDir, home).submit(context()));
+
+        assertEquals(503, ex.getCode());
+        assertTrue(ex.getMessage().contains("openlineage-flink"), ex.getMessage());
+    }
+
+    @Test
+    void 关闭血缘后不校验Agent(@TempDir Path dir) throws Exception {
+        Path bin = script(dir.resolve("sql-client.sh"),
+                "#!/bin/sh\necho \"Job has been submitted with JobID " + JOB_ID + "\"\nexit 0\n");
+        Path workDir = Files.createDirectories(dir.resolve("work"));
+        Path home = Files.createDirectories(dir.resolve("flink-home"));
+        Path lib = Files.createDirectories(home.resolve("lib"));
+        Files.createFile(lib.resolve("flink-dist-2.2.0.jar"));
+
+        IntegrationClusterProperties properties = new IntegrationClusterProperties();
+        properties.getFlink().setHome(home.toString());
+        properties.getFlink().setSubmitBin(bin.toString());
+        properties.getFlink().setManageBin(bin.toString());
+        properties.getFlink().setWorkDir(workDir.toString());
+        properties.getFlink().getLineage().setEnabled(false);
+        FlinkStandaloneSubmitter submitter = new FlinkStandaloneSubmitter();
+        ReflectionTestUtils.setField(submitter, "properties", properties);
+        ReflectionTestUtils.setField(submitter, "runner", new CliCommandRunner());
+
+        SubmitResult result = submitter.submit(context());
+        assertEquals(JOB_ID, result.getJobId());
+        assertFalse(result.getLog().contains("openlineage."), result.getLog());
+    }
+
+    private FlinkStandaloneSubmitter submitter(Path submitBin, Path manageBin, Path workDir) throws Exception {
+        // 提交前会校验 Flink 版本与血缘 Agent，这里按真实安装目录的布局准备 lib
+        Path home = Files.createDirectories(submitBin.getParent().resolve("flink-home"));
+        Path lib = Files.createDirectories(home.resolve("lib"));
+        Files.createFile(lib.resolve("flink-dist-2.2.0.jar"));
+        Files.createFile(lib.resolve("openlineage-flink-1.55.0.jar"));
+        return submitter(submitBin, manageBin, workDir, home);
+    }
+
+    private FlinkStandaloneSubmitter submitter(Path submitBin, Path manageBin, Path workDir, Path home) {
         IntegrationClusterProperties properties = new IntegrationClusterProperties();
         IntegrationClusterProperties.Flink flink = properties.getFlink();
+        flink.setHome(home.toString());
         flink.setSubmitBin(submitBin.toString());
         flink.setManageBin(manageBin.toString());
         flink.setWorkDir(workDir.toString());
@@ -167,8 +286,12 @@ class FlinkStandaloneSubmitterTest {
     }
 
     private DataIntegrationSubmitter.SubmitContext context() {
+        return context("order-platform");
+    }
+
+    private DataIntegrationSubmitter.SubmitContext context(String projectCode) {
         return new DataIntegrationSubmitter.SubmitContext(
-                1L, "订单同步", "order-sync", "BATCH",
+                1L, "订单同步", "order-sync", projectCode, "BATCH",
                 "mysql",
                 Map.of("url", "jdbc:mysql://127.0.0.1:3306/ods",
                         "username", "root",
@@ -179,7 +302,10 @@ class FlinkStandaloneSubmitterTest {
                         "username", "postgres",
                         "password", "123456",
                         "schema", "public"),
-                java.util.List.of(new TableSpec("ods.orders", java.util.List.of())),
+                // 直接给出列清单，避免单元测试依赖本机 MySQL 才能读取源表元数据
+                java.util.List.of(new TableSpec("ods.orders", java.util.List.of(), 0, java.util.List.of(
+                        new ColumnDef("id", "BIGINT"),
+                        new ColumnDef("name", "STRING")))),
                 Map.of(),
                 2, 2);
     }

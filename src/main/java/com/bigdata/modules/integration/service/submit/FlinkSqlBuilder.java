@@ -35,6 +35,9 @@ public final class FlinkSqlBuilder {
     static final long DEFAULT_SERVER_ID_BASE = 5400L;
     /** 缺省基数按 taskId 错开，降低同库多任务之间的 server-id 冲突概率 */
     private static final long TASK_SERVER_ID_STRIDE = 10L;
+    /** Flink 2.x 原生作业血缘监听器（OpenLineage Flink 2 集成，FLIP-314） */
+    static final String LINEAGE_LISTENER_FACTORY =
+            "io.openlineage.flink.listener.OpenLineageJobStatusChangedListenerFactory";
 
     private FlinkSqlBuilder() {
     }
@@ -72,6 +75,7 @@ public final class FlinkSqlBuilder {
             sql.append("SET 'execution.checkpointing.interval' = ")
                     .append(quote(props.getCheckpointInterval() + "ms")).append(";\n");
         }
+        appendLineage(sql, props, ctx);
         if (ctx.getExtraParams() != null) {
             for (Map.Entry<String, Object> entry : ctx.getExtraParams().entrySet()) {
                 if (entry.getValue() == null) {
@@ -262,6 +266,47 @@ public final class FlinkSqlBuilder {
             sql.append(",\n  'hive-version' = ").append(quote(version));
         }
         sql.append("\n);\n\n");
+    }
+
+    /**
+     * 作业级数据血缘配置：Flink 2.x 的 JobStatusChangedListener 通过 OpenLineage
+     * 把 source / sink 血缘上报到 Marquez，不需要改动同步 SQL 本身。
+     *
+     * <p>作业 namespace 取任务所属项目的项目编码（不再使用全局固定值）：
+     * Marquez 里以「项目编码 + 任务编码」定位作业，同一项目下的多个任务互不冲突。</p>
+     *
+     * <p>写在任务级 {@code extraParams} 之前，任务上配置的同名 SET 项可以覆盖这里的默认值。</p>
+     */
+    private static void appendLineage(StringBuilder sql, IntegrationClusterProperties.Flink props,
+                                      DataIntegrationSubmitter.SubmitContext ctx) {
+        IntegrationClusterProperties.Lineage lineage = props.getLineage();
+        if (lineage == null || !lineage.isEnabled()) {
+            return;
+        }
+        String url = lineage.getTransportUrl() == null ? "" : lineage.getTransportUrl().trim();
+        String namespace = ctx.getProjectCode() == null ? "" : ctx.getProjectCode().trim();
+        if (namespace.isEmpty()) {
+            // 兜底不应发生：任务保存与上线阶段都会校验项目，这里再挡一次避免空 namespace 被 Marquez 拒收
+            throw new BusinessException(400, "任务缺少所属项目编码，无法生成数据血缘 namespace；请编辑任务选择项目后重新上线");
+        }
+        sql.append("-- 数据血缘：OpenLineage 作业状态监听器（openlineage-flink jar 需位于 $FLINK_HOME/lib），")
+                .append("namespace = 项目编码 ").append(namespace).append('\n');
+        sql.append("SET 'execution.job-status-changed-listeners' = ")
+                .append(quote(LINEAGE_LISTENER_FACTORY)).append(";\n");
+        sql.append("SET 'openlineage.transport.type' = 'http';\n");
+        sql.append("SET 'openlineage.transport.url' = ").append(quote(url)).append(";\n");
+        sql.append("SET 'openlineage.job.namespace' = ").append(quote(namespace)).append(";\n");
+        sql.append("SET 'openlineage.job.name' = ").append(quote(ctx.getTaskCode())).append(";\n");
+        // CDC 源不提供原生血缘标识时，Flink 会回退成「catalog.database.表别名」且 namespace 为空，
+        // Marquez 会因空 namespace 拒收整条事件；这里把空 namespace 兜底成项目编码，
+        // 输入节点落 (项目编码, default_catalog.default_database.src_N)，
+        // 输出节点仍保留连接器推导出的 namespace（如 postgres://host:port），只把表名作为 name。
+        sql.append("SET 'openlineage.dataset.namespaceResolvers.").append(namespace)
+                .append(".type' = 'pattern';\n");
+        sql.append("SET 'openlineage.dataset.namespaceResolvers.").append(namespace)
+                .append(".regex' = '^$';\n");
+        // sql-client 提交后即退出（作业在远端集群运行），后续 RUNNING/COMPLETE 事件由 JobManager 侧补发
+        sql.append("SET 'openlineage.flink.enableDetachedJobTracking' = 'true';\n");
     }
 
     private static void appendSource(StringBuilder sql, DataSourceKind kind, Map<String, Object> config,

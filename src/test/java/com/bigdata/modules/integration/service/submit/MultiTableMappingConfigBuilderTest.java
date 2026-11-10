@@ -631,6 +631,66 @@ class MultiTableMappingConfigBuilderTest {
         assertEquals("flink-standalone", ClusterType.FLINK_STANDALONE.getCode());
     }
 
+    @Test
+    void 作业SQL默认携带OpenLineage血缘配置() {
+        DataIntegrationSubmitter.SubmitContext ctx = context("mysql", mysqlSource(), "kafka", kafkaTarget(),
+                List.of(table("orders")), "order-platform", "multi-sync");
+
+        String sql = FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 1, 1);
+
+        assertTrue(sql.contains("SET 'execution.job-status-changed-listeners' = '"
+                + FlinkSqlBuilder.LINEAGE_LISTENER_FACTORY + "'"), sql);
+        assertTrue(sql.contains("SET 'openlineage.transport.type' = 'http'"), sql);
+        assertTrue(sql.contains("SET 'openlineage.transport.url' = 'http://127.0.0.1:5000'"), sql);
+        // namespace 取任务所属项目的项目编码，不再使用固定值
+        assertTrue(sql.contains("SET 'openlineage.job.namespace' = 'order-platform'"), sql);
+        assertTrue(sql.contains("SET 'openlineage.job.name' = 'multi-sync'"), sql);
+        assertFalse(sql.contains("'dataforge'"), sql);
+        // CDC 源没有原生血缘标识时，空 namespace 兜底为项目编码，避免 Marquez 拒收事件
+        assertTrue(sql.contains("SET 'openlineage.dataset.namespaceResolvers.order-platform.type' = 'pattern'"), sql);
+        assertTrue(sql.contains("SET 'openlineage.dataset.namespaceResolvers.order-platform.regex' = '^$'"), sql);
+        // sql-client 提交后退出，靠 JobManager 侧继续上报 RUNNING/COMPLETE
+        assertTrue(sql.contains("SET 'openlineage.flink.enableDetachedJobTracking' = 'true'"), sql);
+    }
+
+    @Test
+    void 同一项目下不同任务的作业组合不冲突() {
+        String first = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "kafka", kafkaTarget(),
+                List.of(table("orders")), "order-platform", "task-a"), new IntegrationClusterProperties.Flink(), 1, 1);
+        String second = FlinkSqlBuilder.build(context("mysql", mysqlSource(), "kafka", kafkaTarget(),
+                List.of(table("orders")), "order-platform", "task-b"), new IntegrationClusterProperties.Flink(), 1, 1);
+
+        // namespace 相同（同一项目），job name 取任务编码，二者组合唯一
+        assertTrue(first.contains("SET 'openlineage.job.namespace' = 'order-platform'"));
+        assertTrue(second.contains("SET 'openlineage.job.namespace' = 'order-platform'"));
+        assertTrue(first.contains("SET 'openlineage.job.name' = 'task-a'"));
+        assertTrue(second.contains("SET 'openlineage.job.name' = 'task-b'"));
+    }
+
+    @Test
+    void 缺少项目编码时拒绝生成血缘配置() {
+        DataIntegrationSubmitter.SubmitContext ctx = context("mysql", mysqlSource(), "kafka", kafkaTarget(),
+                List.of(table("orders")), "", "multi-sync");
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> FlinkSqlBuilder.build(ctx, new IntegrationClusterProperties.Flink(), 1, 1));
+        assertEquals(400, error.getCode());
+        assertTrue(error.getMessage().contains("所属项目"), error.getMessage());
+    }
+
+    @Test
+    void 关闭血缘后不生成OpenLineage配置() {
+        IntegrationClusterProperties.Flink props = new IntegrationClusterProperties.Flink();
+        props.getLineage().setEnabled(false);
+        DataIntegrationSubmitter.SubmitContext ctx = context("mysql", mysqlSource(), "kafka", kafkaTarget(),
+                List.of(table("orders")));
+
+        String sql = FlinkSqlBuilder.build(ctx, props, 1, 1);
+
+        assertFalse(sql.contains("openlineage."), sql);
+        assertFalse(sql.contains("job-status-changed-listeners"), sql);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static Map<String, Object> mysqlSource() {
@@ -661,8 +721,18 @@ class MultiTableMappingConfigBuilderTest {
                                                                  String targetType,
                                                                  Map<String, Object> targetConfig,
                                                                  List<TableSpec> tables) {
+        return context(sourceType, sourceConfig, targetType, targetConfig, tables, "order-platform", "multi-sync");
+    }
+
+    private static DataIntegrationSubmitter.SubmitContext context(String sourceType,
+                                                                 Map<String, Object> sourceConfig,
+                                                                 String targetType,
+                                                                 Map<String, Object> targetConfig,
+                                                                 List<TableSpec> tables,
+                                                                 String projectCode,
+                                                                 String taskCode) {
         return new DataIntegrationSubmitter.SubmitContext(
-                1L, "多表同步", "multi-sync", "BATCH",
+                1L, "多表同步", taskCode, projectCode, "BATCH",
                 sourceType, sourceConfig, targetType, targetConfig,
                 tables, Map.of(), 2, 2);
     }

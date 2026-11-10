@@ -62,6 +62,10 @@ public class IntegrationClusterProperties {
         private int defaultParallelism = 1;
         /** checkpoint 间隔（毫秒），<=0 表示关闭 */
         private long checkpointInterval = 30000L;
+        /** 数据集成要求的最低 Flink 版本：低于该版本直接拒绝提交 */
+        private String minVersion = "2.2.0";
+        /** 提交作业时携带的数据血缘（OpenLineage）配置 */
+        private Lineage lineage = new Lineage();
         /** 取消 / 状态查询命令的超时（毫秒） */
         private int timeoutMs = 30000;
         /** 提交命令的超时（毫秒） */
@@ -169,6 +173,62 @@ public class IntegrationClusterProperties {
 
         public void setSubmitTimeoutMs(long submitTimeoutMs) {
             this.submitTimeoutMs = submitTimeoutMs;
+        }
+
+        public String getMinVersion() {
+            return minVersion;
+        }
+
+        public void setMinVersion(String minVersion) {
+            this.minVersion = minVersion;
+        }
+
+        public Lineage getLineage() {
+            return lineage;
+        }
+
+        public void setLineage(Lineage lineage) {
+            this.lineage = lineage;
+        }
+    }
+
+    /**
+     * 数据血缘：Flink 2.x 原生作业血缘接口（FLIP-314）+ OpenLineage，上报 Marquez。
+     *
+     * <p>生成的 SQL 会写入作业状态监听器与 OpenLineage 上报参数；
+     * openlineage-flink jar 必须在 Flink 的 classpath 上（默认要求放在 {@code {flink.home}/lib}，
+     * 也可通过 {@link #jar} 显式指定），缺失时提交直接失败，避免作业静默丢失血缘。</p>
+     */
+    public static class Lineage {
+        /** 是否在提交作业时带上数据血缘配置 */
+        private boolean enabled = true;
+        /** openlineage-flink jar 路径；留空则取 {flink.home}/lib/openlineage-flink-*.jar */
+        private String jar = "";
+        /** OpenLineage HTTP 上报地址（Marquez API） */
+        private String transportUrl = "http://127.0.0.1:5000";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getJar() {
+            return jar;
+        }
+
+        public void setJar(String jar) {
+            this.jar = jar;
+        }
+
+        public String getTransportUrl() {
+            return transportUrl;
+        }
+
+        public void setTransportUrl(String transportUrl) {
+            this.transportUrl = transportUrl;
         }
     }
 }

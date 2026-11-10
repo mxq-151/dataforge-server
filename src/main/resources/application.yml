@@ -114,6 +114,15 @@ integration:
     default-parallelism: 1
     # checkpoint 间隔（毫秒），仅流模式生效；<=0 关闭
     checkpoint-interval: 30000
+    # 数据集成要求的最低 Flink 版本；低于该版本（如 1.x / 2.1）拒绝提交
+    min-version: 2.2.0
+    # 数据血缘：随作业 SQL 下发 OpenLineage 作业状态监听器配置（Flink 2.x 原生血缘接口）。
+    # openlineage-flink jar 需放入 {home}/lib（或通过 jar 显式指定），缺失时提交直接失败。
+    lineage:
+      enabled: true
+      jar: ''
+      # OpenLineage / Marquez 上报地址（容器内 Marquez API 为 5000）
+      transport-url: http://127.0.0.1:5000
     # 取消 / 状态查询命令超时
     timeout-ms: 30000
     # 提交命令超时
