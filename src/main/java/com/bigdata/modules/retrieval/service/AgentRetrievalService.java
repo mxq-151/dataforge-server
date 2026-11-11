@@ -174,7 +174,8 @@ public class AgentRetrievalService {
             wrapper.select("id", "datasource_id", "database_name", "table_name",
                             "table_comment", "business_owner", "category_code")
                     .and(w -> w.like("table_name", keyword)
-                            .or().like("table_comment", keyword))
+                            .or().like("table_comment", keyword)
+                            .or().like("database_name", keyword))
                     .orderByAsc("table_name")
                     .last("LIMIT " + SCAN_PER_KEYWORD);
             List<TableMetadata> matched = tableMetadataMapper.selectList(wrapper);
@@ -416,11 +417,13 @@ public class AgentRetrievalService {
     private Hit scoreTable(TableMetadata table, List<String> keywords) {
         String name = table.getTableName();
         String comment = table.getTableComment();
+        String database = table.getDatabaseName();
         Best best = new Best();
         for (String keyword : keywords) {
             String normalized = keyword.toLowerCase(Locale.ROOT);
             String lowerName = name == null ? "" : name.toLowerCase(Locale.ROOT);
             String lowerComment = comment == null ? "" : comment.toLowerCase(Locale.ROOT);
+            String lowerDatabase = database == null ? "" : database.toLowerCase(Locale.ROOT);
 
             if (lowerName.equals(normalized)) {
                 best.offer(1.0, "name", "表名与关键词「" + keyword + "」完全一致", keyword);
@@ -428,6 +431,12 @@ public class AgentRetrievalService {
                 best.offer(0.92, "name", "表名前缀命中「" + keyword + "」", keyword);
             } else if (lowerName.contains(normalized)) {
                 best.offer(0.84, "name", "表名包含「" + keyword + "」", keyword);
+            }
+            // 库名是结构化约束：按库检索时，库内所有表都应召回，但排序要弱于表名命中
+            if (lowerDatabase.equals(normalized)) {
+                best.offer(0.78, "database", "库名与关键词「" + keyword + "」完全一致", keyword);
+            } else if (lowerDatabase.contains(normalized)) {
+                best.offer(0.64, "database", "库名包含「" + keyword + "」", keyword);
             }
             if (lowerComment.contains(normalized)) {
                 best.offer(0.72, "comment", "表注释包含「" + keyword + "」", keyword);
@@ -530,7 +539,7 @@ public class AgentRetrievalService {
             hint.setSuggest("未找到满足全部约束的对象；nearest 是放宽环境/分层/业务域后的近似候选"
                     + "（仍受权限限制）。请核对约束是否写错，或用 nearest 中的命名重试。");
         } else {
-            hint.setSuggest("元数据中未检索到相关对象。请改用业务实体英文名（如订单→order）、"
+            hint.setSuggest("元数据中未检索到相关对象。请改用库名、业务实体英文名（如订单→order）、"
                     + "分层前缀（ods/dwd/dws/ads/dim）或知识库中出现的命名重试；"
                     + "确认不存在时必须向用户报告未找到，禁止臆造库表名。");
         }

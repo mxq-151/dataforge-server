@@ -149,6 +149,21 @@ class AgentRetrievalServiceTest {
     }
 
     @Test
+    @DisplayName("库名命中：按库检索时返回该库下的表，匹配依据标记为 database")
+    void databaseNameKeywordFindsTablesInThatDatabase() {
+        stubTables(List.of(
+                table(1L, "test_db", "olist_geolocation_dataset", "地理坐标"),
+                table(2L, "test_db", "olist_orders_dataset", "订单"),
+                table(3L, "dwd_trade_prod", "dwd_trade_order_d", "订单明细")));
+
+        AgentSearchResponse response = service.search(request(List.of("test_db"), null, 30));
+
+        assertEquals(2, response.getTotal());
+        assertTrue(response.getItems().stream().allMatch(item -> "test_db".equals(item.getDatabase())));
+        assertTrue(response.getItems().stream().allMatch(item -> "database".equals(item.getMatchedBy())));
+    }
+
+    @Test
     @DisplayName("权限 fail-close：不可见的表不进 items，也不进 nearest")
     void permissionFiltersBothItemsAndNearest() {
         TableMetadata visible = table(1L, "dwd_trade_prod", "dwd_trade_order_d", "订单明细");
