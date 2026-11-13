@@ -306,7 +306,7 @@ docker exec -it dataforge-allinone /opt/dataforge/scripts/set-write-compliance.s
 > **镜像默认档为什么是 `enforce test`**：容器内 Spark 作业的 OS 用户是 `test_tenant`，而它是 `sys_tenant.tenant_code`
 > （**租户编码，不是平台用户名**），`sys_user` 里只有 `admin` / `test`，所以 `strict`（回落 sparkUser）会因
 > 「无法确定校验用户」返回 400 而拦掉**所有**任务。显式指定种子数据里的平台用户 `test`
-> （有 `test_db.*` 权限、无 `ods_olist_test` 权限）即可让拦截真实生效。
+> （有 `test_db.*` 权限、无 `ods_retail_test` 权限）即可让拦截真实生效。
 > 要做到「按提交人逐一判定」，需为每个运行用户登记同名 `sys_user`，再切 `strict`。
 >
 > 临时放行单个任务（不改全局档位）：`--conf spark.write.compliance.enabled=false`。

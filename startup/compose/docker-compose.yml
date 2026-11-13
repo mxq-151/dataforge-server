@@ -17,6 +17,12 @@ services:
       - "8088:8088"   # YARN ResourceManager UI / REST (http://localhost:8088)
       - "8042:8042"   # YARN NodeManager REST
       - "18080:18080" # Spark History Server (http://localhost:18080)
-    # 不挂载数据卷:数据(PostgreSQL / opt/dataforge)写入容器内,
-    # 便于镜像自包含分发;容器删除后数据随之丢失,如需持久化再挂载命名卷。
+      - "9083:9083"   # Hive Metastore Thrift (Spark / beeline / Kyuubi 共用)
+      - "10009:10009" # Kyuubi Thrift/JDBC (jdbc:hive2://localhost:10009/test_db)
+      - "10099:10099" # Kyuubi REST API (dataforge-server 元数据同步/执行策略)
+    # 说明：TPC-DS 数据已打进镜像（/opt/tpcds），首次启动由 entrypoint 播种到可写
+    # warehouse（/opt/dataforge/warehouse/tpcds，df-data 卷），因此不再绑定宿主机目录。
+    # 宿主机 /Users/mxq/Desktop/tpcds 仅作为构建期 staging 源，容器运行不依赖它。
+    # PostgreSQL 与 /opt/dataforge 默认仍写容器内，需要持久化时叠加
+    # docker-compose.persist.yml（命名卷 df-pgdata / df-data）。
     mem_limit: 8g

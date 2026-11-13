@@ -77,6 +77,9 @@ public class DatasourceConfigService {
             return ConnectionType.JDBC;
         }
         switch (datasourceType) {
+            case KYUUBI:
+                // Kyuubi 的标准接入方式是 REST(HTTP) 前端：http://host:10099
+                return ConnectionType.HTTP;
             case ES:
                 return ConnectionType.HTTP;
             default:
@@ -157,36 +160,42 @@ public class DatasourceConfigService {
         ConnectionType connType = resolveConnectionType(dto);
 
         try {
-            switch (connType) {
-                case HTTP:
-                    success = testHttpConnection(dto.getUrl(), dto.getUsername(), dto.getPassword());
-                    message = success ? "HTTP连接成功" : "HTTP连接失败";
-                    break;
-                case ARROW:
-                    success = testArrowConnection(dto.getUrl(), dto.getUsername(), dto.getPassword());
-                    message = success ? "Arrow Flight连接成功" : "Arrow Flight连接失败";
-                    break;
-                case JDBC:
-                default:
-                    DatasourceConfig tempConfig = new DatasourceConfig();
-                    tempConfig.setDatasourceType(dto.getDatasourceType());
-                    tempConfig.setConnectionType(ConnectionType.JDBC);
-                    tempConfig.setUrl(dto.getUrl());
-                    tempConfig.setUsername(dto.getUsername());
-                    tempConfig.setPassword(dto.getPassword());
+            if (dto.getDatasourceType() == DatasourceType.KYUUBI) {
+                // Kyuubi REST 探活：GET /api/v1/version；根路径 / 会 302 到 UI，不能作为探活地址
+                success = testKyuubiRestConnection(dto.getUrl(), dto.getUsername(), dto.getPassword());
+                message = success ? "Kyuubi REST连接成功" : "Kyuubi REST连接失败";
+            } else {
+                switch (connType) {
+                    case HTTP:
+                        success = testHttpConnection(dto.getUrl(), dto.getUsername(), dto.getPassword());
+                        message = success ? "HTTP连接成功" : "HTTP连接失败";
+                        break;
+                    case ARROW:
+                        success = testArrowConnection(dto.getUrl(), dto.getUsername(), dto.getPassword());
+                        message = success ? "Arrow Flight连接成功" : "Arrow Flight连接失败";
+                        break;
+                    case JDBC:
+                    default:
+                        DatasourceConfig tempConfig = new DatasourceConfig();
+                        tempConfig.setDatasourceType(dto.getDatasourceType());
+                        tempConfig.setConnectionType(ConnectionType.JDBC);
+                        tempConfig.setUrl(dto.getUrl());
+                        tempConfig.setUsername(dto.getUsername());
+                        tempConfig.setPassword(dto.getPassword());
 
-                    Long tempId = -System.currentTimeMillis();
-                    tempConfig.setId(tempId);
+                        Long tempId = -System.currentTimeMillis();
+                        tempConfig.setId(tempId);
 
-                    HikariDataSource tempPool = poolManager.createTempPool(tempConfig);
-                    try {
-                        success = poolManager.testPoolConnection(tempPool);
-                        message = success ? dto.getDatasourceType().getDescription() + "连接成功"
-                                : dto.getDatasourceType().getDescription() + "连接失败";
-                    } finally {
-                        tempPool.close();
-                    }
-                    break;
+                        HikariDataSource tempPool = poolManager.createTempPool(tempConfig);
+                        try {
+                            success = poolManager.testPoolConnection(tempPool);
+                            message = success ? dto.getDatasourceType().getDescription() + "连接成功"
+                                    : dto.getDatasourceType().getDescription() + "连接失败";
+                        } finally {
+                            tempPool.close();
+                        }
+                        break;
+                }
             }
         } catch (Exception e) {
             message = "连接异常: " + e.getMessage();
@@ -213,6 +222,35 @@ public class DatasourceConfigService {
 
     public Connection getConnection(Long datasourceId, String databaseName) throws java.sql.SQLException {
         return poolManager.getConnection(datasourceId, databaseName);
+    }
+
+    /**
+     * Kyuubi REST 连接测试：请求 {baseUrl}/api/v1/version，要求 200。
+     * <p>用版本接口而不是根路径，因为 Kyuubi 根路径会 302 到 Web UI，2xx 判定会误报失败。</p>
+     */
+    private boolean testKyuubiRestConnection(String url, String username, String password) throws Exception {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        String base = url.trim().replaceAll("/+$", "");
+        String endpoint = base.contains("/api/v1/") ? base : base + "/api/v1/version";
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(endpoint).openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
+            if (username != null && !username.isEmpty() && password != null && !password.isEmpty()) {
+                String auth = username + ":" + password;
+                String encoded = java.util.Base64.getEncoder().encodeToString(auth.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                conn.setRequestProperty("Authorization", "Basic " + encoded);
+            }
+            return conn.getResponseCode() == 200;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
     }
 
     /**

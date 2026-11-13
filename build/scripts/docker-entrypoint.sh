@@ -171,23 +171,80 @@ chmod +x "$DATA_DIR"/scripts/*.sh 2>/dev/null || true
 
 sync_server_jar
 
+# ---------- TPC-DS 数据播种（镜像内 /opt/tpcds -> 可写 warehouse） ----------
+# 镜像里的 /opt/tpcds 是只读基线数据（构建时 COPY 进独立层，不依赖宿主机 bind mount）。
+# 运行期 warehouse 必须可写（test_tenant 在 test_db 建表/写数据），且要能扛住容器重建，
+# 所以放在 df-data 卷上的 /opt/dataforge/warehouse/tpcds。
+# 播种规则：按表目录补齐，已存在的目录一律不动（不覆盖用户数据）。语义：
+#   * 镜像层 = 初始基线，永不被写；
+#   * 卷     = 运行期状态，容器重建仍保留；
+#   * 删掉 df-data 卷（或该子目录）→ 下次启动回到镜像初始状态，新建的表/数据丢失。
+seed_tpcds_data() {
+  local src=/opt/tpcds
+  local dst="$DATA_DIR/warehouse/tpcds"
+  if [ ! -d "$src" ]; then
+    echo "[entrypoint] WARN: 镜像内未找到 $src，跳过 TPC-DS 数据播种" >&2
+    return 0
+  fi
+  mkdir -p "$dst" "$dst/test_db.db" 2>/dev/null || true
+  local d name seeded=0
+  for d in "$src"/*/; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    [ "$name" = "test_db.db" ] && continue
+    if [ ! -e "$dst/$name" ]; then
+      cp -a "$d" "$dst/$name" 2>/dev/null && seeded=$((seeded + 1))
+    fi
+  done
+  if [ "$seeded" -gt 0 ]; then
+    echo "[entrypoint] TPC-DS 数据已播种到 ${dst}（本次新增 ${seeded} 张表）"
+    if id test_tenant >/dev/null 2>&1; then
+      chown -R test_tenant:test_tenant "$dst" 2>/dev/null || true
+    fi
+  fi
+}
+
 # ---------- YARN / Spark 事件日志目录（卷挂载后重新准备） ----------
 # /opt/dataforge 被 df-data 卷挂载时，镜像层里建好的 yarn/ 与 spark-events/ 会被卷内容遮住，
 # 而卷只播种子一次；容器重建后卷里这些目录的属主可能仍是 root，YARN（test_tenant）与
 # Spark 事件日志写入都会失败。这里每次启动 mkdir + 校正属主（幂等，不递归改已有日志）。
 prepare_yarn_dirs() {
   local d
-  for d in "$DATA_DIR/yarn/logs" "$DATA_DIR/yarn/spark-staging" "$DATA_DIR/spark-events"; do
+  for d in "$DATA_DIR/yarn/logs" "$DATA_DIR/yarn/spark-staging" "$DATA_DIR/spark-events" \
+           "$DATA_DIR/hive/logs" "$DATA_DIR/kyuubi/logs" "$DATA_DIR/kyuubi/work"; do
     mkdir -p "$d" 2>/dev/null || true
   done
+  # TPC-DS warehouse 落在 df-data 卷上（镜像 /opt/tpcds 播种而来，不再依赖宿主机 bind mount），
+  # 由 seed_tpcds_data 负责建目录与补数据；这里只保证父目录存在。
+  mkdir -p "$DATA_DIR/warehouse" 2>/dev/null || true
   if id test_tenant >/dev/null 2>&1; then
-    for d in "$DATA_DIR/yarn/logs" "$DATA_DIR/yarn/spark-staging" "$DATA_DIR/spark-events"; do
+    for d in "$DATA_DIR/yarn/logs" "$DATA_DIR/yarn/spark-staging" "$DATA_DIR/spark-events" \
+             "$DATA_DIR/hive/logs" "$DATA_DIR/kyuubi/logs" "$DATA_DIR/kyuubi/work"; do
       chown test_tenant:test_tenant "$d" 2>/dev/null || true
       chmod 775 "$d" 2>/dev/null || true
     done
   fi
 }
+
+# 卷/挂载属主对齐：
+#  * df-data 卷里可能残留旧 UID 的文件（本次把 test_tenant 从 999 对齐到宿主 501），
+#    用 marker 做一次性 chown，避免每次启动递归扫描。
+#  * 数据源改为镜像内 /opt/tpcds 后不再有宿主机 bind mount，容器内属主在构建期即为
+#    test_tenant（COPY --chown），播种到卷时由 seed_tpcds_data 再校正一次。
+align_data_owner() {
+  if ! id test_tenant >/dev/null 2>&1; then
+    return 0
+  fi
+  local marker="$DATA_DIR/.uid-aligned"
+  if [ ! -f "$marker" ]; then
+    chown -R test_tenant:test_tenant "$DATA_DIR" 2>/dev/null || true
+    touch "$marker" 2>/dev/null || true
+    chown test_tenant:test_tenant "$marker" 2>/dev/null || true
+  fi
+}
 prepare_yarn_dirs
+seed_tpcds_data
+align_data_owner
 
 # 基础镜像(eclipse-temurin)自带 /__cacert_entrypoint.sh(导入自定义 CA 证书后 exec CMD)。
 # 我们接管 ENTRYPOINT 后必须把它接回链路，否则会丢掉证书导入这一步。

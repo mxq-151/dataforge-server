@@ -73,6 +73,9 @@ public class ExecutionStrategyFactory {
 
     private static DatasourceType resolveStrategyType(DatasourceType datasourceType) {
         switch (datasourceType) {
+            // HIVE 是历史兼容入口：KyuubiExecutionStrategy 只实现了 REST 协议，
+            // HIVE 类型（jdbc:hive2://... 地址）会通过 engine.kyuubi.rest-base-url 落到同一套 REST 逻辑。
+            // 新接入请使用 KYUUBI 类型 + http(s) 地址，避免依赖全局地址配置。
             case HIVE:
                 return DatasourceType.KYUUBI;
             case DORIS:

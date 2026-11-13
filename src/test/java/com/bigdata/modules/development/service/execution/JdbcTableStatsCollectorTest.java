@@ -194,18 +194,18 @@ class JdbcTableStatsCollectorTest {
         ResultSet statsRs = mock(ResultSet.class);
         when(statsPs.executeQuery()).thenReturn(statsRs);
         when(statsRs.next()).thenReturn(true, false);
-        when(statsRs.getString("table_name")).thenReturn("ods_olist_orders_d");
+        when(statsRs.getString("table_name")).thenReturn("ods_retail_orders_d");
         when(statsRs.getLong("size_bytes")).thenReturn(24428544L);
         when(statsRs.getLong("row_count")).thenReturn(99441L);
 
         ResultSet partitionRs = mock(ResultSet.class);
         when(partitionPs.executeQuery()).thenReturn(partitionRs);
         when(partitionRs.next()).thenReturn(true, false);
-        when(partitionRs.getString("table_name")).thenReturn("ods_olist_orders_d");
+        when(partitionRs.getString("table_name")).thenReturn("ods_retail_orders_d");
         when(partitionRs.getString("partition_columns")).thenReturn("dt");
 
-        List<TableMetadata> tables = singleTable("ods_olist_orders_d");
-        collector.fill(DatasourceType.POSTGRESQL, connection, "ods_olist_test", tables);
+        List<TableMetadata> tables = singleTable("ods_retail_orders_d");
+        collector.fill(DatasourceType.POSTGRESQL, connection, "ods_retail_test", tables);
 
         TableMetadata table = tables.get(0);
         assertEquals(24428544L, table.getSizeBytes(), "分区父表大小应为聚合值而非 0");
@@ -228,7 +228,7 @@ class JdbcTableStatsCollectorTest {
         when(partitionPs.executeQuery()).thenReturn(partitionRs);
         when(partitionRs.next()).thenReturn(false);
 
-        collector.loadSizeBytes(DatasourceType.POSTGRESQL, connection, "ods_olist_test");
+        collector.loadSizeBytes(DatasourceType.POSTGRESQL, connection, "ods_retail_test");
 
         // 一次采集会下发两条语句（统计 + 分区列），此处只校验统计那条
         ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);

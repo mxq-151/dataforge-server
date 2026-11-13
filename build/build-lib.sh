@@ -22,6 +22,10 @@
 # 产物固定落 build/dist/dataforge-server.jar,Dockerfile 只做 COPY(不再有 Maven 构建阶段)。
 # 因此**两种模式都需要宿主机具备可用的 mvn 与 JDK 17+**(不再有"容器内编译"的退路)。
 #
+# TPC-DS 基准数据(两种模式都会打进镜像 /opt/tpcds, 不再依赖宿主机 bind mount):
+#   TPCDS_DATA_SRC  宿主机数据目录(默认 /Users/mxq/Desktop/tpcds);
+#                   源目录不存在时沿用 build/dist/tpcds-data 已有内容(校验 25 张表齐全)
+#
 # Spark 写入合规监听器(spark-write-compliance)相关(两种模式都会构建并打进镜像 /opt/spark/jars/):
 #   SPARK_LISTENER_DIR      监听器源码目录(默认 <dataforge-docker 同级>/spark-listener)
 #   SPARK_LISTENER_MODULES  maven 模块列表(默认 core,spark-3.5 —— 对齐容器内 Spark 3.5.9)
@@ -46,6 +50,12 @@ SPARK_LISTENER_DIR="${SPARK_LISTENER_DIR:-$(cd "$SERVER_DIR/.." && pwd)/spark-li
 SPARK_LISTENER_JARS_DIR="$DIST_DIR/spark-listeners"
 # 只构建容器内 Spark 版本需要的模块: core(纯 Java 引擎) + spark-3.5 适配层
 SPARK_LISTENER_MODULES="${SPARK_LISTENER_MODULES:-core,spark-3.5}"
+
+# TPC-DS 数据: 只把目录结构与 parquet 文件 stage 到 build/dist/tpcds-data,
+# 由 Dockerfile COPY 进 /opt/tpcds(独立镜像层), 运行时由 entrypoint 播种到可写 warehouse。
+TPCDS_DATA_SRC="${TPCDS_DATA_SRC:-/Users/mxq/Desktop/tpcds}"
+TPCDS_DATA_STAGE="$DIST_DIR/tpcds-data"
+TPCDS_EXPECTED_TABLES=25
 
 # 大数据组件版本覆盖映射: 环境变量名 -> maven 属性名
 VERSION_PROP_MAP=(
@@ -207,6 +217,40 @@ ensure_spark_listener() {
   ls -l "$SPARK_LISTENER_JARS_DIR"
 }
 
+# ---------- TPC-DS 数据 staging ----------
+# 把宿主机数据目录的可发布内容(仅子目录 + parquet/.crc)同步到 build/dist/tpcds-data,
+# 再由 Dockerfile COPY 进镜像 /opt/tpcds。这样构建完全可重复(不依赖 docker cp),
+# 宿主机目录里的 .DS_Store、权限探测残留文件等杂物不会污染镜像。
+# 源目录不存在时沿用已 stage 的内容(用于换机器/无源码包环境),但必须校验齐全。
+stage_tpcds_data() {
+  local src="$TPCDS_DATA_SRC"
+  local stage="$TPCDS_DATA_STAGE"
+
+  if [ -d "$src" ]; then
+    echo "==> staging TPC-DS 数据: $src -> build/dist/tpcds-data"
+    rm -rf "$stage"
+    mkdir -p "$stage"
+    # --include '*/' 先放行目录, 再只收 parquet 与 .crc; 其余(含 _roottest 等杂物)全部排除
+    rsync -a \
+      --include '*/' --include '*.parquet' --include '*.crc' --exclude '*' \
+      "$src/" "$stage/"
+  else
+    echo "==> 源目录不存在($src), 沿用已有 build/dist/tpcds-data"
+  fi
+
+  local n_tbl n_parquet
+  n_tbl=$(find "$stage" -mindepth 1 -maxdepth 1 -type d ! -name 'test_db.db' 2>/dev/null | wc -l | tr -d ' ')
+  n_parquet=$(find "$stage" -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')
+  if [ "${n_tbl:-0}" -lt "$TPCDS_EXPECTED_TABLES" ] || [ "${n_parquet:-0}" -lt "$TPCDS_EXPECTED_TABLES" ]; then
+    echo "!! TPC-DS staging 不完整: ${n_tbl:-0} 个表目录 / ${n_parquet:-0} 个 parquet(期望 >=$TPCDS_EXPECTED_TABLES)"
+    echo "   用 TPCDS_DATA_SRC=/path/to/tpcds 指定宿主机数据目录后重试"
+    exit 1
+  fi
+  # test_db.db 是库目录, 允许为空; 运行时 entrypoint 也会确保存在
+  mkdir -p "$stage/test_db.db"
+  echo "    staged $(du -sh "$stage" | cut -f1), ${n_tbl} 张表 / ${n_parquet} 个 parquet"
+}
+
 # ---------- 宿主机编译 dataforge-server ----------
 # 编译已移出 Docker: 用宿主机 mvn `package`,产物拷到 build/dist/dataforge-server.jar,
 # Dockerfile 只做 COPY。两种构建模式都走这里。
@@ -223,7 +267,10 @@ build_server_jar() {
   fi
   [ -f "$HOST_JAR" ] || { echo "!! 打包产物不存在: $HOST_JAR"; exit 1; }
   mkdir -p "$DIST_DIR"
-  cp -f "$HOST_JAR" "$SERVER_JAR_IN_DIST"
+  # 先写临时名再 mv：个别 macOS 环境下 build/dist 里的旧 jar 带 TCC 属性(com.apple.macl)，
+  # 直接 cp -f 覆盖会 Permission denied；改名写入 + 原子 mv 不受影响。
+  cp -f "$HOST_JAR" "$SERVER_JAR_IN_DIST.new"
+  mv -f "$SERVER_JAR_IN_DIST.new" "$SERVER_JAR_IN_DIST"
   echo "    产物: build/dist/dataforge-server.jar ($(wc -c < "$SERVER_JAR_IN_DIST" | tr -d ' ') 字节)"
 }
 
@@ -235,10 +282,13 @@ build_jar_only() {
     echo "!! 基础镜像 $BASE_IMAGE 不存在,请先执行: FULL=1 ./build.sh"; exit 1
   fi
 
-  echo "==> 1/4 构建 Spark 写入合规监听器 jar"
+  echo "==> 1/5 构建 Spark 写入合规监听器 jar"
   ensure_spark_listener
 
-  echo "==> 2/4 宿主机编译 dataforge-server jar"
+  echo "==> 2/5 staging TPC-DS 基准数据"
+  stage_tpcds_data
+
+  echo "==> 3/5 宿主机编译 dataforge-server jar"
   build_server_jar
 
   # 搭建独立的精简构建上下文(仅 jar + Dockerfile),避免 dataforge-server/.dockerignore
@@ -266,6 +316,9 @@ build_jar_only() {
         "$staging/hadoop-conf/$_f.tmpl" > "$staging/hadoop-conf/$_f"
   done
   cp -R "$SPARK_LISTENER_JARS_DIR" "$staging/spark-listeners"
+  # TPC-DS 数据层: 178MB, 仅 parquet; 硬链接避免每次增量构建在宿主机重复拷贝
+  cp -R -l "$TPCDS_DATA_STAGE" "$staging/tpcds-data" 2>/dev/null \
+    || cp -R "$TPCDS_DATA_STAGE" "$staging/tpcds-data"
   cp -R "$BUILD_DIR/scripts" "$staging/scripts"
   mkdir -p "$staging/sql/testdata"
   cp "$SERVER_DIR/src/main/resources/sql/init/dataforge-postgresql.sql" \
@@ -301,13 +354,15 @@ COPY spark-listeners/ /opt/spark/jars/
 COPY scripts/ /opt/dataforge/scripts/
 COPY scripts/ /opt/dataforge-image/scripts/
 COPY sql/ /opt/dataforge-image/sql/
+# TPC-DS 数据层(独立层, 内容未变时复用缓存)；位于 /opt/tpcds, 不被 df-data 卷遮蔽
+COPY --chown=test_tenant:test_tenant tpcds-data /opt/tpcds
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /opt/dataforge/scripts/*.sh /opt/dataforge-image/scripts/*.sh /usr/local/bin/docker-entrypoint.sh /opt/spark/conf/spark-env.sh /opt/hadoop/etc/hadoop/hadoop-env.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 DOCKEREOF
 
-  echo "==> 3/4 基于 $BASE_IMAGE 覆盖新 jar 构建 $FULL_TAG"
+  echo "==> 4/5 基于 $BASE_IMAGE 覆盖新 jar 构建 $FULL_TAG"
   docker buildx build --platform "$PLATFORMS" \
     $(load_push) \
     --provenance=false --sbom=false \
@@ -315,7 +370,7 @@ DOCKEREOF
     -t "$FULL_TAG" -f "$staging/Dockerfile" "$staging"
 
   rm -rf "$staging"
-  echo "==> 4/4 完成: $FULL_TAG(已更新 dataforge-server jar / 监听器 jar / Spark 默认配置 / 容器脚本 / 初始化 SQL)"
+  echo "==> 5/5 完成: $FULL_TAG(已更新 dataforge-server jar / 监听器 jar / Spark 默认配置 / 容器脚本 / 初始化 SQL / TPC-DS 数据层)"
 }
 
 # ---------- 2) 全量重建(基础镜像) ----------
@@ -335,6 +390,13 @@ ensure_dist() {
   # 国内镜像优先；直连 archive.apache.org 较慢时可用 HADOOP_DIST_URL 覆盖。
   fetch_one hadoop-3.3.6.tar.gz \
             "${HADOOP_DIST_URL:-https://mirrors.aliyun.com/apache/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz}"
+  # Hive 2.3.9：Metastore 服务端 + beeline 客户端（与 Spark 3.5.9 内置 Hive 客户端同版本）
+  # Kyuubi 1.9.1：Spark SQL Thrift/JDBC 服务（官方 1.9.x 支持 Spark 3.5）
+  # 国内华为云镜像优先，可用 HIVE_DIST_URL / KYUUBI_DIST_URL 覆盖
+  fetch_one apache-hive-2.3.9-bin.tar.gz \
+            "${HIVE_DIST_URL:-https://repo.huaweicloud.com/apache/hive/hive-2.3.9/apache-hive-2.3.9-bin.tar.gz}"
+  fetch_one apache-kyuubi-1.9.1-bin.tgz \
+            "${KYUUBI_DIST_URL:-https://repo.huaweicloud.com/apache/kyuubi/kyuubi-1.9.1/apache-kyuubi-1.9.1-bin.tgz}"
   fetch_one apache-dolphinscheduler-3.4.1-bin.tar.gz \
             https://archive.apache.org/dist/dolphinscheduler/3.4.1/apache-dolphinscheduler-3.4.1-bin.tar.gz
   fetch_one marquez-0.51.1.tar.gz \
@@ -352,6 +414,9 @@ build_full() {
 
   echo "==> 构建 Spark 写入合规监听器"
   ensure_spark_listener
+
+  echo "==> staging TPC-DS 基准数据"
+  stage_tpcds_data
 
   echo "==> 宿主机编译 dataforge-server"
   build_server_jar

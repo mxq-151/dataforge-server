@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  Hive 2.3.9 Metastore（服务端）配置 —— dataforge all-in-one 容器
+
+  版本对齐说明：
+    * Spark 3.5.9 内置的 Hive 客户端就是 2.3.9；Kyuubi 1.9.1 的 Spark 引擎复用同一套客户端，
+      beeline 也来自 /opt/hive（2.3.9），因此客户端/服务端严格同为 2.3.9，不存在 2.x 连 3.x。
+    * 元数据存 PostgreSQL 14（库 metastore，账号 hive），而不是内嵌 Derby：
+      Derby 是单进程嵌入式，Spark / Kyuubi 引擎 / beeline 三个 JVM 无法共享同一份 metastore_db
+      （会互相锁库）；PostgreSQL 已随镜像运行并持久化在 df-pgdata 卷里。
+    * warehouse 指向容器内可写目录 /opt/dataforge/warehouse/tpcds（df-data 卷）：
+      初始 parquet 由镜像 /opt/tpcds 在首次启动时播种，容器重建后数据仍在卷里，
+      不再依赖宿主机 bind mount；test_tenant 可在该目录下建库建表写数据。
+-->
+<configuration>
+  <!-- ===== JDBC / PostgreSQL ===== -->
+  <property>
+    <name>javax.jdo.option.ConnectionURL</name>
+    <value>jdbc:postgresql://127.0.0.1:5432/metastore</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>org.postgresql.Driver</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionUserName</name>
+    <value>hive</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionPassword</name>
+    <value>hive</value>
+  </property>
+
+  <!-- ===== warehouse / 文件系统 ===== -->
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>file:///opt/dataforge/warehouse/tpcds</value>
+  </property>
+  <property>
+    <name>fs.defaultFS</name>
+    <value>file:///</value>
+  </property>
+  <property>
+    <name>hive.exec.scratchdir</name>
+    <value>/tmp/hive-scratch</value>
+  </property>
+
+  <!-- ===== metastore 服务 ===== -->
+  <property>
+    <name>hive.metastore.uris</name>
+    <value>thrift://127.0.0.1:9083</value>
+  </property>
+  <!-- schema 由 init-hive.sh 用 schematool 初始化，禁止运行期自动建表 -->
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>datanucleus.schema.autoCreateAll</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>datanucleus.autoCreateSchema</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>datanucleus.autoStartMechanism</name>
+    <value>None</value>
+  </property>
+
+  <!-- 本地 FS 场景下关闭不必要的权限/事件校验 -->
+  <property>
+    <name>hive.metastore.event.db.notification.api.auth</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hive.metastore.execute.setugi</name>
+    <value>false</value>
+  </property>
+</configuration>

@@ -1542,7 +1542,7 @@ VALUES
 -- 内置示例业务术语表（业务知识文档）
 --   为什么放这里：新装环境知识库是空的，GET /api/agent/retrieval/terms 返回空词典，
 --   「业务方说法 → 平台命名」的映射能力没有可演示的样本。本文档只是**示例**：
---   英文名取自 test_db 演示库（Olist 电商）的真实表名，接入真实业务后应替换为
+--   英文名取自 TPC-DS 演示数据集（零售）的表名，接入真实业务后应替换为
 --   客户的术语表，或直接删除本文档。
 --   幂等/只播种一次：只在知识库为空时插入。不能按 title 判重 —— 用户删掉本文档后
 --   下次启动会被重新插回来；按「空库」判断才是真正的一次性播种（本脚本每次启动都会执行）。
@@ -1551,23 +1551,23 @@ VALUES
 INSERT INTO `knowledge_document`
   (`title`, `doc_type`, `category`, `content`, `author_name`, `author_id`,
    `status`, `sync_to_rag`, `view_count`, `tags`, `description`, `create_time`, `update_time`)
-SELECT '业务术语表示例（Olist 电商）', 'business_knowledge', '电商',
+SELECT '业务术语表示例（TPC-DS 零售）', 'business_knowledge', '电商',
 '> 本文档由平台初始化脚本预置，是**示例**而非真实业务口径：接入业务后请替换为你们自己的术语表，或直接删除本文档。
 >
-> 表格中的英文名取自 test_db 演示库（Olist 巴西电商数据集）的真实表名，用于演示「业务方说法 → 平台命名」的映射。
+> 表格中的英文名取自 TPC-DS 演示数据集（零售）的表名，用于演示「业务方说法 → 平台命名」的映射。
 
 ## 术语表
 
 | 术语 | 别名 | 英文名 |
 | --- | --- | --- |
-| 订单 | 订单主表、下单记录 | olist_orders_dataset |
-| 订单商品明细 | 订单流水、订单明细 | olist_order_items_dataset |
-| 客户 | 买家、顾客 | olist_customers_dataset |
-| 卖家 | 商家、供应商 | olist_sellers_dataset |
-| 商品 | 产品、货品 | olist_products_dataset |
-| 支付记录 | 付款、支付流水 | olist_order_payments_dataset |
-| 订单评价 | 评论、评分 | olist_order_reviews_dataset |
-| 收货地址 | 收货地、地理信息 | olist_geolocation_dataset |
+| 订单 | 订单主表、下单记录 | store_sales |
+| 订单商品明细 | 订单流水、订单明细 | store_returns |
+| 客户 | 买家、顾客 | customer |
+| 卖家 | 商家、供应商 | store |
+| 商品 | 产品、货品 | item |
+| 支付记录 | 付款、支付流水 | catalog_sales |
+| 订单评价 | 评论、评分 | web_returns |
+| 收货地址 | 收货地、地理信息 | customer_address |
 | 商品类目 | 品类、类目翻译 | product_category_name_translation |
 
 ## 使用说明

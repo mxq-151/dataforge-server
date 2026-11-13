@@ -38,7 +38,7 @@ class DeployEnvParserTest {
             assertNull(DeployEnvParser.parseEnv("dwd_trade"));
             assertNull(DeployEnvParser.parseEnv("dwd_trade_"));
             assertNull(DeployEnvParser.parseEnv("dwd_trade_staging"));
-            assertNull(DeployEnvParser.parseEnv("olist_code_ods_test2"));
+            assertNull(DeployEnvParser.parseEnv("retail_code_ods_test2"));
         }
 
         @Test
@@ -90,8 +90,8 @@ class DeployEnvParserTest {
         @Test
         @DisplayName("工作流名与库名同一套口径（提交调度把环境拼在名称末尾）")
         void appliesToWorkflowNames() {
-            assertTrue(DeployEnvParser.matches("olist_code_ods_prod", "prod"));
-            assertFalse(DeployEnvParser.matches("olist_code_ods_prod", "gray"));
+            assertTrue(DeployEnvParser.matches("retail_code_ods_prod", "prod"));
+            assertFalse(DeployEnvParser.matches("retail_code_ods_prod", "gray"));
         }
     }
 

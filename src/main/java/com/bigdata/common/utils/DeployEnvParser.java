@@ -7,7 +7,7 @@ import java.util.Locale;
  *
  * <h3>规范</h3>
  * <p>命名规范：{@code {分层}_{业务域}_{环境}}，环境后缀仅 {@code _prod / _gray / _test}。
- * 例如库名 {@code dwd_trade_prod} → 环境 prod；工作流名 {@code olist_code_ods_test} → 环境 test
+ * 例如库名 {@code dwd_trade_prod} → 环境 prod；工作流名 {@code retail_code_ods_test} → 环境 test
  * （提交调度时环境就拼在工作流名末尾，见 deployEnv 的环境后缀约定）。</p>
  *
  * <h3>为什么解析不出来就返回 null，而不是猜一个</h3>

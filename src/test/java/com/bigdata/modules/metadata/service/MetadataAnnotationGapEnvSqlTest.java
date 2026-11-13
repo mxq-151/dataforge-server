@@ -59,11 +59,11 @@ class MetadataAnnotationGapEnvSqlTest {
     @Test
     @DisplayName("分层 / 业务域：下推表名 LIKE 粗筛，编码走占位符不进 SQL 文本")
     void conventionAppendsEscapedTableNameLike() {
-        String sql = conventionSqlOf("ods", "olist");
+        String sql = conventionSqlOf("ods", "retail");
         assertTrue(sql.contains("table_name LIKE"), sql);
         assertTrue(sql.contains("ESCAPE '!'"), "转义字符必须显式声明，否则 _ 会被当作通配符：" + sql);
         assertFalse(sql.contains("ods"), "分层编码不能拼进 SQL 文本：" + sql);
-        assertFalse(sql.contains("olist"), "业务域编码不能拼进 SQL 文本：" + sql);
+        assertFalse(sql.contains("retail"), "业务域编码不能拼进 SQL 文本：" + sql);
     }
 
     @Test

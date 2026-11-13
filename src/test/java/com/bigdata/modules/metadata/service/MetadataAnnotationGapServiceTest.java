@@ -185,8 +185,8 @@ class MetadataAnnotationGapServiceTest {
     @Test
     void narrowsByLayerAndDomainCode() {
         when(tableMetadataMapper.selectList(any())).thenReturn(List.of(
-                table(1L, "ods_olist_order_d", null),
-                table(2L, "dws_olist_sales_d", null),
+                table(1L, "ods_retail_order_d", null),
+                table(2L, "dws_retail_sales_d", null),
                 table(3L, "dwd_order_detail_d", null),
                 table(4L, "sales_summary", null)
         ));
@@ -194,10 +194,10 @@ class MetadataAnnotationGapServiceTest {
 
         AnnotationGapSummaryVO odsOnly = service.query(1L, null, 100, null, null, "ods");
         assertEquals(1, odsOnly.getTableScanned());
-        assertEquals("ods_olist_order_d", odsOnly.getTables().get(0).getTableName());
+        assertEquals("ods_retail_order_d", odsOnly.getTables().get(0).getTableName());
 
-        AnnotationGapSummaryVO olistDomain = service.query(1L, null, 100, null, "olist", null);
-        assertEquals(2, olistDomain.getTableScanned());
+        AnnotationGapSummaryVO retailDomain = service.query(1L, null, 100, null, "retail", null);
+        assertEquals(2, retailDomain.getTableScanned());
 
         AnnotationGapSummaryVO unclassified = service.query(1L, null, 100, null, null, "__unclassified");
         assertEquals(1, unclassified.getTableScanned());

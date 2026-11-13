@@ -66,6 +66,11 @@ permission:
 engine:
   spark:
     home: /Users/mxq/Desktop/bigdata-workspace/spark-4.1.1-bin-hadoop3
+  # Kyuubi REST 前端地址：与 JDBC/Thrift 端口（默认 10009）不同，Kyuubi REST 默认 10099。
+  # 留空时沿用旧逻辑（把数据源 URL 的 host:port 直接当 REST 地址），仅适用于 URL 填 http(s) 的部署。
+  # 容器内由 build/scripts/run-dataforge.sh 注入 http://127.0.0.1:10099。
+  kyuubi:
+    rest-base-url: ${KYUUBI_REST_BASE_URL:}
   flink:
     home: /opt/flink
   jar:

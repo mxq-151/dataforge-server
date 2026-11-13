@@ -117,19 +117,19 @@ class AssetHealthServiceTest {
     void qualityRuleScope() {
         // 源表解析不出分层 → 不纳入
         TableMetadata source = healthyTable();
-        source.setTableName("olist_orders_dataset");
+        source.setTableName("retail_orders_dataset");
         assertFalse(service.issuesFor(source, contextWith(1L, true, true, 0))
                 .contains(AssetHealthService.Issue.NO_QUALITY_RULE));
 
         // 质检层 dqc 本身是质检资产 → 排除
         TableMetadata dqc = healthyTable();
-        dqc.setTableName("dqc_olist_rule_d");
+        dqc.setTableName("dqc_retail_rule_d");
         assertFalse(service.issuesFor(dqc, contextWith(1L, true, true, 0))
                 .contains(AssetHealthService.Issue.NO_QUALITY_RULE));
 
         // 普通数仓分层表 → 纳入
         TableMetadata ods = healthyTable();
-        ods.setTableName("ods_olist_orders_d");
+        ods.setTableName("ods_retail_orders_d");
         assertTrue(service.issuesFor(ods, contextWith(1L, true, true, 0))
                 .contains(AssetHealthService.Issue.NO_QUALITY_RULE));
     }

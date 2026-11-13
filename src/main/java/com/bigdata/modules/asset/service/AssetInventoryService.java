@@ -160,7 +160,7 @@ public class AssetInventoryService {
             layerStat.setSizeBytes(layerStat.getSizeBytes() + size);
 
             // 业务域只在「分层成立」时才计入盘点维度：解析器为了目录树好读，会从未知分层的
-            // 表名里也尽力抽出第二段当域（如 olist_customers_dataset → customers），
+            // 表名里也尽力抽出第二段当域（如 retail_customers_dataset → customers），
             // 那是展示用的「尽力而为」；盘点要的是业务域维度的口径，混进 customers /
             // geolocation / order 这类实体名，会让占用空间被拆到一堆并不存在的业务域上。
             if (parsed.layerCode() != null && parsed.domainCode() != null) {

@@ -159,11 +159,28 @@ RUN mkdir -p /opt/marquez /opt/marquez-web \
 
 # 任务执行用户:DolphinScheduler 以租户(OS 用户)运行任务,
 # 需要非 root 的 `test_tenant` 用户 + 免密 sudo,DS(root 进程)才能 sudo -u test_tenant 执行任务。
-RUN useradd -rm -s /bin/bash -d /home/test_tenant test_tenant \
+# UID/GID 默认 501:20(与 macOS 宿主首用户一致):容器内 TPC-DS 数据与 warehouse 均归 test_tenant,
+# 仍挂宿主机目录做调试时也不会出现属主错位;其它机器可覆盖:
+#   --build-arg TEST_TENANT_UID=$(id -u) --build-arg TEST_TENANT_GID=$(id -g)
+# 注：容器基础镜像里 gid 20 已被 dialout 占用，用 `groupadd -o` 允许重复 GID。
+ARG TEST_TENANT_UID=501
+ARG TEST_TENANT_GID=20
+RUN groupadd -o -g ${TEST_TENANT_GID} test_tenant \
+ && useradd -rm -u ${TEST_TENANT_UID} -g ${TEST_TENANT_GID} -s /bin/bash -d /home/test_tenant test_tenant \
  && echo "test_tenant ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/test_tenant \
  && chmod 440 /etc/sudoers.d/test_tenant \
  # Spark 任务输出写到 warehouse,须对任务用户(test_tenant)可写
  && chown -R test_tenant:test_tenant /opt/dataforge/warehouse
+
+# ---------- TPC-DS 4.0.0 基准数据（镜像内数据层，不依赖宿主机 bind mount） ----------
+# 数据来源: build/build-lib.sh 的 stage_tpcds_data() 把宿主机 TPCDS_DATA_SRC(默认
+#   /Users/mxq/Desktop/tpcds)下的目录结构与 parquet 同步到 build/dist/tpcds-data,
+#   Dockerfile 只做 COPY。构建可重复, 不用 docker cp; 宿主机杂物(.DS_Store 等)不会进镜像。
+# 路径 /opt/tpcds: 不被 df-data 命名卷遮蔽, 容器重建后始终能拿到镜像内的初始数据。
+# 该层只读使用: entrypoint 首次启动时把它播种到可写 warehouse(/opt/dataforge/warehouse/tpcds),
+# 之后 test_db 内新建的表/数据写在 df-data 卷上, 镜像层永远不会被改写。
+COPY --chown=test_tenant:test_tenant build/dist/tpcds-data /opt/tpcds
+RUN mkdir -p /opt/tpcds/test_db.db && chown test_tenant:test_tenant /opt/tpcds/test_db.db
 
 # ---------- Spark 3.5.9 (仅 local 模式) ----------
 # 发行包已预下载到本地 build/dist/(见 build.sh ensure_dist),构建不再联网下载
@@ -230,6 +247,33 @@ RUN mkdir -p /var/lib/dataforge-yarn/nm-local /var/lib/dataforge-yarn/nm-logs \
              /opt/dataforge/spark-events \
  && chown -R test_tenant:test_tenant /var/lib/dataforge-yarn /var/log/dataforge/yarn \
  && chown -R test_tenant:test_tenant /opt/dataforge/yarn /opt/dataforge/spark-events
+
+# ---------- Hive 2.3.9（Metastore 服务端 + beeline 客户端） ----------
+# 版本策略：Spark 3.5.9 内置 Hive 客户端即 2.3.9，Kyuubi 的 Spark 引擎复用同一客户端，
+# beeline 也来自 /opt/hive（2.3.9），保证客户端/服务端严格同版本（不出现 2.x 连 3.x）。
+# 发行包已预下载到 build/dist/（见 build-lib.sh ensure_dist），bind mount 安装避免 tar 进层。
+RUN --mount=type=bind,source=build/dist/apache-hive-2.3.9-bin.tar.gz,target=/tmp/hive.tgz \
+    bash -c 'set -eux; \
+      tar xzf /tmp/hive.tgz -C /opt; \
+      mv /opt/apache-hive-2.3.9-bin /opt/hive; \
+      rm -rf /opt/hive/examples /opt/hive/hcatalog /opt/hive/jdbc; \
+      mkdir -p /opt/hive/logs'
+# Metastore 元数据存 PostgreSQL（库 metastore，账号 hive/hive），warehouse 指向宿主 bind mount
+COPY build/conf/hive/hive-site.xml /opt/hive/conf/hive-site.xml
+COPY build/dist/postgresql-42.7.12.jar /opt/hive/lib/postgresql-42.7.12.jar
+RUN mkdir -p /opt/dataforge/hive/logs \
+ && chown -R test_tenant:test_tenant /opt/hive/logs /opt/dataforge/hive
+
+# ---------- Apache Kyuubi 1.9.1（Spark SQL 即席查询，Thrift/JDBC 10009） ----------
+# 1.9.1 官方构建对应 Spark 3.5.1（同一 3.5.x 补丁线，兼容 3.5.9），Hive 客户端随 Spark 为 2.3.9。
+RUN --mount=type=bind,source=build/dist/apache-kyuubi-1.9.1-bin.tgz,target=/tmp/kyuubi.tgz \
+    bash -c 'set -eux; \
+      tar xzf /tmp/kyuubi.tgz -C /opt; \
+      mv /opt/apache-kyuubi-1.9.1-bin /opt/kyuubi; \
+      mkdir -p /opt/kyuubi/logs /opt/kyuubi/work /opt/kyuubi/embedded_zookeeper'
+COPY build/conf/kyuubi/kyuubi-defaults.conf /opt/kyuubi/conf/kyuubi-defaults.conf
+RUN mkdir -p /opt/dataforge/kyuubi/logs /opt/dataforge/kyuubi/work \
+ && chown -R test_tenant:test_tenant /opt/dataforge/kyuubi /opt/kyuubi/embedded_zookeeper /opt/kyuubi/logs /opt/kyuubi/work
 
 # ---------- DolphinScheduler 3.4.1 (standalone) ----------
 # 发行包已预下载到本地 build/dist/(见 build.sh ensure_dist),构建不再联网下载
@@ -324,6 +368,10 @@ COPY src/main/resources/sql/init/dataforge-postgresql.sql /opt/dataforge-image/s
 COPY src/main/resources/sql/testdata/dataforge-testdata-postgresql.sql /opt/dataforge-image/sql/testdata/dataforge-testdata-postgresql.sql
 COPY src/main/resources/sql/testdata/test_db-postgresql.sql /opt/dataforge-image/sql/testdata/test_db-postgresql.sql
 COPY build/sql/dolphinscheduler-init-data.sql /opt/dataforge-image/sql/dolphinscheduler-init-data.sql
+# TPC-DS 建表 DDL（test_db 库，25 张外部表，LOCATION=/opt/dataforge/warehouse/tpcds/*）；由 init-hive-tables.sh 执行
+COPY build/sql/tpcds-ddl.sql /opt/dataforge-image/sql/tpcds-ddl.sql
+# 既有库自愈：HIVE(jdbc) -> KYUUBI(REST) 数据源迁移，每次启动幂等执行
+COPY build/sql/migrate-kyuubi-datasource.sql /opt/dataforge-image/sql/migrate-kyuubi-datasource.sql
 COPY build/scripts/ /opt/dataforge-image/scripts/
 COPY build/scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY build/conf/supervisord.conf /etc/supervisor/conf.d/dataforge.conf
@@ -342,13 +390,17 @@ ENV JAVA_HOME=/opt/java/openjdk \
     HADOOP_HOME=/opt/hadoop \
     HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop \
     YARN_CONF_DIR=/opt/hadoop/etc/hadoop \
+    HIVE_HOME=/opt/hive \
+    HIVE_CONF_DIR=/opt/hive/conf \
+    KYUUBI_HOME=/opt/kyuubi \
     DOLPHINSCHEDULER_HOME=/opt/dolphinscheduler \
     MARQUEZ_CONFIG=/opt/marquez/marquez.dev.yml \
-    PATH=/opt/java/openjdk/bin:/opt/spark/bin:/opt/hadoop/bin:/opt/hadoop/sbin:/opt/dolphinscheduler/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/opt/java/openjdk/bin:/opt/spark/bin:/opt/hadoop/bin:/opt/hadoop/sbin:/opt/hive/bin:/opt/kyuubi/bin:/opt/dolphinscheduler/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # 8088 RM UI/REST、8042 NM REST、18080 Spark History Server
+# 9083 Hive Metastore Thrift、10009 Kyuubi Thrift/JDBC、10099 Kyuubi REST API
 # （8030/8031/8032/8033 与 8041/8043 为 RM/NM 内部 RPC，仅容器内可达，不对外映射）
-EXPOSE 8082 5432 12345 5000 5001 3000 8088 8042 18080
+EXPOSE 8082 5432 12345 5000 5001 3000 8088 8042 18080 9083 10009 10099
 
 # entrypoint 先把镜像里的 sql/ 与 scripts/ 同步进可能被命名卷遮蔽的 /opt/dataforge，
 # 再exec CMD 启动 supervisord（详见 build/scripts/docker-entrypoint.sh 顶部说明）

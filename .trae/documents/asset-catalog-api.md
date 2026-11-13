@@ -612,7 +612,7 @@
 
 **`projectCode` 口径（重要）**：平台目前**没有项目↔资产绑定表**，传入 `projectCode` 时盘点范围被收窄为"该项目默认数据源（`dev_project.default_datasource_id`）下的资产"。这是明确的近似，不是完整项目资产台账。项目不存在或未配置默认数据源会返回业务异常（不静默放宽范围）。
 
-**`domainCode` ≠ `projectCode`（重要）**：`domainCode` 是命名规范台账里的**业务域**（表名第二段，如 `order`），而 `projectCode` 是**调度项目编码**（`dev_project.project_code`，如 `olist`）。二者不可互相替代：前端目录「规范视角」的**数仓名称**节点请用 `domainCode` 传参，不要塞进 `projectCode`（后者命中不到 `dev_project` 会返回 404）。
+**`domainCode` ≠ `projectCode`（重要）**：`domainCode` 是命名规范台账里的**业务域**（表名第二段，如 `order`），而 `projectCode` 是**调度项目编码**（`dev_project.project_code`，如 `retail`）。二者不可互相替代：前端目录「规范视角」的**数仓名称**节点请用 `domainCode` 传参，不要塞进 `projectCode`（后者命中不到 `dev_project` 会返回 404）。
 
 ---
 
@@ -677,7 +677,7 @@
 
 ```json
 [
-  { "env": "prod", "projectCode": "olist", "projectName": "Olist 数仓", "tableCount": 128, "sizeBytes": 5368709120 }
+  { "env": "prod", "projectCode": "retail", "projectName": "Retail 数仓", "tableCount": 128, "sizeBytes": 5368709120 }
 ]
 ```
 
@@ -714,8 +714,8 @@
     "databaseName": "dwd_trade_prod",
     "tableName": "dwd_trade_order_d",
     "env": "prod",
-    "projectCode": "olist",
-    "projectName": "Olist 数仓",
+    "projectCode": "retail",
+    "projectName": "Retail 数仓",
     "sizeBytes": 21474836480,
     "ownerName": "zhangsan"
   }
@@ -748,7 +748,7 @@
     "databaseName": "dwd_trade_prod",
     "tableName": "dwd_trade_log_d",
     "env": "prod",
-    "projectName": "Olist 数仓",
+    "projectName": "Retail 数仓",
     "previousSizeBytes": 17179869184,
     "currentSizeBytes": 32212254720,
     "growthBytes": 15032385536,
@@ -793,10 +793,10 @@
 ```json
 [
   {
-    "workflowName": "ads_olist_daily",
+    "workflowName": "ads_retail_daily",
     "nodeName": "spark_ads_trade",
     "taskType": "SPARK",
-    "projectName": "Olist 数仓",
+    "projectName": "Retail 数仓",
     "cpuHours": null,
     "memoryGbHours": null,
     "runDurationSeconds": 111600,

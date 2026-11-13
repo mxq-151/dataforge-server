@@ -86,6 +86,15 @@ else
   echo "[init] dataforge test data already imported"
 fi
 
+# 5.1 数据源类型迁移(每次启动执行,幂等):
+#     历史记录 HIVE + jdbc:hive2://...:10009 -> KYUUBI + http://127.0.0.1:10099
+#     只更新 id=2 且仍为 hive 的记录,并同步改授权行的 datasource_name
+MIGRATE_SQL=/opt/dataforge/sql/migrate-kyuubi-datasource.sql
+if [ -f "$MIGRATE_SQL" ]; then
+  su postgres -c "$PG_BIN/psql -d dataforge -v ON_ERROR_STOP=0 -f $MIGRATE_SQL" >/dev/null 2>&1 || true
+  echo "[init] datasource migration checked (hive -> kyuubi)"
+fi
+
 # 6. 初始化 DolphinScheduler 的 PostgreSQL 库(独立于 dataforge 库)
 #    schema 用官方 PG 脚本(含 QRTZ + t_ds_* 全部表 + admin/default 默认数据);
 #    随后导入补充数据(测试用户/租户/环境/项目/令牌, dolphinscheduler-init-data.sql)

@@ -37,6 +37,11 @@ if [ -z "${DS_TOKEN:-}" ]; then
   fi
 fi
 
+# Kyuubi REST 前端地址：与 JDBC/Thrift(10009) 分离，默认监听到 10099。
+# 数据源 URL 仍保持 jdbc:hive2://...:10009（beeline/JDBC/测试连接不受影响），
+# KyuubiExecutionStrategy 的 REST 调用通过本参数改走 10099。
+KYUUBI_REST_BASE_URL="${KYUUBI_REST_BASE_URL:-http://127.0.0.1:10099}"
+
 exec "${JAVA_HOME}/bin/java" -jar /opt/dataforge/dataforge-server.jar \
   --server.port=8082 \
   '--spring.datasource.url=jdbc:postgresql://127.0.0.1:5432/dataforge?useUnicode=true&characterEncoding=utf-8' \
@@ -44,5 +49,6 @@ exec "${JAVA_HOME}/bin/java" -jar /opt/dataforge/dataforge-server.jar \
   --spring.datasource.username=postgres \
   --spring.datasource.password=123456 \
   --engine.spark.home=/opt/spark \
+  --engine.kyuubi.rest-base-url="${KYUUBI_REST_BASE_URL}" \
   --engine.jar.base-path=/opt/dataforge/jars \
   '--mybatis-plus.mapper-locations=classpath:mapper/common/*.xml,classpath:mapper/postgresql/*.xml'

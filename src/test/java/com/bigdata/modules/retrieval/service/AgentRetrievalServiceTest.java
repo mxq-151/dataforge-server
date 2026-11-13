@@ -152,8 +152,8 @@ class AgentRetrievalServiceTest {
     @DisplayName("库名命中：按库检索时返回该库下的表，匹配依据标记为 database")
     void databaseNameKeywordFindsTablesInThatDatabase() {
         stubTables(List.of(
-                table(1L, "test_db", "olist_geolocation_dataset", "地理坐标"),
-                table(2L, "test_db", "olist_orders_dataset", "订单"),
+                table(1L, "test_db", "retail_geolocation_dataset", "地理坐标"),
+                table(2L, "test_db", "retail_orders_dataset", "订单"),
                 table(3L, "dwd_trade_prod", "dwd_trade_order_d", "订单明细")));
 
         AgentSearchResponse response = service.search(request(List.of("test_db"), null, 30));

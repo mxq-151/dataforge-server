@@ -100,9 +100,36 @@ ON CONFLICT (tenant_id, role_id) DO NOTHING;
 INSERT INTO datasource_config (id, datasource_name, datasource_type, connection_type, storage_engine, url, database_name, username, password, connection_status, last_test_time, description, create_by, create_time, update_time) VALUES
 (1,'test_datasource','postgresql','jdbc','POSTGRESQL','jdbc:postgresql://127.0.0.1:5432/test_db?currentSchema=test_db','["test_db"]','test_tenant','3UcRXfVuO9KPvpqKUXMswQ==',1,'2026-07-13 15:17:00','系统初始化-连接test_db的PostgreSQL数据源',3,'2026-07-13 15:17:00','2026-07-13 15:28:14');
 
+-- Kyuubi 数据源：REST(HTTP) 前端 http://127.0.0.1:10099，默认库 test_db，
+-- 25 张 TPC-DS 表由容器内 Hive Metastore 2.3.9 管理。
+-- 认证 kyuubi.authentication=NONE，故密码为空；username 仅用于 Kyuubi 会话/引擎归属。
+-- 说明：不再使用 HIVE + jdbc:hive2://...:10009（那条链路的 REST 地址只能靠全局配置兜底）。
+-- 幂等：冲突时更新为 Kyuubi 类型/HTTP 地址，老库重复导入也能完成迁移。
+INSERT INTO datasource_config (id, datasource_name, datasource_type, connection_type, storage_engine, url, database_name, username, password, connection_status, last_test_time, description, create_by, create_time, update_time) VALUES
+(2,'kyuubi_datasource','kyuubi','http','KYUUBI','http://127.0.0.1:10099','["test_db"]','test_tenant','',1,'2026-11-14 01:00:00','系统初始化-Kyuubi REST数据源(test_db, 25张TPC-DS表)',3,'2026-11-13 16:00:00','2026-11-14 01:00:00')
+ON CONFLICT (id) DO UPDATE SET
+  datasource_name = EXCLUDED.datasource_name,
+  datasource_type = EXCLUDED.datasource_type,
+  connection_type = EXCLUDED.connection_type,
+  storage_engine = EXCLUDED.storage_engine,
+  url = EXCLUDED.url,
+  database_name = EXCLUDED.database_name,
+  username = EXCLUDED.username,
+  description = EXCLUDED.description,
+  update_time = EXCLUDED.update_time;
+
 -- 库表资源授权：测试租户下数据开发/数据架构师角色对 test_db 全部表读写
 INSERT INTO sys_table_permission (id, permission_name, datasource_name, database_name, table_names, permission_scope, can_select, can_insert, can_update, can_delete, can_export, description, create_time, update_time) VALUES
 (1,'test_db读写权限','test_datasource','test_db','*',1,1,1,1,1,1,'test用户对test_db的全部表读写权限','2026-07-13 15:17:00','2026-07-13 15:55:04');
+
+-- Kyuubi 数据源库表授权（test_db 下 25 张 TPC-DS 表只读）
+INSERT INTO sys_table_permission (id, permission_name, datasource_name, database_name, table_names, permission_scope, can_select, can_insert, can_update, can_delete, can_export, description, create_time, update_time) VALUES
+(2,'kyuubi_test_db读权限','kyuubi_datasource','test_db','*',1,1,0,0,0,1,'test用户对Kyuubi test_db的查询权限','2026-11-13 16:00:00','2026-11-14 01:00:00')
+ON CONFLICT (id) DO UPDATE SET
+  permission_name = EXCLUDED.permission_name,
+  datasource_name = EXCLUDED.datasource_name,
+  description = EXCLUDED.description,
+  update_time = EXCLUDED.update_time;
 
 INSERT INTO sys_role_table_permission (id, role_id, table_permission_id, create_time) VALUES
 (379,3,1,'2026-07-13 15:55:04'),(380,6,1,'2026-07-13 15:55:04')

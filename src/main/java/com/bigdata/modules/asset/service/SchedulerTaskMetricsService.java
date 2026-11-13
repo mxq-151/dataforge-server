@@ -253,7 +253,7 @@ public class SchedulerTaskMetricsService {
      * 两个排序维度都按「窗口内累计运行时长」降序（resource 维度降级，前端提示语需同步）。</p>
      *
      * <p>环境维度取自<b>工作流名后缀</b>：提交调度时环境就拼在工作流名末尾
-     * （{@code olist_code_ods} + test → {@code olist_code_ods_test}），
+     * （{@code retail_code_ods} + test → {@code retail_code_ods_test}），
      * 与库名的环境后缀是同一套约定（见 {@link DeployEnvParser}）。
      * 工作流名解析不出环境时表示「无法归属到某个环境」，在显式按环境过滤时被排除。</p>
      *

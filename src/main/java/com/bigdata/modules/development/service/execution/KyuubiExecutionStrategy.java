@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
@@ -37,6 +38,17 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     private ProcessManager processManager;
 
     private final RestTemplate restTemplate = new RestTemplate();
+
+    /**
+     * Kyuubi REST 前端的独立地址（可选）。
+     * <p>Kyuubi 的 Thrift 与 REST 是两个前端、各自监听不同端口（默认 10009 / 10099）。
+     * 数据源 URL（jdbc:hive2://host:10009/db）里的端口是 JDBC/Thrift 端口，直接当 REST
+     * 地址用会把 HTTP 请求打到 Thrift 端口，被服务端直接断开，报
+     * "Unexpected end of file from server"。</p>
+     * <p>为空时沿用历史推导（URL 本身是 http(s) 的场景不受影响）。</p>
+     */
+    @Value("${engine.kyuubi.rest-base-url:}")
+    private String kyuubiRestBaseUrl;
 
     /** 异步执行的任务缓存，用于取消操作 */
     private final ConcurrentHashMap<String, Future<?>> asyncTaskMap = new ConcurrentHashMap<>();
@@ -167,7 +179,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         }
 
         DatasourceConfig dsConfig = context.getPrimaryDatasourceConfig();
-        String baseUrl = buildBaseUrl(dsConfig.getUrl());
+        String baseUrl = resolveBaseUrl(dsConfig);
         String username = dsConfig.getUsername();
         String password = dsConfig.getPassword();
 
@@ -364,6 +376,25 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     }
 
     // ==================== Kyuubi REST API 调用方法 ====================
+
+    /**
+     * 解析 Kyuubi REST 基础地址，优先级（从高到低）：
+     * <ol>
+     *   <li>数据源 URL 本身是 http(s)：KYUUBI 类型的标准配置，直接用，不做任何推导；</li>
+     *   <li>全局配置 {@code engine.kyuubi.rest-base-url}：兼容 HIVE 类型 + jdbc URL 的老记录；</li>
+     *   <li>从 JDBC URL 推导 host:port：最后兜底（历史上 REST 与 Thrift 同端口的错误假设）。</li>
+     * </ol>
+     */
+    private String resolveBaseUrl(DatasourceConfig dsConfig) {
+        String url = dsConfig.getUrl();
+        if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+            return url.trim().replaceAll("/+$", "");
+        }
+        if (kyuubiRestBaseUrl != null && !kyuubiRestBaseUrl.isBlank()) {
+            return kyuubiRestBaseUrl.trim().replaceAll("/+$", "");
+        }
+        return buildBaseUrl(url);
+    }
 
     /** 从JDBC URL构建REST基础URL：jdbc:hive2://host:port/db -> http://host:port */
     private String buildBaseUrl(String jdbcUrl) {
@@ -973,7 +1004,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     @Override
     public boolean testConnection(DatasourceConfig datasourceConfig) {
         try {
-            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            String baseUrl = resolveBaseUrl(datasourceConfig);
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
             SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
             return entry != null && entry.sessionHandle != null && !entry.sessionHandle.isEmpty();
@@ -987,7 +1018,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     public List<String> listDatabases(DatasourceConfig datasourceConfig) {
         List<String> databases = new ArrayList<>();
         try {
-            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            String baseUrl = resolveBaseUrl(datasourceConfig);
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
             SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
             if (entry == null) return databases;
@@ -1026,7 +1057,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     public List<TableMetadata> listTables(DatasourceConfig datasourceConfig, String databaseName) {
         List<TableMetadata> tables = new ArrayList<>();
         try {
-            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            String baseUrl = resolveBaseUrl(datasourceConfig);
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
             SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
             if (entry == null) return tables;
@@ -1038,14 +1069,21 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
             OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
             if (result.status == OperationStatus.FINISHED && result.rows != null) {
+                // Spark 3.x 的 SHOW TABLES 返回三列 [namespace, tableName, isTemporary]，
+                // 直接取第 0 列会把库名当表名（后续 DESCRIBE db.db 必失败）；Hive 2.x 才是单列 tab_name。
+                // 因此优先按列名定位，取不到再按列数兜底。
+                int nameIdx = columnIndex(result.columns, "tableName");
                 for (List<String> row : result.rows) {
-                    if (!row.isEmpty()) {
-                        TableMetadata tableMeta = new TableMetadata();
-                        tableMeta.setTableName(row.get(0));
-                        tableMeta.setTableType("TABLE");
-                        tableMeta.setDatabaseName(databaseName);
-                        tables.add(tableMeta);
-                    }
+                    if (row.isEmpty()) continue;
+                    int idx = nameIdx >= 0 ? nameIdx : (row.size() >= 3 ? 1 : 0);
+                    if (idx >= row.size()) continue;
+                    String tableName = row.get(idx);
+                    if (tableName == null || tableName.isEmpty() || "NULL".equals(tableName)) continue;
+                    TableMetadata tableMeta = new TableMetadata();
+                    tableMeta.setTableName(tableName);
+                    tableMeta.setTableType("TABLE");
+                    tableMeta.setDatabaseName(databaseName);
+                    tables.add(tableMeta);
                 }
             }
             // 表属性补齐：DESCRIBE EXTENDED 提供分区列/存储大小/行数/压缩算法/位置/最后修改时间
@@ -1057,6 +1095,17 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         }
         // Session由缓存管理，不在此关闭
         return tables;
+    }
+
+    /**
+     * 按列名定位下标（大小写不敏感），列元数据缺失时返回 -1。
+     */
+    private int columnIndex(List<String> columns, String name) {
+        if (columns == null) return -1;
+        for (int i = 0; i < columns.size(); i++) {
+            if (name.equalsIgnoreCase(columns.get(i))) return i;
+        }
+        return -1;
     }
 
     /**
@@ -1089,7 +1138,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     public Map<String, Long> listTableSizes(DatasourceConfig datasourceConfig, String databaseName) {
         Map<String, Long> sizes = new LinkedHashMap<>();
         try {
-            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            String baseUrl = resolveBaseUrl(datasourceConfig);
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
             SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(),
                     datasourceConfig.getPassword(), ctx);
@@ -1153,7 +1202,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             return result;
         }
         try {
-            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            String baseUrl = resolveBaseUrl(datasourceConfig);
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
             SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(),
                     datasourceConfig.getPassword(), ctx);
@@ -1365,7 +1414,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     public List<ColumnMetadataVO> listColumns(DatasourceConfig datasourceConfig, String databaseName, String tableName) {
         List<ColumnMetadataVO> columns = new ArrayList<>();
         try {
-            String baseUrl = buildBaseUrl(datasourceConfig.getUrl());
+            String baseUrl = resolveBaseUrl(datasourceConfig);
             CodeExecutionContext ctx = buildMinimalContext(datasourceConfig);
             SessionEntry entry = getOrCreateSession(baseUrl, datasourceConfig.getUsername(), datasourceConfig.getPassword(), ctx);
             if (entry == null) return columns;

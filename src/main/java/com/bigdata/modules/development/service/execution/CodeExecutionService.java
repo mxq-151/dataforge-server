@@ -389,6 +389,15 @@ public class CodeExecutionService {
         }
         result.put("engine", storageEngine.name());
 
+        // Kyuubi(REST) 数据源的地址是 http://host:10099，没有 JDBC 连接串，
+        // 无法复用本地 JDBC 做语法校验；直接放行，由 Kyuubi 服务端在提交时解析。
+        if (dsConfig.getUrl() != null
+                && (dsConfig.getUrl().startsWith("http://") || dsConfig.getUrl().startsWith("https://"))) {
+            result.put("valid", true);
+            result.put("message", "Kyuubi REST 数据源跳过本地语法校验");
+            return result;
+        }
+
         String dbName = (dsConfig.getDatabaseName() != null && !dsConfig.getDatabaseName().isEmpty())
                 ? dsConfig.getDatabaseName().get(0) : null;
 
