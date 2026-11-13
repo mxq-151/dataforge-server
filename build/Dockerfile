@@ -339,6 +339,15 @@ RUN sed -i "s|^-Duser.timezone=.*$|-Duser.timezone=${SPRING_JACKSON_TIME_ZONE}|"
         /opt/dolphinscheduler/standalone-server/bin/jvm_args_env.sh \
  && grep -n 'Duser.timezone' /opt/dolphinscheduler/standalone-server/bin/jvm_args_env.sh
 
+# ---------- DolphinScheduler Worker 任务并行度 ----------
+# DS 3.4.1 中 worker 的并行度由 worker.physical-task-config.task-executor-thread-size 决定
+# (物理任务执行线程池大小,同时作为上报给 master 的可用 slot 数),发行包默认 100。
+# 单容器内 Spark 任务较重,按容器资源压到 2,避免同时拉起过多任务把内存/CPU 打满。
+RUN sed -i 's|^\([[:space:]]*task-executor-thread-size:\).*$|\1 2|' \
+        /opt/dolphinscheduler/standalone-server/conf/application.yaml \
+ && grep -n -B2 'task-executor-thread-size' \
+        /opt/dolphinscheduler/standalone-server/conf/application.yaml
+
 # ---------- Marquez 0.51.1(自建产物) ----------
 COPY --from=marquez-builder /opt/marquez-src/api/build/libs/marquez-api-0.51.1.jar /opt/marquez/
 COPY --from=marquez-builder /opt/marquez-src/marquez.dev.yml /opt/marquez/
