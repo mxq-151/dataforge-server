@@ -373,14 +373,11 @@ COPY build/dist/postgresql-42.7.12.jar /opt/dataforge/jars/postgresql-42.7.12.ja
 # 报 column "xxx" does not exist，且极易被误判成"镜像没重建"。
 # /opt/dataforge-image 不被任何卷挂载，entrypoint 每次启动都用它覆盖 /opt/dataforge，
 # 保证镜像始终是权威版本（见 build/scripts/docker-entrypoint.sh）。
-COPY src/main/resources/sql/init/dataforge-postgresql.sql /opt/dataforge-image/sql/dataforge-postgresql.sql
-COPY src/main/resources/sql/testdata/dataforge-testdata-postgresql.sql /opt/dataforge-image/sql/testdata/dataforge-testdata-postgresql.sql
-COPY src/main/resources/sql/testdata/test_db-postgresql.sql /opt/dataforge-image/sql/testdata/test_db-postgresql.sql
+COPY src/main/resources/sql/ddl/dataforge-postgresql.sql /opt/dataforge-image/sql/ddl/dataforge-postgresql.sql
+COPY src/main/resources/sql/init/dataforge-postgresql.sql /opt/dataforge-image/sql/init/dataforge-postgresql.sql
 COPY build/sql/dolphinscheduler-init-data.sql /opt/dataforge-image/sql/dolphinscheduler-init-data.sql
 # TPC-DS 建表 DDL（test_db 库，25 张外部表，LOCATION=/opt/dataforge/warehouse/tpcds/*）；由 init-hive-tables.sh 执行
 COPY build/sql/tpcds-ddl.sql /opt/dataforge-image/sql/tpcds-ddl.sql
-# 既有库自愈：HIVE(jdbc) -> KYUUBI(REST) 数据源迁移，每次启动幂等执行
-COPY build/sql/migrate-kyuubi-datasource.sql /opt/dataforge-image/sql/migrate-kyuubi-datasource.sql
 COPY build/scripts/ /opt/dataforge-image/scripts/
 COPY build/scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY build/conf/supervisord.conf /etc/supervisor/conf.d/dataforge.conf

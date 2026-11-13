@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>服务端枚举 {@link QualityRuleType}（落库与校验分支的依据）；</li>
  *   <li>前端 {@code dataforge/src/types/quality.ts} 的 {@code QUALITY_RULE_TYPES}
  *       （UI 展示与提示词生成的唯一事实源）；</li>
- *   <li>建库脚本 {@code sql/init/dataforge-*.sql} 里 {@code dq_rule_template} 的内置模板种子
+ *   <li>初始化数据脚本 {@code sql/init/dataforge-*.sql} 里 {@code dq_rule_template} 的内置模板种子
  *       （决定 template_code 与 rule_type 是否同名）。</li>
  * </ol>
  * </p>
@@ -231,7 +231,7 @@ class QualityRuleTypeContractTest {
         return Files.readString(file, StandardCharsets.UTF_8);
     }
 
-    /** 读取 PostgreSQL 建库脚本（四方言里种子内容一致，取一份即可）。 */
+    /** 读取 PostgreSQL 初始化数据脚本（四方言里种子内容一致，取一份即可）。 */
     private String readInitScript() throws IOException {
         Path file = Paths.get("src/main/resources/sql/init/dataforge-postgresql.sql").toAbsolutePath();
         Assumptions.assumeTrue(Files.exists(file), "未找到建库脚本 " + file);

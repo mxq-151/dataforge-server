@@ -12,7 +12,7 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 | 安全      | Spring Security 6 + JWT（jjwt 0.12.3，默认有效期 24h，`Authorization: Bearer <token>`）         |
 | Web     | spring-boot-starter-web / validation / aop / websocket                                 |
 | ORM     | MyBatis-Plus 3.5.5（`mybatis-plus-spring-boot3-starter`，`mapper/**/*.xml`）              |
-| 数据库     | MySQL 8（默认）、PostgreSQL；`sql/init` 另提供 MariaDB / H2 方言脚本                                |
+| 数据库     | MySQL 8（默认）、PostgreSQL；`sql/ddl`（建表）+ `sql/init`（初始化数据）另提供 MariaDB / H2 方言脚本                                |
 | 接口文档    | Knife4j 4.4.0（`knife4j-openapi3-jakarta-spring-boot-starter`，OpenAPI 3）                |
 | 工具库     | Hutool 5.8.24、Guava 33.0.0-jre、HttpClient 4.5.14                                       |
 | 计算/存储对接 | Hadoop 3.4.3、HBase 2.5.9、JuiceFS Hadoop 1.2.3、Calcite 1.37.0、JSqlParser 4.9、Apache ORC |
@@ -36,7 +36,7 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 
 ## 数据模型
 
-`src/main/resources/sql/init/` 下的初始化脚本共 **27 张表**，按用途分为五组：
+`src/main/resources/sql/ddl/` 下的建表脚本共 **27 张表**，按用途分为五组：
 
 | 分组        | 表                                                                                                                                                                                                                                                                 |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -117,7 +117,8 @@ DDL 执行成功后会触发元数据同步；同步失败不再只写 warn 日�
 **环境要求**：JDK 17+、Maven 3.6+、MySQL 8（或 PostgreSQL）。
 
 ```bash
-# 1. 初始化数据库（按数据库方言选择脚本）
+# 1. 初始化数据库（按方言选择脚本；先建表，再导入初始化数据）
+mysql -u root -p < src/main/resources/sql/ddl/dataforge-mysql.sql
 mysql -u root -p < src/main/resources/sql/init/dataforge-mysql.sql
 
 # 2. 修改连接信息：src/main/resources/application.yml -> spring.datasource.*
@@ -128,7 +129,7 @@ mvn spring-boot:run
 
 - 服务地址：<http://localhost:8083/api>
 - 接口文档：<http://localhost:8083/api/doc.html>
-- 默认账号：`admin` / `123456`（初始化脚本预置 1 个 `SUPER_ADMIN` 角色；测试用的用户 / 角色 / 菜单 / 租户 / 数据源见 `sql/testdata/`）
+- 默认账号：`admin` / `123456`（初始化脚本预置 1 个 `SUPER_ADMIN` 角色；测试用的用户 / 角色 / 菜单 / 租户 / 数据源已包含在 `sql/init/` 初始化脚本中）
 
 登录自测：
 

@@ -1,0 +1,954 @@
+-- ============================================================
+-- dataforge - PostgreSQL 14+ 建表脚本（DDL）
+-- 约定：
+--   * 自增主键使用 BIGSERIAL（允许显式 id 插入）
+--   * tinyint -> smallint, longtext/text -> text, json -> jsonb
+--   * enum -> varchar + CHECK 约束
+--   * 主键 id 与 Java Long 对齐，统一 BIGSERIAL
+--   * operation_audit_log 在本脚本中按普通表建立（PG 原生分区不支持
+--     MySQL 的 p_max 兜底+日分区重叠语义），审计清理走 DELETE 兜底
+-- 初始化数据：sql/init/dataforge-postgresql.sql（需在本脚本之后执行）
+-- ============================================================
+
+BEGIN;
+
+-- ==================================================================
+-- 资产目录模块（asset_*）：对标 DataWorks 数据资产目录
+--   分类不靠人工维护：表名规范 {分层}_{业务域}_{实体描述}_{刷新周期} 可直接
+--   解析出分层与业务域，解析失败即「未分类」并自动成为治理项；
+--   asset_category 只存人工覆盖与显示名。
+-- ==================================================================
+
+-- 资产分类表(分层/业务域，支持人工覆盖)
+CREATE TABLE IF NOT EXISTS asset_category (
+  id BIGSERIAL,
+  category_code VARCHAR(64) NOT NULL,
+  category_name VARCHAR(100) NOT NULL,
+  parent_code VARCHAR(64),
+  category_kind VARCHAR(16) NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  remark VARCHAR(500),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_category_code UNIQUE (category_code)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_category_kind ON asset_category (category_kind);
+CREATE INDEX IF NOT EXISTS idx_asset_category_parent ON asset_category (parent_code);
+COMMENT ON TABLE asset_category IS '资产分类表(分层/业务域，支持人工覆盖)';
+COMMENT ON COLUMN asset_category.category_kind IS '分类维度(layer=数仓分层 domain=业务域)';
+
+
+-- ==================================================================
+-- 资产目录模块（第二批 / 第三批）：标签、使用说明
+--   使用说明复用同一张 asset_doc + 版本历史，避免重复建设 markdown 与版本能力。
+-- ==================================================================
+
+-- 资产使用说明表(markdown，版本历史在 asset_doc_history)
+CREATE TABLE IF NOT EXISTS asset_doc (
+  id BIGSERIAL NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  content TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  update_by VARCHAR(100),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_doc_table UNIQUE (table_metadata_id)
+);
+COMMENT ON TABLE asset_doc IS '资产使用说明表(markdown，版本历史在 asset_doc_history)';
+COMMENT ON COLUMN asset_doc.update_by IS '最后修改人';
+
+-- 资产使用说明版本历史表
+CREATE TABLE IF NOT EXISTS asset_doc_history (
+  id BIGSERIAL NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  version INTEGER NOT NULL,
+  content TEXT,
+  update_by VARCHAR(100),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_doc_history_table ON asset_doc_history (table_metadata_id);
+COMMENT ON TABLE asset_doc_history IS '资产使用说明版本历史表';
+
+-- 资产标签定义表
+CREATE TABLE IF NOT EXISTS asset_tag (
+  id BIGSERIAL NOT NULL,
+  tag_code VARCHAR(64) NOT NULL,
+  tag_name VARCHAR(100) NOT NULL,
+  color VARCHAR(32),
+  remark VARCHAR(500),
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_tag_code UNIQUE (tag_code)
+);
+COMMENT ON TABLE asset_tag IS '资产标签定义表';
+COMMENT ON COLUMN asset_tag.color IS '标签颜色(前端色值，如 #1565c0)';
+
+-- 资产标签关联表(支持表/字段/指标)
+CREATE TABLE IF NOT EXISTS asset_tag_rel (
+  id BIGSERIAL NOT NULL,
+  tag_id BIGINT NOT NULL,
+  asset_type VARCHAR(16) NOT NULL,
+  asset_id BIGINT NOT NULL,
+  table_metadata_id BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_tag_rel UNIQUE (tag_id, asset_type, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_tag_rel_asset ON asset_tag_rel (asset_type, asset_id);
+CREATE INDEX IF NOT EXISTS idx_asset_tag_rel_table ON asset_tag_rel (table_metadata_id);
+COMMENT ON TABLE asset_tag_rel IS '资产标签关联表(支持表/字段/指标)';
+
+-- 资产目录日快照表(T+1，一行=一张表×一个统计日)
+CREATE TABLE IF NOT EXISTS asset_catalog_daily (
+  id BIGSERIAL NOT NULL,
+  stat_date DATE NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  datasource_id BIGINT,
+  datasource_name VARCHAR(200),
+  storage_engine VARCHAR(40),
+  database_name VARCHAR(100),
+  table_name VARCHAR(200) NOT NULL,
+  table_comment VARCHAR(1000),
+  table_type VARCHAR(50),
+  layer_code VARCHAR(40),
+  domain_code VARCHAR(40),
+  convention_parsed SMALLINT NOT NULL DEFAULT 0,
+  refresh_cycle VARCHAR(8),
+  category_code VARCHAR(64),
+  business_owner VARCHAR(255),
+  tech_owner VARCHAR(255),
+  topic VARCHAR(255),
+  visibility VARCHAR(20),
+  asset_level VARCHAR(8),
+  row_count BIGINT,
+  size_bytes BIGINT,
+  column_count INTEGER NOT NULL DEFAULT 0,
+  tag_count INTEGER NOT NULL DEFAULT 0,
+  indicator_count INTEGER NOT NULL DEFAULT 0,
+  quality_rule_count INTEGER NOT NULL DEFAULT 0,
+  has_doc SMALLINT NOT NULL DEFAULT 0,
+  health_issue_count INTEGER NOT NULL DEFAULT 0,
+  health_issue_codes VARCHAR(500),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_asset_catalog_daily UNIQUE (stat_date, table_metadata_id)
+);
+CREATE INDEX IF NOT EXISTS idx_asset_catalog_daily_layer ON asset_catalog_daily (stat_date, layer_code);
+CREATE INDEX IF NOT EXISTS idx_asset_catalog_daily_domain ON asset_catalog_daily (stat_date, domain_code);
+CREATE INDEX IF NOT EXISTS idx_asset_catalog_daily_ds ON asset_catalog_daily (stat_date, datasource_id);
+COMMENT ON TABLE asset_catalog_daily IS '资产目录日快照表(T+1，一行=一张表×一个统计日)';
+COMMENT ON COLUMN asset_catalog_daily.stat_date IS '统计日';
+COMMENT ON COLUMN asset_catalog_daily.layer_code IS '命名规范解析出的分层编码(未解析为NULL)';
+COMMENT ON COLUMN asset_catalog_daily.domain_code IS '命名规范解析出的业务域编码(未解析为NULL)';
+COMMENT ON COLUMN asset_catalog_daily.health_issue_codes IS '治理项编码集合(逗号分隔)';
+
+-- 分区日大小表(T+1，一行=一张天分区表×一个统计日，记录当日最新分区)
+CREATE TABLE IF NOT EXISTS table_partition_size_daily (
+  id BIGSERIAL NOT NULL,
+  stat_date DATE NOT NULL,
+  table_metadata_id BIGINT NOT NULL,
+  datasource_id BIGINT,
+  database_name VARCHAR(100),
+  table_name VARCHAR(200) NOT NULL,
+  partition_column VARCHAR(64),
+  partition_value VARCHAR(64),
+  size_bytes BIGINT,
+  row_count BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_partition_size_daily UNIQUE (stat_date, table_metadata_id)
+);
+CREATE INDEX IF NOT EXISTS idx_partition_size_daily_table ON table_partition_size_daily (table_metadata_id, stat_date);
+CREATE INDEX IF NOT EXISTS idx_partition_size_daily_date ON table_partition_size_daily (stat_date);
+COMMENT ON TABLE table_partition_size_daily IS '分区日大小表(T+1，一行=一张天分区表×一个统计日，记录当日最新分区)';
+COMMENT ON COLUMN table_partition_size_daily.partition_column IS '日期类分区列名';
+COMMENT ON COLUMN table_partition_size_daily.partition_value IS '当日最新分区值';
+COMMENT ON COLUMN table_partition_size_daily.size_bytes IS '该分区存储字节数';
+
+-- 调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)
+CREATE TABLE IF NOT EXISTS scheduler_task_run_daily (
+  id BIGSERIAL NOT NULL,
+  stat_date DATE NOT NULL,
+  project_code VARCHAR(100) NOT NULL DEFAULT '',
+  project_name VARCHAR(200),
+  workflow_code BIGINT,
+  workflow_name VARCHAR(200) NOT NULL DEFAULT '',
+  node_name VARCHAR(200) NOT NULL DEFAULT '',
+  task_type VARCHAR(40) NOT NULL DEFAULT '',
+  task_run_count INTEGER NOT NULL DEFAULT 0,
+  delayed_count INTEGER NOT NULL DEFAULT 0,
+  success_count INTEGER NOT NULL DEFAULT 0,
+  failed_count INTEGER NOT NULL DEFAULT 0,
+  total_duration_seconds BIGINT NOT NULL DEFAULT 0,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_scheduler_task_run_daily UNIQUE (stat_date, project_code, workflow_name, node_name, task_type)
+);
+CREATE INDEX IF NOT EXISTS idx_scheduler_task_run_date ON scheduler_task_run_daily (stat_date);
+CREATE INDEX IF NOT EXISTS idx_scheduler_task_run_project ON scheduler_task_run_daily (stat_date, project_code);
+COMMENT ON TABLE scheduler_task_run_daily IS '调度任务运行日汇总表(T+1，由 DolphinScheduler 采集)';
+COMMENT ON COLUMN scheduler_task_run_daily.stat_date IS '统计日(任务实际开始日)';
+COMMENT ON COLUMN scheduler_task_run_daily.delayed_count IS '延迟实例数(实际开始晚于计划开始)';
+
+-- 表字段元数据表
+CREATE TABLE IF NOT EXISTS column_metadata (
+  id BIGSERIAL,
+  table_metadata_id BIGINT NOT NULL,
+  storage_engine VARCHAR(20),
+  database_name VARCHAR(100),
+  table_name VARCHAR(200),
+  column_name VARCHAR(200) NOT NULL,
+  column_type VARCHAR(100) NOT NULL,
+  column_comment VARCHAR(1000),
+  is_partition SMALLINT NOT NULL DEFAULT 0,
+  is_primary_key SMALLINT NOT NULL DEFAULT 0,
+  ordinal_position INTEGER NOT NULL DEFAULT 0,
+  nullable SMALLINT NOT NULL DEFAULT 1,
+  default_value VARCHAR(500),
+  business_desc VARCHAR(1000),
+  security_level VARCHAR(16),
+  sync_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_column_storage UNIQUE (storage_engine, database_name, table_name, column_name)
+);
+CREATE INDEX IF NOT EXISTS idx_column_metadata_table_metadata_id ON column_metadata (table_metadata_id);
+CREATE INDEX IF NOT EXISTS idx_column_metadata_column_name ON column_metadata (column_name);
+COMMENT ON TABLE column_metadata IS '表字段元数据表';
+COMMENT ON COLUMN column_metadata.business_desc IS '业务描述(与 column_comment 的技术注释区分，供资产目录展示)';
+COMMENT ON COLUMN column_metadata.security_level IS '字段安全等级';
+
+-- ==================================================================
+-- data_quality_check_result 已下线（2026-10-10）
+--   该历史结果表（check_item 为自由文本）已被 dq_rule_result 取代：
+--   规则级结果统一落 dq_rule_result。表连同前后端兼容端点一并移除。
+-- ==================================================================
+
+-- 数据源配置表
+CREATE TABLE IF NOT EXISTS datasource_config (
+  id BIGSERIAL,
+  datasource_name VARCHAR(100) NOT NULL,
+  datasource_type VARCHAR(50) NOT NULL,
+  connection_type VARCHAR(20) DEFAULT 'jdbc',
+  storage_engine VARCHAR(20),
+  url VARCHAR(500) NOT NULL,
+  database_name VARCHAR(500),
+  username VARCHAR(100),
+  password VARCHAR(255),
+  extra_params TEXT,
+  connection_status SMALLINT NOT NULL DEFAULT 0,
+  last_test_time TIMESTAMP,
+  description VARCHAR(500),
+  create_by BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+COMMENT ON COLUMN datasource_config.password IS '密码(AES加密存储)';
+CREATE INDEX IF NOT EXISTS idx_datasource_config_type ON datasource_config (datasource_type);
+CREATE INDEX IF NOT EXISTS idx_datasource_config_engine ON datasource_config (storage_engine);
+CREATE INDEX IF NOT EXISTS idx_datasource_config_conn_type ON datasource_config (connection_type);
+COMMENT ON TABLE datasource_config IS '数据源配置表';
+
+-- DDL执行日志表
+CREATE TABLE IF NOT EXISTS ddl_execution_log (
+  id BIGSERIAL,
+  datasource_id BIGINT NOT NULL,
+  database_name VARCHAR(100),
+  sql_content TEXT NOT NULL,
+  sql_type VARCHAR(20) NOT NULL,
+  object_type VARCHAR(20) DEFAULT 'TABLE',
+  object_name VARCHAR(200),
+  status VARCHAR(20) NOT NULL DEFAULT 'submitted',
+  affected_rows INTEGER,
+  error_message TEXT,
+  execution_time_ms INTEGER,
+  metadata_updated SMALLINT NOT NULL DEFAULT 0,
+  execute_by BIGINT,
+  execute_by_name VARCHAR(50),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_ddl_execution_log_datasource_id ON ddl_execution_log (datasource_id);
+CREATE INDEX IF NOT EXISTS idx_ddl_execution_log_sql_type ON ddl_execution_log (sql_type);
+CREATE INDEX IF NOT EXISTS idx_ddl_execution_log_status ON ddl_execution_log (status);
+CREATE INDEX IF NOT EXISTS idx_ddl_execution_log_create_time ON ddl_execution_log (create_time);
+COMMENT ON TABLE ddl_execution_log IS 'DDL执行日志表';
+
+-- JAR包依赖配置表
+CREATE TABLE IF NOT EXISTS dev_jar_dependency (
+  id BIGSERIAL,
+  jar_name VARCHAR(200) NOT NULL,
+  group_id VARCHAR(200),
+  artifact_id VARCHAR(200),
+  version VARCHAR(50),
+  scope VARCHAR(20) NOT NULL DEFAULT 'compile',
+  source VARCHAR(20) NOT NULL DEFAULT 'system',
+  jar_path VARCHAR(500),
+  repository_url VARCHAR(500),
+  file_size BIGINT,
+  checksum VARCHAR(64),
+  status SMALLINT NOT NULL DEFAULT 1,
+  description VARCHAR(500),
+  category VARCHAR(100),
+  program_type VARCHAR(20) NOT NULL DEFAULT 'flink',
+  auto_choose SMALLINT NOT NULL DEFAULT 0,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dev_jar_dependency_source ON dev_jar_dependency (source);
+CREATE INDEX IF NOT EXISTS idx_dev_jar_dependency_scope ON dev_jar_dependency (scope);
+COMMENT ON TABLE dev_jar_dependency IS 'JAR包依赖配置表';
+
+-- 程序运行参数表
+CREATE TABLE IF NOT EXISTS dev_program_params (
+  project_id BIGINT NOT NULL,
+  file_path VARCHAR(500) NOT NULL,
+  engine VARCHAR(50),
+  datasources TEXT,
+  jar_dependency_catalogs TEXT,
+  run_params TEXT,
+  compute_resources TEXT,
+  remark VARCHAR(500),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (project_id, file_path)
+);
+COMMENT ON TABLE dev_program_params IS '程序运行参数表';
+
+-- 开发项目管理表
+CREATE TABLE IF NOT EXISTS dev_project (
+  id BIGSERIAL,
+  project_name VARCHAR(200) NOT NULL,
+  project_code VARCHAR(100) NOT NULL,
+  description TEXT,
+  owner_id BIGINT,
+  owner_name VARCHAR(50),
+  default_datasource_id BIGINT,
+  status SMALLINT NOT NULL DEFAULT 1,
+  script_count INTEGER NOT NULL DEFAULT 0,
+  scheduled_count INTEGER NOT NULL DEFAULT 0,
+  create_by BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_by BIGINT,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_project_code UNIQUE (project_code)
+);
+CREATE INDEX IF NOT EXISTS idx_dev_project_owner_id ON dev_project (owner_id);
+CREATE INDEX IF NOT EXISTS idx_dev_project_status ON dev_project (status);
+COMMENT ON TABLE dev_project IS '开发项目管理表';
+
+-- 脚本执行历史表
+CREATE TABLE IF NOT EXISTS dev_script_execution (
+  id BIGSERIAL,
+  script_id BIGINT NOT NULL,
+  execution_id VARCHAR(64) NOT NULL,
+  script_type VARCHAR(50) NOT NULL,
+  execute_mode VARCHAR(20) NOT NULL DEFAULT 'debug',
+  engine_id BIGINT,
+  datasource_id BIGINT,
+  status VARCHAR(20) NOT NULL DEFAULT 'submitted',
+  start_time TIMESTAMP,
+  end_time TIMESTAMP,
+  duration_ms INTEGER,
+  input_params JSONB,
+  output_log TEXT,
+  error_message TEXT,
+  affected_rows INTEGER,
+  result_data JSONB,
+  submit_by BIGINT,
+  submit_by_name VARCHAR(50),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dev_script_execution_script_id ON dev_script_execution (script_id);
+CREATE INDEX IF NOT EXISTS idx_dev_script_execution_execution_id ON dev_script_execution (execution_id);
+CREATE INDEX IF NOT EXISTS idx_dev_script_execution_status ON dev_script_execution (status);
+CREATE INDEX IF NOT EXISTS idx_dev_script_execution_start_time ON dev_script_execution (start_time);
+CREATE INDEX IF NOT EXISTS idx_dev_script_execution_execute_mode ON dev_script_execution (execute_mode);
+COMMENT ON TABLE dev_script_execution IS '脚本执行历史表';
+
+-- ==================================================================
+-- 数据质量模块（dq_*）：对标 DataWorks 数据质量
+--   契约早已存在 —— 智能体提示词里已约定 7 类规则类型（主键唯一性/非空/值域/
+--   行数波动/行数环比/上下游对账/口径一致性）与 DQC 质量层，但平台侧原先只有
+--   一张自由文本的结果表，规则定义、阈值与运行记录无处存放。
+--   本模块补齐「规则 + 运行」两段（历史结果表 data_quality_check_result 已下线，2026-10-10）。
+--   ⚠ 规则类型是契约：新增/改名必须同时改前端 types/quality.ts 与提示词，禁止自造同义词。
+-- ==================================================================
+
+-- 规则模板表：内置模板即 7 类规则类型(template_code 与类型编码同名)；
+-- 自定义模板仍需归属 7 类之一(差异只在 SQL 模板，不在类型)，否则覆盖率统计失去口径
+CREATE TABLE IF NOT EXISTS dq_rule_template (
+  id BIGSERIAL,
+  template_code VARCHAR(64) NOT NULL,
+  template_name VARCHAR(200) NOT NULL,
+  rule_type VARCHAR(64) NOT NULL,
+  template_kind VARCHAR(16) NOT NULL DEFAULT 'custom',
+  sql_template TEXT,
+  field_types VARCHAR(255),
+  param_schema TEXT,
+  remark VARCHAR(500),
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_dq_template_code UNIQUE (template_code)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_template_rule_type ON dq_rule_template (rule_type);
+COMMENT ON TABLE dq_rule_template IS '数据质量规则模板表';
+COMMENT ON COLUMN dq_rule_template.rule_type IS '规则类型(7类之一:PRIMARY_KEY_UNIQUE/NOT_NULL/VALUE_RANGE/ROW_COUNT_FLUCTUATION/ROW_COUNT_MOM/UPSTREAM_DOWNSTREAM_RECON/METRIC_CONSISTENCY)';
+COMMENT ON COLUMN dq_rule_template.template_kind IS '模板类别(builtin=内置 custom=自定义)';
+
+-- 监控规则表：模板的具体应用，含校验对象、阈值与处置方式。
+--   dispose_mode=BLOCK 即「阻断下游」，落地方式是让质检任务自身跑失败，
+--   DolphinScheduler 的下游节点便不会触发（不依赖任何「反向置为失败」接口）
+CREATE TABLE IF NOT EXISTS dq_rule (
+  id BIGSERIAL,
+  rule_name VARCHAR(200) NOT NULL,
+  rule_type VARCHAR(64) NOT NULL,
+  template_id BIGINT,
+  template_code VARCHAR(64),
+  datasource_id BIGINT,
+  datasource_name VARCHAR(100),
+  database_name VARCHAR(100),
+  table_name VARCHAR(200) NOT NULL,
+  column_name VARCHAR(200),
+  partition_expr VARCHAR(255),
+  ref_datasource_id BIGINT,
+  ref_database_name VARCHAR(100),
+  ref_table_name VARCHAR(200),
+  ref_column_name VARCHAR(200),
+  compare_mode VARCHAR(8) NOT NULL DEFAULT 'EQ',
+  expected_value VARCHAR(255),
+  warn_threshold VARCHAR(255),
+  error_threshold VARCHAR(255),
+  dispose_mode VARCHAR(8) NOT NULL DEFAULT 'ALERT',
+  params TEXT,
+  owner_name VARCHAR(100),
+  enabled SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_table ON dq_rule (database_name, table_name);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_type ON dq_rule (rule_type);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_template ON dq_rule (template_id);
+CREATE INDEX IF NOT EXISTS idx_dq_rule_datasource ON dq_rule (datasource_id);
+COMMENT ON TABLE dq_rule IS '数据质量监控规则表';
+COMMENT ON COLUMN dq_rule.compare_mode IS '比较方式(EQ/NE/GT/GTE/LT/LTE)';
+COMMENT ON COLUMN dq_rule.params IS '自定义模板占位符取值(JSON 对象)；内置模板按规则类型使用固定参数名';
+COMMENT ON COLUMN dq_rule.dispose_mode IS '处置方式(BLOCK=阻断下游 ALERT=告警)，与提示词 S2 的「处置方式」同义';
+COMMENT ON COLUMN dq_rule.owner_name IS '规则负责人';
+COMMENT ON COLUMN dq_rule.warn_threshold IS '橙色(警告)阈值，空表示不设';
+COMMENT ON COLUMN dq_rule.error_threshold IS '红色(异常)阈值，空表示不设';
+
+-- 规则级校验结果表（结果留痕）：对应提示词「校验输出须可定位：规则名/校验对象/阈值/实际值/是否通过」
+--   每条结果自包含（批次、计数、实际执行的 SQL 都在），不依赖任何外部实例即可追溯；
+--   它是「行数波动 / 行数环比」试跑基线与资产目录质量摘要的唯一数据源。
+--   ⚠ 历史曾有的 run_id 列已随运行实例表（dq_run_instance）一并移除。
+CREATE TABLE IF NOT EXISTS dq_rule_result (
+  id BIGSERIAL,
+  batch_no VARCHAR(64),
+  rule_id BIGINT,
+  rule_name VARCHAR(200) NOT NULL,
+  rule_type VARCHAR(64) NOT NULL,
+  check_object VARCHAR(500),
+  threshold VARCHAR(255),
+  actual_value VARCHAR(500),
+  metric_value VARCHAR(64),
+  status VARCHAR(16) NOT NULL DEFAULT 'PASS',
+  severity VARCHAR(16),
+  check_record_count BIGINT NOT NULL DEFAULT 0,
+  fail_record_count BIGINT NOT NULL DEFAULT 0,
+  exec_sql TEXT,
+  error_msg VARCHAR(1000),
+  cost_ms BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_dq_result_rule ON dq_rule_result (rule_id);
+CREATE INDEX IF NOT EXISTS idx_dq_result_status ON dq_rule_result (status);
+CREATE INDEX IF NOT EXISTS idx_dq_result_batch ON dq_rule_result (batch_no);
+CREATE INDEX IF NOT EXISTS idx_dq_result_time ON dq_rule_result (create_time);
+COMMENT ON TABLE dq_rule_result IS '数据质量规则级校验结果表';
+COMMENT ON COLUMN dq_rule_result.batch_no IS '业务批次(如 20260917)';
+COMMENT ON COLUMN dq_rule_result.rule_name IS '规则名(结果自包含，规则被删后仍可追溯)';
+COMMENT ON COLUMN dq_rule_result.status IS '校验状态(PASS=通过 WARN=橙色异常 ERROR=红色异常 FAILED=校验失败)';
+COMMENT ON COLUMN dq_rule_result.check_object IS '校验对象(表.字段 或 上下游两表)';
+COMMENT ON COLUMN dq_rule_result.metric_value IS '原始度量值(行数类=当期行数 跨表比对=主表值,对照值)；仅存百分比无法回推历史基线';
+COMMENT ON COLUMN dq_rule_result.check_record_count IS '检查记录数(回传侧口径)';
+COMMENT ON COLUMN dq_rule_result.fail_record_count IS '未通过记录数(回传侧口径)';
+
+
+-- ==================================================================
+-- 数据质量模块：质检任务 / 运行实例 / 告警订阅三张链路已下线（2026-10-09）
+--   原先的 dq_run_instance、dq_alert_log、dq_alert_subscription、
+--   dq_task、dq_task_rule_rel 五张表连同其前后端代码一并移除；
+--   规则级结果保留在 dq_rule_result 中作为「结果留痕」。
+-- ==================================================================
+
+-- 指标定义主表
+CREATE TABLE IF NOT EXISTS indicators (
+  id BIGSERIAL,
+  project_code VARCHAR(200) NOT NULL,
+  topic VARCHAR(200) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  code VARCHAR(1024) NOT NULL,
+  business_definition TEXT,
+  calc_expr VARCHAR(1024) NOT NULL,
+  default_filter TEXT,
+  alert_config JSONB,
+  business_owner VARCHAR(1024),
+  tech_owner VARCHAR(1024),
+  refresh_interval INTEGER,
+  refresh_unit VARCHAR(10),
+  refresh_desc VARCHAR(10),
+  visibility VARCHAR(20) DEFAULT 'internal',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_code UNIQUE (code),
+  CONSTRAINT chk_indicators_visibility CHECK (visibility IN ('public','internal','restricted'))
+);
+COMMENT ON TABLE indicators IS '指标定义主表';
+
+-- 指标相关字段
+CREATE TABLE IF NOT EXISTS indicators_fields (
+  id BIGSERIAL,
+  indicators_id BIGINT NOT NULL,
+  datasource_name VARCHAR(200) NOT NULL,
+  db_name VARCHAR(200) NOT NULL,
+  tbl_name VARCHAR(200) NOT NULL,
+  field_name VARCHAR(200) NOT NULL,
+  field_type VARCHAR(200) NOT NULL,
+  PRIMARY KEY (id)
+);
+COMMENT ON TABLE indicators_fields IS '指标相关字段';
+
+-- 知识文档表
+CREATE TABLE IF NOT EXISTS knowledge_document (
+  id BIGSERIAL,
+  title VARCHAR(200) NOT NULL,
+  doc_type VARCHAR(30) NOT NULL,
+  category VARCHAR(100),
+  content TEXT,
+  author_name VARCHAR(50),
+  author_id BIGINT,
+  status SMALLINT NOT NULL DEFAULT 0,
+  sync_to_rag SMALLINT NOT NULL DEFAULT 0,
+  view_count INTEGER NOT NULL DEFAULT 0,
+  tags VARCHAR(500),
+  description VARCHAR(500),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_document_doc_type ON knowledge_document (doc_type);
+CREATE INDEX IF NOT EXISTS idx_knowledge_document_status ON knowledge_document (status);
+CREATE INDEX IF NOT EXISTS idx_knowledge_document_author_id ON knowledge_document (author_id);
+COMMENT ON TABLE knowledge_document IS '知识文档表';
+
+-- 审计日志表（PG 下按普通表建立，审计清理走 DELETE 兜底）
+CREATE TABLE IF NOT EXISTS operation_audit_log (
+  id BIGSERIAL,
+  user_id BIGINT,
+  username VARCHAR(50),
+  tenant_id BIGINT,
+  tenant_name VARCHAR(100),
+  module VARCHAR(50) NOT NULL,
+  operation VARCHAR(100) NOT NULL,
+  operation_type VARCHAR(20),
+  target_type VARCHAR(50),
+  target_id BIGINT,
+  target_name VARCHAR(200),
+  request_method VARCHAR(10),
+  request_url VARCHAR(500),
+  request_params TEXT,
+  response_body TEXT,
+  response_status INTEGER,
+  error_message TEXT,
+  exception_class VARCHAR(200),
+  ip_address VARCHAR(50),
+  user_agent VARCHAR(500),
+  operation_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  duration_ms INTEGER,
+  is_sensitive SMALLINT DEFAULT 0,
+  is_ai_request SMALLINT DEFAULT 0,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id, operation_time)
+);
+CREATE INDEX IF NOT EXISTS idx_operation_audit_log_user_id ON operation_audit_log (user_id);
+CREATE INDEX IF NOT EXISTS idx_operation_audit_log_tenant_id ON operation_audit_log (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_operation_audit_log_module ON operation_audit_log (module);
+CREATE INDEX IF NOT EXISTS idx_operation_audit_log_operation_type ON operation_audit_log (operation_type);
+COMMENT ON TABLE operation_audit_log IS '审计日志表';
+
+-- 存储配置表
+CREATE TABLE IF NOT EXISTS storage_config (
+  id BIGSERIAL,
+  storage_name VARCHAR(100) NOT NULL,
+  storage_type VARCHAR(20) NOT NULL,
+  endpoint VARCHAR(255),
+  bucket_name VARCHAR(100),
+  access_key VARCHAR(255),
+  secret_key VARCHAR(255),
+  root_path VARCHAR(255) NOT NULL DEFAULT '/',
+  local_mount_path VARCHAR(500),
+  extra_params TEXT,
+  status SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+COMMENT ON TABLE storage_config IS '存储配置表';
+
+-- 文件路径权限表
+CREATE TABLE IF NOT EXISTS sys_file_permission (
+  id BIGSERIAL,
+  storage_config_id BIGINT NOT NULL,
+  permission_name VARCHAR(100) NOT NULL,
+  file_path VARCHAR(1000) NOT NULL,
+  permission_type SMALLINT NOT NULL DEFAULT 1,
+  recursive SMALLINT NOT NULL DEFAULT 0,
+  description VARCHAR(500),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_file_permission_storage_config_id ON sys_file_permission (storage_config_id);
+CREATE INDEX IF NOT EXISTS idx_sys_file_permission_file_path ON sys_file_permission (file_path);
+COMMENT ON TABLE sys_file_permission IS '文件路径权限表';
+
+-- 菜单/页面权限表
+CREATE TABLE IF NOT EXISTS sys_menu_permission (
+  id BIGSERIAL,
+  parent_id BIGINT NOT NULL DEFAULT 0,
+  menu_name VARCHAR(100) NOT NULL,
+  menu_code VARCHAR(100) NOT NULL,
+  path VARCHAR(255),
+  component VARCHAR(255),
+  icon VARCHAR(100),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  visible SMALLINT NOT NULL DEFAULT 1,
+  status SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_menu_code UNIQUE (menu_code)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_menu_permission_parent_id ON sys_menu_permission (parent_id);
+COMMENT ON TABLE sys_menu_permission IS '菜单/页面权限表';
+
+-- 角色表
+CREATE TABLE IF NOT EXISTS sys_role (
+  id BIGSERIAL,
+  role_name VARCHAR(50) NOT NULL,
+  role_code VARCHAR(50) NOT NULL,
+  role_type VARCHAR(30) NOT NULL DEFAULT 'VIEWER',
+  description VARCHAR(255),
+  status SMALLINT NOT NULL DEFAULT 1,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_role_code UNIQUE (role_code)
+);
+COMMENT ON TABLE sys_role IS '角色表';
+
+-- 角色-文件权限关联表
+CREATE TABLE IF NOT EXISTS sys_role_file_permission (
+  id BIGSERIAL,
+  role_id BIGINT NOT NULL,
+  file_permission_id BIGINT NOT NULL,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_role_file UNIQUE (role_id, file_permission_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_role_file_permission_role_id ON sys_role_file_permission (role_id);
+COMMENT ON TABLE sys_role_file_permission IS '角色-文件权限关联表';
+
+-- 角色-菜单权限关联表
+CREATE TABLE IF NOT EXISTS sys_role_menu_permission (
+  id BIGSERIAL,
+  role_id BIGINT NOT NULL,
+  menu_permission_id BIGINT NOT NULL,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_role_menu UNIQUE (role_id, menu_permission_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_role_menu_permission_role_id ON sys_role_menu_permission (role_id);
+COMMENT ON TABLE sys_role_menu_permission IS '角色-菜单权限关联表';
+
+-- 角色项目权限关联表
+CREATE TABLE IF NOT EXISTS sys_role_project_permission (
+  id BIGSERIAL,
+  role_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  permission_type INTEGER NOT NULL,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_role_project UNIQUE (role_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_role_project_permission_role_id ON sys_role_project_permission (role_id);
+CREATE INDEX IF NOT EXISTS idx_sys_role_project_permission_project_id ON sys_role_project_permission (project_id);
+COMMENT ON TABLE sys_role_project_permission IS '角色项目权限关联表';
+
+-- 角色-库表权限关联表
+CREATE TABLE IF NOT EXISTS sys_role_table_permission (
+  id BIGSERIAL,
+  role_id BIGINT NOT NULL,
+  table_permission_id BIGINT NOT NULL,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_role_table UNIQUE (role_id, table_permission_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_role_table_permission_role_id ON sys_role_table_permission (role_id);
+COMMENT ON TABLE sys_role_table_permission IS '角色-库表权限关联表';
+
+-- 库表CRUD权限表
+CREATE TABLE IF NOT EXISTS sys_table_permission (
+  id BIGSERIAL,
+  permission_name VARCHAR(100) NOT NULL,
+  datasource_name VARCHAR(255),
+  database_name VARCHAR(255),
+  table_names TEXT,
+  permission_scope SMALLINT NOT NULL DEFAULT 1,
+  can_select SMALLINT NOT NULL DEFAULT 1,
+  can_insert SMALLINT NOT NULL DEFAULT 0,
+  can_update SMALLINT NOT NULL DEFAULT 0,
+  can_delete SMALLINT NOT NULL DEFAULT 0,
+  can_export SMALLINT NOT NULL DEFAULT 0,
+  row_filter_sql TEXT,
+  data_masking_rule VARCHAR(500),
+  description VARCHAR(500),
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_table_permission_scope ON sys_table_permission (permission_scope);
+COMMENT ON TABLE sys_table_permission IS '库表CRUD权限表';
+
+-- 库表权限-列级白名单（指定列）
+CREATE TABLE IF NOT EXISTS sys_table_permission_column (
+  id BIGSERIAL,
+  table_permission_id BIGINT NOT NULL,
+  table_name VARCHAR(255) NOT NULL,
+  column_name VARCHAR(255) NOT NULL,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_table_permission_column_perm ON sys_table_permission_column (table_permission_id);
+COMMENT ON TABLE sys_table_permission_column IS '库表权限-指定列白名单';
+
+-- 库表权限-行级过滤（指定行）
+CREATE TABLE IF NOT EXISTS sys_table_permission_row (
+  id BIGSERIAL,
+  table_permission_id BIGINT NOT NULL,
+  table_name VARCHAR(255) NOT NULL,
+  row_filter_sql TEXT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_table_permission_row_perm ON sys_table_permission_row (table_permission_id);
+COMMENT ON TABLE sys_table_permission_row IS '库表权限-行级过滤SQL';
+
+-- 租户表
+CREATE TABLE IF NOT EXISTS sys_tenant (
+  id BIGSERIAL,
+  tenant_name VARCHAR(100) NOT NULL,
+  tenant_code VARCHAR(50) NOT NULL,
+  contact_name VARCHAR(50),
+  contact_phone VARCHAR(20),
+  contact_email VARCHAR(100),
+  description VARCHAR(500),
+  status INTEGER DEFAULT 1,
+  owner_id BIGINT,
+  password VARCHAR(200),
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_tenant_code UNIQUE (tenant_code)
+);
+COMMENT ON COLUMN sys_tenant.password IS '租户密码(AES加密)';
+COMMENT ON TABLE sys_tenant IS '租户表';
+
+-- 租户角色关联表
+CREATE TABLE IF NOT EXISTS sys_tenant_role (
+  id BIGSERIAL,
+  tenant_id BIGINT NOT NULL,
+  role_id BIGINT NOT NULL,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_tenant_role UNIQUE (tenant_id, role_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_role_tenant_id ON sys_tenant_role (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_role_role_id ON sys_tenant_role (role_id);
+COMMENT ON TABLE sys_tenant_role IS '租户角色关联表';
+
+-- 租户用户关联表
+CREATE TABLE IF NOT EXISTS sys_tenant_user (
+  id BIGSERIAL,
+  tenant_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_tenant_id UNIQUE (tenant_id),
+  CONSTRAINT uk_user_id UNIQUE (user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_user_tenant_id ON sys_tenant_user (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_sys_tenant_user_user_id ON sys_tenant_user (user_id);
+COMMENT ON TABLE sys_tenant_user IS '租户用户关联表';
+
+-- 用户表
+CREATE TABLE IF NOT EXISTS sys_user (
+  id BIGSERIAL,
+  username VARCHAR(50) NOT NULL,
+  password VARCHAR(255) NOT NULL,
+  real_name VARCHAR(50),
+  email VARCHAR(100),
+  phone VARCHAR(20),
+  avatar VARCHAR(255),
+  status SMALLINT NOT NULL DEFAULT 1,
+  is_admin SMALLINT DEFAULT 0,
+  last_login_time TIMESTAMP,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_username UNIQUE (username)
+);
+COMMENT ON COLUMN sys_user.password IS '密码(MD5加密存储)';
+COMMENT ON TABLE sys_user IS '用户表';
+
+-- 库表元数据表
+CREATE TABLE IF NOT EXISTS table_metadata (
+  id BIGSERIAL,
+  datasource_id BIGINT NOT NULL,
+  storage_engine VARCHAR(20),
+  catalog_name VARCHAR(100),
+  database_name VARCHAR(100) NOT NULL,
+  table_name VARCHAR(200) NOT NULL,
+  table_type VARCHAR(50),
+  table_comment VARCHAR(1000),
+  table_create_time TIMESTAMP,
+  last_modify_time TIMESTAMP,
+  partition_columns TEXT,
+  storage_format VARCHAR(200),
+  compression VARCHAR(50),
+  location VARCHAR(500),
+  row_count BIGINT,
+  size_bytes BIGINT,
+  hot_days INTEGER NOT NULL DEFAULT 90,
+  cold_days INTEGER NOT NULL DEFAULT 180,
+  keep_days INTEGER NOT NULL DEFAULT 720,
+  sync_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  table_fingerprint VARCHAR(64),
+  columns_fingerprint VARCHAR(64),
+  business_owner VARCHAR(255),
+  tech_owner VARCHAR(255),
+  topic VARCHAR(200),
+  visibility VARCHAR(20) NOT NULL DEFAULT 'internal',
+  category_code VARCHAR(64),
+  asset_level VARCHAR(16),
+  create_by BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_table_storage UNIQUE (storage_engine, database_name, table_name),
+  CONSTRAINT chk_table_metadata_visibility CHECK (visibility IN ('public','internal','restricted'))
+);
+CREATE INDEX IF NOT EXISTS idx_table_metadata_database_name ON table_metadata (database_name);
+CREATE INDEX IF NOT EXISTS idx_table_metadata_table_name ON table_metadata (table_name);
+CREATE INDEX IF NOT EXISTS idx_table_metadata_owner ON table_metadata (business_owner);
+CREATE INDEX IF NOT EXISTS idx_table_metadata_category ON table_metadata (category_code);
+COMMENT ON TABLE table_metadata IS '库表元数据表';
+COMMENT ON COLUMN table_metadata.business_owner IS '业务负责人(语义对齐 indicators.business_owner；本表按负责人筛选，需可建索引，故宽度取 255)';
+COMMENT ON COLUMN table_metadata.tech_owner IS '技术负责人(同上)';
+COMMENT ON COLUMN table_metadata.topic IS '所属主题域(对齐 indicators.topic)';
+COMMENT ON COLUMN table_metadata.visibility IS '可见性(public/internal/restricted，对齐 indicators.visibility)';
+COMMENT ON COLUMN table_metadata.category_code IS '人工覆盖的分类编码；为空表示采用表名规范解析结果';
+COMMENT ON COLUMN table_metadata.asset_level IS '资产等级(L1~L5)';
+
+-- ============================================================
+-- 数据集成（Data Integration）
+-- 已有库升级：把下面两段 CREATE TABLE 单独执行一次即可
+-- ============================================================
+CREATE TABLE IF NOT EXISTS integration_task (
+  id BIGSERIAL,
+  task_name VARCHAR(200) NOT NULL,
+  task_code VARCHAR(100) NOT NULL,
+  description VARCHAR(500),
+  project_id BIGINT,
+  project_code VARCHAR(100),
+  source_type VARCHAR(50) NOT NULL,
+  source_config TEXT,
+  target_type VARCHAR(50) NOT NULL,
+  target_config TEXT,
+  cluster_type VARCHAR(50) NOT NULL,
+  read_parallelism INT NOT NULL DEFAULT 1,
+  write_parallelism INT NOT NULL DEFAULT 1,
+  job_mode VARCHAR(20) NOT NULL DEFAULT 'BATCH',
+  trigger_type VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
+  trigger_config VARCHAR(500),
+  extra_params TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+  job_id VARCHAR(200),
+  last_submit_time TIMESTAMP,
+  last_offline_time TIMESTAMP,
+  last_error VARCHAR(500),
+  create_by BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_integration_task_code UNIQUE (task_code)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_task_status ON integration_task (status);
+CREATE INDEX IF NOT EXISTS idx_integration_task_cluster ON integration_task (cluster_type);
+CREATE INDEX IF NOT EXISTS idx_integration_task_project ON integration_task (project_id);
+
+CREATE TABLE IF NOT EXISTS integration_task_table (
+  id BIGSERIAL,
+  task_id BIGINT NOT NULL,
+  source_table VARCHAR(200) NOT NULL,
+  exclude_columns VARCHAR(2000),
+  sort_no INT NOT NULL DEFAULT 0,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_integration_table_source UNIQUE (task_id, source_table)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_table_task ON integration_task_table (task_id);
+
+CREATE TABLE IF NOT EXISTS integration_submit_log (
+  id BIGSERIAL,
+  task_id BIGINT NOT NULL,
+  action VARCHAR(20) NOT NULL,
+  cluster_type VARCHAR(50),
+  job_id VARCHAR(200),
+  result_status VARCHAR(20) NOT NULL,
+  params_snapshot TEXT,
+  log_content TEXT,
+  error_message VARCHAR(1000),
+  operator_id BIGINT,
+  operator_name VARCHAR(100),
+  duration_ms BIGINT,
+  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+);
+CREATE INDEX IF NOT EXISTS idx_integration_log_task ON integration_submit_log (task_id);
+
+COMMIT;

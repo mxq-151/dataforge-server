@@ -35,7 +35,8 @@
 - 分页用 MyBatis-Plus `Page`，返回体字段为 `records`/`total`（前端依赖）。
 - 方言族收敛在各自模块的 `*Dialect`（如 `DqDialect`：MYSQL/POSTGRESQL/HIVE），
   引用符 / 转字符串 / LIMIT 差异不散落到业务代码。
-- 建表脚本：`src/main/resources/sql/init/`（4 方言全量）+ `sql/testdata/`（种子：菜单/角色/授权/演示库）。
+- 建表脚本：`src/main/resources/sql/ddl/`；初始化数据（含测试用户/角色/菜单/租户/Kyuubi 数据源）：
+  `sql/init/`（各 4 方言）。
   **2026-10-09 起已无迁移脚本**：`sql/migrate/` 目录与 `df_gen_mysql_migrate.py` 生成器整体删除，
   项目在开发阶段 —— 新库直接建、开发库直接重建，**init 是 schema 的唯一来源**。
   顺带解决了历史包袱：migrate 里残留的 `deleted` 列（早前"全表移除 deleted"时没跟着改）已随之消失。
@@ -133,32 +134,17 @@ Docker 只在卷首次创建时用镜像内容播种，之后重建镜像都不�
   （entrypoint 故意不覆盖 `dataforge-server.jar`，否则会把 `hot-update-dataforge-server.sh`
   的热更新在下次重启时回退。）
 
-## init 脚本自带「既有库自愈」段（2026-10-12 落地）
+## init 脚本只支持新库（2026-11-14 移除「既有库自愈」段）
 
-**背景**：`sql/init/` 是 schema 唯一来源且没有迁移机制，但原先 `init-dataforge.sh` 第 63 行
-「`sys_user` 存在就整段跳过 schema 导入」+ 建表只写 `CREATE TABLE IF NOT EXISTS`（只补表不补列），
-老库升级新镜像后新列永远补不上 → 线上报 `column "xxx" does not exist`。
+**变更**：`build/gen_init_schema_sync.py` 与 4 份 `sql/init/dataforge-*.sql` 中
+`BEGIN/END AUTO-GENERATED SCHEMA SYNC` 补齐段已全部删除（用户决策：只支持新库）。
+2026-11-14 起 `sql/` 拆为 `ddl/`（仅建表）与 `init/`（仅初始化数据，测试数据也已合并进来），
+4 方言各一份。
+`CREATE TABLE IF NOT EXISTS` 只补「缺表」，不再补「表在、列不在」；
+老库升级前必须人工补列或重建库（不要再重新引入自动补齐生成器）。
 
-**现在的机制**（4 份 `sql/init/dataforge-*.sql` 都带，勿手改这一段）：
-- 生成器：`build/gen_init_schema_sync.py`（`--check` 供 CI 用）。它从各文件**自身的建表段**解析出
-  全部列与约束，生成幂等补齐 SQL，挂在 `BEGIN/END AUTO-GENERATED SCHEMA SYNC` 标记之间。
-  **改完 DDL 必须重跑生成器**（38 表 / 472 列 / 约束数 PG 25、MySQL 88、H2 2）。
-- 方言写法：PG 用 `DO $$ ... information_schema + pg_constraint 存在性判断 + 动态 ALTER`；
-  MySQL 用存储过程 `df_sync_add_column` / `df_sync_add_index` + `CALL` 列表（含 DELIMITER，
-  必须 mysql CLI 执行）；H2 用 `ALTER TABLE **IF EXISTS** t ADD COLUMN IF NOT EXISTS ...`
-  （H2 的 `IF NOT EXISTS` 不保护缺表，漏了 `IF EXISTS` 会因 Table not found 中断整个脚本）。
-- **三个不能改的约束**：
-  1. **位置必须建表段之前**。`COMMENT ON` / `CREATE INDEX` 紧跟各表建表，老库缺列时它们先报错，
-     PG 里会 abort 整个事务，把后续语句全部带没（踩过：补齐段放文件末尾＝永远执行不到）。
-  2. **PG 的补齐段必须在 `BEGIN;` 之前**（事务之外），否则后面任何错误回滚会把补好的列一起撤销。
-  3. **每条 ALTER 各自兜异常**（PG `EXCEPTION WHEN OTHERS` → `RAISE WARNING`），单列失败不 abort 脚本。
-- `init-dataforge.sh` 第 4 步已去掉跳过守卫，**每次启动都全量执行 schema 脚本**，并把
-  `ERROR:` 计数打出来（有错就 WARN + 前 20 行），替代原先 `>/dev/null 2>&1` 的静默吞错。
-- 配套：种子 INSERT 全部改成幂等（PG `ON CONFLICT DO NOTHING`、MySQL/MariaDB `INSERT IGNORE`、
-  H2 `INSERT ... SELECT ... WHERE NOT EXISTS`）。**这是一条硬约束**：脚本每次启动都跑，
-  不幂等的 INSERT 会让 `asset_category` / `asset_tag` 这类参考数据静默插重复行（它们当时还没唯一键）。
-- 已验证：全新库、幂等重跑、以及「2026-09-23 前老库 → 跑新脚本」三种场景，4 种方言全部 0 错误；
-  老库补齐后覆盖脚本声明的全部 38 表 / 472 列 / 约束（只多出 13 个历史遗留 `deleted` 列，应用已不映射）。
+仍保留的幂等约束：种子 INSERT（PG `ON CONFLICT DO NOTHING`、MySQL/MariaDB `INSERT IGNORE`、
+H2 `INSERT ... SELECT ... WHERE NOT EXISTS`）—— `init-dataforge.sh` 每次启动仍全量执行 schema 脚本。
 
 ## ⚠ 增量构建必须送 sql/（2026-10-12 修掉的真根因）
 
@@ -170,9 +156,8 @@ Docker 只在卷首次创建时用镜像内容播种，之后重建镜像都不�
 新建的库只有 25 张表，报 `column "business_owner" does not exist`，且极易被误判成"镜像没重建"。
 
 - **已修**：`build_jar_only()` 的 staging 与临时 Dockerfile 现在一并送
-  `sql/dataforge-postgresql.sql`、`sql/testdata/*`、`sql/dolphinscheduler-init-data.sql`，
+  `sql/ddl/dataforge-postgresql.sql`、`sql/init/dataforge-postgresql.sql`、`sql/dolphinscheduler-init-data.sql`，
   COPY 到 `/opt/dataforge-image/sql/`；最后一行提示也加上了"初始化 SQL"。
-  代价：增量构建上下文 +126MB（testdata 的 test_db 转储），实测多花约 1.3 秒，可接受。
 - **踩坑记录（改这个 staging Dockerfile 时务必注意）**：
   1. **一旦在里面写 `ENTRYPOINT`，基础镜像继承来的 `CMD` 会被清空**（Docker 明确行为），
      必须同时重新声明 `CMD ["/usr/bin/supervisord","-c","/etc/supervisor/supervisord.conf"]`，

@@ -320,13 +320,11 @@ build_jar_only() {
   cp -R -l "$TPCDS_DATA_STAGE" "$staging/tpcds-data" 2>/dev/null \
     || cp -R "$TPCDS_DATA_STAGE" "$staging/tpcds-data"
   cp -R "$BUILD_DIR/scripts" "$staging/scripts"
-  mkdir -p "$staging/sql/testdata"
+  mkdir -p "$staging/sql/ddl" "$staging/sql/init"
+  cp "$SERVER_DIR/src/main/resources/sql/ddl/dataforge-postgresql.sql" \
+     "$staging/sql/ddl/dataforge-postgresql.sql"
   cp "$SERVER_DIR/src/main/resources/sql/init/dataforge-postgresql.sql" \
-     "$staging/sql/dataforge-postgresql.sql"
-  cp "$SERVER_DIR/src/main/resources/sql/testdata/dataforge-testdata-postgresql.sql" \
-     "$staging/sql/testdata/dataforge-testdata-postgresql.sql"
-  cp "$SERVER_DIR/src/main/resources/sql/testdata/test_db-postgresql.sql" \
-     "$staging/sql/testdata/test_db-postgresql.sql"
+     "$staging/sql/init/dataforge-postgresql.sql"
   cp "$BUILD_DIR/sql/dolphinscheduler-init-data.sql" \
      "$staging/sql/dolphinscheduler-init-data.sql"
   cp "$BUILD_DIR/scripts/docker-entrypoint.sh" "$staging/docker-entrypoint.sh"
