@@ -1,0 +1,197 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  dataforge all-in-one 容器内 YARN **最小形态**（伪分布式：RM + NM 同进程组、同容器）。
+
+  本文件是**模板**，占位符由 build/scripts/run-yarn.sh 在容器每次启动时用环境变量渲染成
+  /opt/hadoop/etc/hadoop/yarn-site.xml（构建期也会用默认值渲染一份，便于镜像内直接调 yarn CLI）：
+
+    __YARN_DATA_DIR__       默认 /var/lib/dataforge-yarn    NM local-dirs / tmp（临时，容器重建即丢）
+    __YARN_LOG_DIR__        默认 /opt/dataforge/yarn/logs   聚合日志落盘目录（df-data 卷，可持久）
+    __YARN_NM_MEMORY_MB__   默认 4096                      可调度内存上限（YARN_NM_MEMORY_MB 覆盖）
+    __YARN_NM_VCORES__      默认 2                         可调度 vcore 上限（YARN_NM_VCORES 覆盖）
+
+  限制：
+    - 单节点，无 HDFS，fs.defaultFS=file:///（见 core-site.xml）；
+    - 无 Timeline Server v2（Spark 不需要，省 ~1 个 JVM）；
+    - 关闭物理/虚拟内存检查：容器 cgroup 限额与宿主机视角不一致，开着会误杀容器；
+    - 未启用 LinuxContainerExecutor（容器内无 setuid container-executor），
+      因此**容器只能以 NodeManager 的运行用户（test_tenant）身份启动**，
+      提交作业也必须用该用户，否则报 "Can't run container ... as user root"。
+-->
+<configuration>
+  <!-- ================= ResourceManager（单节点 localhost） ================= -->
+  <property>
+    <name>yarn.resourcemanager.hostname</name>
+    <value>localhost</value>
+  </property>
+  <property>
+    <name>yarn.resourcemanager.address</name>
+    <value>localhost:8032</value>
+  </property>
+  <property>
+    <name>yarn.resourcemanager.scheduler.address</name>
+    <value>localhost:8030</value>
+  </property>
+  <property>
+    <name>yarn.resourcemanager.resource-tracker.address</name>
+    <value>localhost:8031</value>
+  </property>
+  <property>
+    <name>yarn.resourcemanager.admin.address</name>
+    <value>localhost:8033</value>
+  </property>
+  <!-- Web UI / REST：8088 对外（宿主映射 8088，未与 dataforge 8082 冲突） -->
+  <property>
+    <name>yarn.resourcemanager.webapp.address</name>
+    <value>0.0.0.0:8088</value>
+  </property>
+  <property>
+    <name>yarn.resourcemanager.webapp.https.address</name>
+    <value>0.0.0.0:8090</value>
+  </property>
+
+  <!-- ================= NodeManager ================= -->
+  <property>
+    <name>yarn.nodemanager.hostname</name>
+    <value>localhost</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.webapp.address</name>
+    <value>0.0.0.0:8042</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.localizer.address</name>
+    <value>localhost:8041</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.address</name>
+    <value>0.0.0.0:8043</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.local-dirs</name>
+    <value>__YARN_DATA_DIR__/nm-local</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.log-dirs</name>
+    <value>__YARN_DATA_DIR__/nm-logs</value>
+  </property>
+  <!-- 容器内单盘：放宽磁盘健康检查，避免 overlay 使用率高时 NM 拒绝启动 -->
+  <property>
+    <name>yarn.nodemanager.disk-health-checker.max-disk-utilization-per-disk-percentage</name>
+    <value>98.0</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.disk-health-checker.min-healthy-disks</name>
+    <value>0</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.vmem-check-enabled</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.pmem-check-enabled</name>
+    <value>false</value>
+  </property>
+  <!-- 关闭容器清理等待：单节点无需保留现场，加快 app 结束后目录回收 -->
+  <property>
+    <name>yarn.nodemanager.delete.debug-delay-sec</name>
+    <value>0</value>
+  </property>
+  <!-- 运行在容器内，禁用 cgroup（cgroup v2 在容器里权限受限，开了反而起不来） -->
+  <property>
+    <name>yarn.nodemanager.linux-container-executor.resources-handler.class</name>
+    <value>org.apache.hadoop.yarn.server.nodemanager.util.DefaultLCEResourcesHandler</value>
+  </property>
+
+  <!-- ================= 资源配额（保守，环境变量可覆盖） ================= -->
+  <property>
+    <name>yarn.nodemanager.resource.memory-mb</name>
+    <value>__YARN_NM_MEMORY_MB__</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.resource.cpu-vcores</name>
+    <value>__YARN_NM_VCORES__</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.minimum-allocation-mb</name>
+    <value>512</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.maximum-allocation-mb</name>
+    <value>__YARN_NM_MEMORY_MB__</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.minimum-allocation-vcores</name>
+    <value>1</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.maximum-allocation-vcores</name>
+    <value>__YARN_NM_VCORES__</value>
+  </property>
+  <property>
+    <name>yarn.scheduler.capacity.maximum-am-resource-percent</name>
+    <value>0.5</value>
+  </property>
+
+  <!-- ================= 日志聚合（落在容器内本地盘） ================= -->
+  <!-- fs.defaultFS=file:///，此处路径即容器内真实路径；NM 运行用户 test_tenant 必须可写 -->
+  <property>
+    <name>yarn.nodemanager.remote-app-log-dir</name>
+    <value>__YARN_LOG_DIR__</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.remote-app-log-dir-suffix</name>
+    <value>logs</value>
+  </property>
+  <property>
+    <name>yarn.log-aggregation-enable</name>
+    <value>true</value>
+  </property>
+  <!-- 聚合日志保留 7 天；容器重建后若挂在 df-data 卷上仍然可读 -->
+  <property>
+    <name>yarn.log-aggregation.retain-seconds</name>
+    <value>604800</value>
+  </property>
+  <property>
+    <name>yarn.log-aggregation.retain-check-interval-seconds</name>
+    <value>3600</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.log-aggregation.compression-type</name>
+    <value>none</value>
+  </property>
+
+  <!-- ================= 其它 ================= -->
+  <!-- 无 Kerberos，直接关 ACL，避免 yarn logs / REST 需要授权配置 -->
+  <property>
+    <name>yarn.acl.enable</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>yarn.admin.acl</name>
+    <value>*</value>
+  </property>
+  <property>
+    <name>yarn.timeline-service.enabled</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>yarn.resourcemanager.system-metrics-publisher.enabled</name>
+    <value>false</value>
+  </property>
+  <!-- 允许 NM 在无法解析主机名时使用 localhost -->
+  <property>
+    <name>yarn.nodemanager.recovery.enabled</name>
+    <value>false</value>
+  </property>
+  <!-- Spark 不需要 MR shuffle service；仍保留 aux-service 以兼容 hadoop 自检 -->
+  <property>
+    <name>yarn.nodemanager.aux-services</name>
+    <value>mapreduce_shuffle</value>
+  </property>
+  <property>
+    <name>yarn.nodemanager.aux-services.mapreduce_shuffle.class</name>
+    <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+  </property>
+</configuration>

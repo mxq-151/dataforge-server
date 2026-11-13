@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  dataforge all-in-one 容器内 YARN 的最小 core-site 配置。
+
+  ⚠ 本容器**不部署 HDFS**，默认文件系统直接指向本地文件系统（file:///）：
+    - YARN 的 staging / NM 工作目录 / 日志聚合全部落在容器内本地磁盘（或 df-data 卷）；
+    - 因此 YARN 作业的数据与日志**不能跨容器共享**，也无法验证 hdfs:// 路径相关的诊断能力；
+    - 需要真实 HDFS 时，把 fs.defaultFS 换成 hdfs://<nn>:8020 并另行部署 NameNode。
+-->
+<configuration>
+  <property>
+    <name>fs.defaultFS</name>
+    <value>file:///</value>
+  </property>
+  <!-- 临时目录：与 NM local-dirs 同盘，容器重建即丢失（作业运行期数据，无需持久化） -->
+  <property>
+    <name>hadoop.tmp.dir</name>
+    <value>__YARN_DATA_DIR__/tmp</value>
+  </property>
+  <property>
+    <name>io.file.buffer.size</name>
+    <value>131072</value>
+  </property>
+  <!-- 单节点、无 Kerberos：指定 HTTP 静态用户，避免 yarn logs / RM UI 因取不到用户而 403 -->
+  <property>
+    <name>hadoop.http.staticuser.user</name>
+    <value>test_tenant</value>
+  </property>
+</configuration>

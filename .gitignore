@@ -24,6 +24,11 @@ hs_err_pid*
 # Logs
 logs/
 *.log
+# 统一日志访问层是源码包（com.bigdata.modules.logs），不是运行期日志目录，需入库
+!src/main/java/com/bigdata/modules/logs/
+!src/main/java/com/bigdata/modules/logs/**
+!src/test/java/com/bigdata/modules/logs/
+!src/test/java/com/bigdata/modules/logs/**
 
 # IDE - IntelliJ IDEA
 .idea/

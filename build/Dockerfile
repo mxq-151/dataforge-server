@@ -1,6 +1,8 @@
 # ============================================================
 # dataforge All-in-One 镜像
 # 包含: dataforge-server + JDK17 + PostgreSQL14 + Spark3.5.9(local)
+#       + Hadoop 3.3.6 最小 YARN(RM+NM 伪分布式, 无 HDFS, Spark on YARN)
+#       + Spark History Server(18080, 事件日志落 df-data 卷)
 #       + DolphinScheduler3.4.1(standalone)
 #       + Marquez0.51.1(源码自建 api + web)
 #       + Spark 写入合规监听器 spark-write-compliance(core + spark-3.5, 全局装载)
@@ -176,6 +178,11 @@ RUN tar xzf /tmp/spark.tgz -C /opt \
 # 单独放成仓库文件而非内联 printf，便于随增量构建(./build.sh)一起刷新，也可直接 diff 审阅。
 COPY build/conf/spark-defaults.conf /opt/spark/conf/spark-defaults.conf
 
+# spark-env.sh：把 HADOOP_CONF_DIR/YARN_CONF_DIR 指到 /opt/hadoop/etc/hadoop，
+# 使 `spark-submit --master yarn` 能读到 RM 地址（否则报 Cannot initialize Cluster）。
+COPY build/conf/spark-env.sh /opt/spark/conf/spark-env.sh
+RUN chmod +x /opt/spark/conf/spark-env.sh
+
 # 数据血缘 Agent(OpenLineage 1.8.0),fat jar 自包含依赖,放入 spark jars 目录使其对
 # dataforge-server/DolphinScheduler 发起的 spark 任务全局生效
 COPY build/dist/openlineage-spark-1.8.0.jar /opt/spark/jars/openlineage-spark.jar
@@ -187,6 +194,42 @@ COPY build/dist/openlineage-spark-1.8.0.jar /opt/spark/jars/openlineage-spark.ja
 # 是 Spark 自己按类名反射装载的，类必须对驱动端类加载器可见，
 # 否则 Spark 只会打一条 "Cannot use ... to configure session extensions" 告警并静默跳过。
 COPY build/dist/spark-listeners/*.jar /opt/spark/jars/
+
+# ---------- Hadoop 3.3.6 最小可用 YARN（伪分布式 RM + NM，不含 HDFS） ----------
+# 发行包已预下载到本地 build/dist/（见 build.sh ensure_dist），构建不再联网下载。
+# install-hadoop.sh 负责裁剪：1.3G -> ~210M，只留 YARN 运行必需模块（详见脚本头部说明）。
+# 版本选择：Spark 3.5.9 的 bin-hadoop3 发行包基于 hadoop 3.3.x，YARN 侧对齐 3.3.6 最稳。
+#
+# ⚠ 发行包用 **bind mount** 而不是 COPY：730M 的 tar.gz 若 COPY 进镜像会永久留一层
+#   （即使后续 RUN 里 rm 掉，层里仍在，镜像体积照样 +730M）。bind mount 只读挂载构建上下文，
+#   不进任何层，装完即释放。
+RUN --mount=type=bind,source=build/dist/hadoop-3.3.6.tar.gz,target=/tmp/hadoop.tgz \
+    --mount=type=bind,source=build/scripts/install-hadoop.sh,target=/tmp/install-hadoop.sh \
+    bash /tmp/install-hadoop.sh /tmp/hadoop.tgz /opt/hadoop
+
+# YARN 配置：三个 XML 是**模板**（含 __YARN_*__ 占位符），运行期由 run-yarn.sh 按环境变量
+# 重新渲染（资源配额可配）；这里先用默认值渲染一份，保证镜像内直接调 yarn CLI 也能用。
+COPY build/conf/hadoop/ /opt/hadoop/etc/hadoop/
+RUN set -eux; \
+    cd /opt/hadoop/etc/hadoop; \
+    for f in core-site.xml mapred-site.xml yarn-site.xml; do \
+      sed -e 's|__YARN_DATA_DIR__|/var/lib/dataforge-yarn|g' \
+          -e 's|__YARN_LOG_DIR__|/opt/dataforge/yarn/logs|g' \
+          -e 's|__YARN_NM_MEMORY_MB__|4096|g' \
+          -e 's|__YARN_NM_VCORES__|2|g' "$f.tmpl" > "$f"; \
+    done; \
+    chmod +x hadoop-env.sh; ls -l core-site.xml yarn-site.xml mapred-site.xml
+
+# YARN 运行目录：守护进程以 test_tenant 身份运行（与 DolphinScheduler 租户一致），
+# 必须可写。nm-local/nm-logs 属临时目录；yarn/logs（聚合日志）与 spark-events 落在
+# df-data 卷上，容器重建后仍可读（卷在首次创建时用镜像内容播种，entrypoint 每次启动再校正属主）。
+RUN mkdir -p /var/lib/dataforge-yarn/nm-local /var/lib/dataforge-yarn/nm-logs \
+             /var/lib/dataforge-yarn/tmp /var/lib/dataforge-yarn/pids \
+             /var/log/dataforge/yarn \
+             /opt/dataforge/yarn/logs /opt/dataforge/yarn/spark-staging \
+             /opt/dataforge/spark-events \
+ && chown -R test_tenant:test_tenant /var/lib/dataforge-yarn /var/log/dataforge/yarn \
+ && chown -R test_tenant:test_tenant /opt/dataforge/yarn /opt/dataforge/spark-events
 
 # ---------- DolphinScheduler 3.4.1 (standalone) ----------
 # 发行包已预下载到本地 build/dist/(见 build.sh ensure_dist),构建不再联网下载
@@ -296,11 +339,16 @@ ENV http_proxy="" https_proxy="" HTTP_PROXY="" HTTPS_PROXY="" \
 # 环境变量
 ENV JAVA_HOME=/opt/java/openjdk \
     SPARK_HOME=/opt/spark \
+    HADOOP_HOME=/opt/hadoop \
+    HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop \
+    YARN_CONF_DIR=/opt/hadoop/etc/hadoop \
     DOLPHINSCHEDULER_HOME=/opt/dolphinscheduler \
     MARQUEZ_CONFIG=/opt/marquez/marquez.dev.yml \
-    PATH=/opt/java/openjdk/bin:/opt/spark/bin:/opt/dolphinscheduler/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/opt/java/openjdk/bin:/opt/spark/bin:/opt/hadoop/bin:/opt/hadoop/sbin:/opt/dolphinscheduler/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-EXPOSE 8082 5432 12345 5000 5001 3000
+# 8088 RM UI/REST、8042 NM REST、18080 Spark History Server
+# （8030/8031/8032/8033 与 8041/8043 为 RM/NM 内部 RPC，仅容器内可达，不对外映射）
+EXPOSE 8082 5432 12345 5000 5001 3000 8088 8042 18080
 
 # entrypoint 先把镜像里的 sql/ 与 scripts/ 同步进可能被命名卷遮蔽的 /opt/dataforge，
 # 再exec CMD 启动 supervisord（详见 build/scripts/docker-entrypoint.sh 顶部说明）

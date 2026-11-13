@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  最小 mapred 配置：仅用于让 NM 的 mapreduce_shuffle aux-service 有名称可解析。
+
+  本容器不跑 MapReduce 作业（Spark 自带 shuffle，不依赖 shuffle service），
+  因此**不启动 JobHistoryServer**（省一个 JVM）；如需提交 MR 作业再补
+  mapreduce.jobhistory.address 并拉起 historyserver。
+-->
+<configuration>
+  <property>
+    <name>mapreduce.framework.name</name>
+    <value>yarn</value>
+  </property>
+  <property>
+    <name>yarn.app.mapreduce.am.env</name>
+    <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+  </property>
+  <property>
+    <name>mapreduce.map.env</name>
+    <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+  </property>
+  <property>
+    <name>mapreduce.reduce.env</name>
+    <value>HADOOP_MAPRED_HOME=/opt/hadoop</value>
+  </property>
+  <!-- 容器内单节点，作业历史不落地：关闭 MR 的完成事件写入 -->
+  <property>
+    <name>mapreduce.jobhistory.intermediate-done-dir</name>
+    <value>__YARN_DATA_DIR__/mr-history/done_intermediate</value>
+  </property>
+  <property>
+    <name>mapreduce.jobhistory.done-dir</name>
+    <value>__YARN_DATA_DIR__/mr-history/done</value>
+  </property>
+</configuration>

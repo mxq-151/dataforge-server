@@ -171,6 +171,24 @@ chmod +x "$DATA_DIR"/scripts/*.sh 2>/dev/null || true
 
 sync_server_jar
 
+# ---------- YARN / Spark 事件日志目录（卷挂载后重新准备） ----------
+# /opt/dataforge 被 df-data 卷挂载时，镜像层里建好的 yarn/ 与 spark-events/ 会被卷内容遮住，
+# 而卷只播种子一次；容器重建后卷里这些目录的属主可能仍是 root，YARN（test_tenant）与
+# Spark 事件日志写入都会失败。这里每次启动 mkdir + 校正属主（幂等，不递归改已有日志）。
+prepare_yarn_dirs() {
+  local d
+  for d in "$DATA_DIR/yarn/logs" "$DATA_DIR/yarn/spark-staging" "$DATA_DIR/spark-events"; do
+    mkdir -p "$d" 2>/dev/null || true
+  done
+  if id test_tenant >/dev/null 2>&1; then
+    for d in "$DATA_DIR/yarn/logs" "$DATA_DIR/yarn/spark-staging" "$DATA_DIR/spark-events"; do
+      chown test_tenant:test_tenant "$d" 2>/dev/null || true
+      chmod 775 "$d" 2>/dev/null || true
+    done
+  fi
+}
+prepare_yarn_dirs
+
 # 基础镜像(eclipse-temurin)自带 /__cacert_entrypoint.sh(导入自定义 CA 证书后 exec CMD)。
 # 我们接管 ENTRYPOINT 后必须把它接回链路，否则会丢掉证书导入这一步。
 if [ -x /__cacert_entrypoint.sh ]; then

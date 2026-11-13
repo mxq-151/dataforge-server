@@ -79,8 +79,10 @@ engine:
 # base-url 为空表示未接入：产出任务返回空列表、运行指标采集静默跳过，均不报错。
 scheduler:
   dolphinscheduler:
-    base-url: ''
-    token: ''
+    # all-in-one 容器由 supervisord 注入 DS_URL=http://127.0.0.1:12345/dolphinscheduler
+    # 与 DS_TOKEN（DS standalone 的访问令牌，由 build/sql/dolphinscheduler-init-data.sql 播种）
+    base-url: ${DS_URL:}
+    token: ${DS_TOKEN:}
     default-project-code: '1'
 
 # 质检告警投递配置（alert.webhook.url）已随「告警订阅」页签与告警链路一并删除
@@ -127,5 +129,293 @@ integration:
     timeout-ms: 30000
     # 提交命令超时
     submit-timeout-ms: 120000
+
+# ============================================================================
+# 统一日志访问层（/api/logs/**）
+#
+# 所有日志都经 dataforge-server 出口，前端 / 智能体不直连 DS、YARN、Spark 等。
+# 定位信息全部来自本段配置：代码里不写死主机、端口、日志目录。
+# 未配置 base-url（file 源未配置 root-dirs）的源会在 /api/logs/sources 中
+# 标记 enabled=false 并给出 disabledReason，调用时返回明确的 400 错误。
+# ============================================================================
+logs:
+  # 总开关；false 时所有日志接口返回「未启用」
+  enabled: true
+  query:
+    # 单次最多返回行数（硬上限 2000）
+    max-lines: 2000
+    # 单次最多返回字节数（256KB）
+    max-bytes: 262144
+    # 单次查询超时（毫秒）
+    timeout-ms: 20000
+    # 关键字最大长度
+    max-keyword-length: 200
+  chain:
+    # 跨服务串联最多段数（DS -> YARN -> Spark）
+    max-segments: 3
+    # 每段预算 200KB
+    segment-max-bytes: 204800
+    # 合计预算 600KB
+    total-max-bytes: 614400
+  cache:
+    # 结果缓存：只缓存成功且未降级的结果
+    enabled: true
+    ttl-ms: 5000
+    max-entries: 200
+  masking:
+    # 出口脱敏（密码 / token / Bearer / JDBC URL 等内置规则）
+    enabled: true
+    # 额外规则，格式 "正则=>替换串"；替换串可用 $1 引用分组
+    extra-patterns: []
+  rbac:
+    # true 表示仅超级管理员可查日志
+    admin-only: false
+    # 未命中角色规则时默认允许的服务类型
+    default-allowed-services: [ds, yarn, spark]
+    # 角色-服务-集群规则；roles/services/clusters 为空表示该维度不限制
+    rules: []
+  observability:
+    # 超过该耗时按慢查询打 WARN
+    slow-query-ms: 3000
+  executor:
+    # 每个日志源独立线程池，避免慢源拖垮其他源
+    core-pool-size: 2
+    max-pool-size: 8
+    queue-capacity: 64
+    keep-alive-seconds: 60
+  stream:
+    # SSE 最多推送页数与总时长
+    max-pages: 5
+    timeout-ms: 25000
+  sources:
+    - id: ds-default
+      name: DolphinScheduler
+      service-type: ds
+      cluster: default
+      enabled: true
+      # 留空时回退 scheduler.dolphinscheduler.base-url；直填时需包含 /dolphinscheduler 前缀
+      # all-in-one 容器由 supervisord 注入 DS_URL=http://127.0.0.1:12345/dolphinscheduler
+      # （注意：只有 token 为空时才会走 scheduler.* 回退，所以这里显式引用同一个变量）
+      base-url: ${DS_URL:}
+      roles: [master, worker]
+      log-kinds: [runtime]
+      auth:
+        # 二选一：token 直填，或 token-ref 引用（env:DS_TOKEN / file:/run/secrets/ds_token / config:scheduler.dolphinscheduler.token）
+        token: ''
+        token-ref: config:scheduler.dolphinscheduler.token
+      # 主机 -> 该主机上 DS 的访问地址，用于任务日志在 worker 本地时的路由
+      worker-endpoints: {}
+      limits:
+        max-concurrency: 4
+        failure-threshold: 5
+        open-ms: 30000
+
+    - id: yarn-default
+      name: YARN
+      service-type: yarn
+      cluster: default
+      enabled: true
+      # RM 地址（如 http://rm:8088）；NodeManager 单容器日志走 worker-endpoints
+      # all-in-one 容器由 supervisord 注入 YARN_RM_URL=http://127.0.0.1:8088（YARN_ENABLED=false 时清空）
+      base-url: ${YARN_RM_URL:}
+      roles: [resource_manager, node_manager]
+      log-kinds: [aggregate, runtime]
+      options:
+        # 聚合日志命令与参数模板（占位符 {appId}/{containerId}/{logFiles}）
+        command: yarn
+        command-args: ['logs', '-applicationId', '{appId}']
+        command-timeout-ms: 60000
+        default-user: yarn
+
+    - id: spark-shs-default
+      name: Spark History Server
+      service-type: spark
+      cluster: default
+      # 默认关闭：Spark History Server **没有文本日志接口**，
+      # /api/v1/applications/{appId}/logs 返回的是事件日志压缩包（eventLogs-*.zip，
+      # Content-Disposition: attachment），读出来是二进制，不能当日志用。
+      # Spark 作业的 driver/executor 日志请走 yarn 源的 aggregate（yarn logs -applicationId）；
+      # SHS 只用于 /api/runtime 的 history 指标与配置（spark-shs-runtime-default）。
+      enabled: false
+      # 如 http://shs:18080
+      # all-in-one 容器由 supervisord 注入 SPARK_SHS_URL=http://127.0.0.1:18080
+      base-url: ${SPARK_SHS_URL:}
+      roles: [history_server]
+      log-kinds: [runtime]
+      options:
+        # 可配 {appId}/{from}/{size}；不同 Spark 版本是否提供该接口需以实际环境为准
+        logs-path-template: '/api/v1/applications/{appId}/logs'
+
+    - id: flink-default
+      name: Flink
+      service-type: flink
+      cluster: default
+      enabled: true
+      # JobManager REST 地址（如 http://jm:8081）；只做异常/运行摘要，不返回原始日志
+      # all-in-one 镜像暂未内置 Flink 发行包，该变量默认不注入 -> 本源如实显示「未配置 base-url」
+      base-url: ${FLINK_REST_URL:}
+      roles: [job_manager, task_manager]
+      # 结构化层 exception 走 REST；runtime/stdout 必须有日志目录才可用
+      log-kinds: [exception, runtime, stdout]
+      auth:
+        # Flink REST 若开启认证，可填 token 或 token-ref（env: / file: / config:）
+        token: ''
+        token-ref: ''
+      options:
+        # 单次 REST 请求超时，避免对 JobManager 造成压力
+        rest-timeout-ms: 3000
+        # 日志根目录：独立/会话集群填 JM/TM 主机本地目录，K8s 填挂载卷路径
+        jobmanager-log-dirs: []
+        taskmanager-log-dirs: []
+        # 文件名模板（glob），按 Flink 发行包默认命名规则配置，可按现场调整
+        jobmanager-log-pattern: 'flink-*-jobmanager-*.log'
+        taskmanager-log-pattern: 'flink-*-taskmanager-*.log'
+        jobmanager-stdout-pattern: 'flink-*-jobmanager-*.out'
+        taskmanager-stdout-pattern: 'flink-*-taskmanager-*.out'
+        # 单个文件最多读取字节数；超出只读末尾，避免日志过大拖垮查询
+        max-file-bytes: 8388608
+        # P1：K8s 容器日志（按 pod 标签选择器）与对象存储日志，P0 仅用于标注不可用原因
+        pod-selector: ''
+        object-store-path: ''
+
+    - id: local-file
+      name: 本地/挂载日志目录
+      service-type: file
+      cluster: local
+      # 配置 root-dirs 后置为 true
+      enabled: false
+      roles: [generic]
+      log-kinds: [runtime, audit, slow_query]
+      options:
+        # 允许访问的根目录（绝对路径）；越界路径会被拒绝
+        root-dirs: []
+        allow-download: false
+        max-download-bytes: 5242880
+
+# ============================================================================
+# 运行时指标快照（/api/runtime/**）
+#
+# 与日志层分开：日志是文本流（有游标），这里是有结构的指标快照（无游标）。
+# 复用 logs 的凭据解析、脱敏、审计、熔断、线程池与源配置模型；RBAC 使用本段独立策略。
+#
+# 「运行中可查」还是「结束后可查」由 source.mode 决定：
+#   - flink：只支持 live（JobManager REST，作业在 JM 内存中时才有指标）
+#   - spark + mode=live：运行中可查，地址来自 base-url / tracking-url-template / YARN RM
+#   - spark + mode=history：作业结束后可查，地址必须是 Spark History Server
+# 两者是不同的源，不要用同一个 base-url 混查。
+# ============================================================================
+runtime:
+  # 总开关
+  enabled: true
+  query:
+    # 单次接口总超时（毫秒）
+    timeout-ms: 12000
+    # 单次快照最多返回的组件数（TM / executor）
+    max-components: 100
+    # Flink 单次最多展开的 vertex 数（控制对 JM 的压力）
+    max-vertices: 20
+    # checkpoint 历史最多返回条数
+    checkpoint-history-limit: 5
+    # 显式指标名上限
+    max-metric-names: 200
+  cache:
+    # 指标是快照：TTL 要短；同一诊断动作内避免重复打集群
+    enabled: true
+    ttl-ms: 10000
+    # 配置参数变化慢，单独给更长 TTL
+    config-ttl-ms: 60000
+    max-entries: 200
+  rbac:
+    admin-only: false
+    # 未命中角色规则时默认允许的服务类型
+    default-allowed-services: [spark, flink]
+    rules: []
+  sources:
+    # ---------------- Flink：运行中（JobManager REST） ----------------
+    - id: flink-runtime-default
+      name: Flink Runtime
+      service-type: flink
+      cluster: default
+      # Flink 只有 live：作业结束后 JM 不再提供指标
+      mode: live
+      enabled: true
+      # JobManager REST，如 http://jm-host:8081
+      base-url: ${FLINK_REST_URL:}
+      roles: [job_manager, task_manager]
+      auth:
+        token: ''
+        # 支持 env: / file: / config: 引用
+        token-ref: 'env:FLINK_REST_TOKEN'
+      limits:
+        max-concurrency: 4
+        failure-threshold: 5
+        open-ms: 30000
+      options:
+        # 单次 REST 请求超时，只收紧不放宽全局预算
+        rest-timeout-ms: 3000
+        # 未指定 families 时的默认指标族
+        default-metric-families: [jvm_gc, throughput, checkpoint, failures]
+        # <=0 时用全局 query.*
+        max-components: 0
+        max-vertices: 0
+        checkpoint-history-limit: 0
+        # GC collector 名随 JVM 版本不同；留空用通配符 *，版本不支持通配时显式填写（如 G1 Young Generation）
+        gc-collectors: []
+
+    # ---------------- Spark：运行中（live UI，经 YARN 发现 trackingUrl） ----------------
+    - id: spark-live-default
+      name: Spark Live UI
+      service-type: spark
+      cluster: default
+      mode: live
+      enabled: true
+      # 单应用直连时填 UI 地址（如 http://host:4040）；经 YARN 代理时留空，用下面的 yarn-rm-url + tracking-url-template
+      base-url: ''
+      roles: [driver, executor]
+      auth:
+        token: ''
+        token-ref: ''
+      limits:
+        max-concurrency: 4
+        failure-threshold: 5
+        open-ms: 30000
+      options:
+        rest-timeout-ms: 3000
+        default-metric-families: [jvm_gc, throughput, shuffle, failures]
+        # YARN ResourceManager：用于发现 appId 与 trackingUrl
+        # 例：http://yarn-rm:8088（本服务会拼 /ws/v1/cluster/apps）
+        # all-in-one 容器由 supervisord 注入 YARN_RM_URL=http://127.0.0.1:8088
+        yarn-rm-url: ${YARN_RM_URL:}
+        # 已知单应用时可固定 appId；快照接口未传 jobId 时使用
+        app-id: ''
+        # 已知代理规则时可绕过 YARN：http://rm:8088/proxy/{appId}
+        tracking-url-template: ''
+        # stage 去重后最多保留数量
+        max-stages: 100
+
+    # ---------------- Spark：结束后（History Server） ----------------
+    - id: spark-shs-runtime-default
+      name: Spark History Server Runtime
+      service-type: spark
+      cluster: default
+      # 作业结束后可查：SHS 只保留已结束应用
+      mode: history
+      enabled: true
+      # 如 http://shs-host:18080
+      # all-in-one 容器由 supervisord 注入 SPARK_SHS_URL=http://127.0.0.1:18080
+      base-url: ${SPARK_SHS_URL:}
+      roles: [history_server]
+      auth:
+        token: ''
+        token-ref: ''
+      limits:
+        max-concurrency: 4
+        failure-threshold: 5
+        open-ms: 30000
+      options:
+        rest-timeout-ms: 3000
+        default-metric-families: [jvm_gc, throughput, shuffle, failures]
+        max-stages: 100
+
 
 

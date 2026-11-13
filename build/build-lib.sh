@@ -252,6 +252,19 @@ build_jar_only() {
   local staging; staging="$(mktemp -d)"
   cp "$SERVER_JAR_IN_DIST" "$staging/dataforge-server.jar"
   cp "$BUILD_DIR/conf/spark-defaults.conf" "$staging/spark-defaults.conf"
+  cp "$BUILD_DIR/conf/spark-env.sh" "$staging/spark-env.sh"
+  # YARN 配置同理随增量构建刷新：模板 + 按默认值渲染后的 XML
+  # （运行期 run-yarn.sh 会按 YARN_NM_MEMORY_MB / YARN_NM_VCORES 再渲染一次）
+  mkdir -p "$staging/hadoop-conf"
+  cp "$BUILD_DIR/conf/hadoop/"*.xml.tmpl "$BUILD_DIR/conf/hadoop/hadoop-env.sh" \
+     "$staging/hadoop-conf/"
+  for _f in core-site.xml mapred-site.xml yarn-site.xml; do
+    sed -e 's|__YARN_DATA_DIR__|/var/lib/dataforge-yarn|g' \
+        -e 's|__YARN_LOG_DIR__|/opt/dataforge/yarn/logs|g' \
+        -e 's|__YARN_NM_MEMORY_MB__|4096|g' \
+        -e 's|__YARN_NM_VCORES__|2|g' \
+        "$staging/hadoop-conf/$_f.tmpl" > "$staging/hadoop-conf/$_f"
+  done
   cp -R "$SPARK_LISTENER_JARS_DIR" "$staging/spark-listeners"
   cp -R "$BUILD_DIR/scripts" "$staging/scripts"
   mkdir -p "$staging/sql/testdata"
@@ -281,12 +294,15 @@ COPY dataforge-server.jar /opt/dataforge/dataforge-server.jar
 # 到 /opt/dataforge，避免持久化卷里的旧 jar 遮住镜像新 jar。
 COPY dataforge-server.jar /opt/dataforge-image/dataforge-server.jar
 COPY spark-defaults.conf /opt/spark/conf/spark-defaults.conf
+COPY spark-env.sh /opt/spark/conf/spark-env.sh
+# Hadoop/YARN 配置（镜像须已由 FULL=1 构建内置 /opt/hadoop，否则仅覆盖配置文件）
+COPY hadoop-conf/ /opt/hadoop/etc/hadoop/
 COPY spark-listeners/ /opt/spark/jars/
 COPY scripts/ /opt/dataforge/scripts/
 COPY scripts/ /opt/dataforge-image/scripts/
 COPY sql/ /opt/dataforge-image/sql/
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /opt/dataforge/scripts/*.sh /opt/dataforge-image/scripts/*.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /opt/dataforge/scripts/*.sh /opt/dataforge-image/scripts/*.sh /usr/local/bin/docker-entrypoint.sh /opt/spark/conf/spark-env.sh /opt/hadoop/etc/hadoop/hadoop-env.sh
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 DOCKEREOF
@@ -314,6 +330,11 @@ ensure_dist() {
   }
   fetch_one spark-3.5.9-bin-hadoop3.tgz \
             https://archive.apache.org/dist/spark/spark-3.5.9/spark-3.5.9-bin-hadoop3.tgz
+  # YARN 运行环境：hadoop 3.3.6 发行包（与 Spark bin-hadoop3 对齐），构建时由
+  # build/scripts/install-hadoop.sh 裁剪到 ~210M（剔除 S3A/azure SDK、native、源码、tests 等）。
+  # 国内镜像优先；直连 archive.apache.org 较慢时可用 HADOOP_DIST_URL 覆盖。
+  fetch_one hadoop-3.3.6.tar.gz \
+            "${HADOOP_DIST_URL:-https://mirrors.aliyun.com/apache/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz}"
   fetch_one apache-dolphinscheduler-3.4.1-bin.tar.gz \
             https://archive.apache.org/dist/dolphinscheduler/3.4.1/apache-dolphinscheduler-3.4.1-bin.tar.gz
   fetch_one marquez-0.51.1.tar.gz \
