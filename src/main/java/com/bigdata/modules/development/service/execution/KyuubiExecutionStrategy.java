@@ -1395,6 +1395,14 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                 continue;
             }
             switch (first.toLowerCase(Locale.ROOT).replace(":", "")) {
+                case "comment" -> {
+                    // 表注释只在「# Detailed Table Information」段出现（Spark/Hive 输出形如
+                    // "Comment<TAB>门店渠道销售事实表"）；列定义段的 comment 列属于字段注释，
+                    // 由 listColumns/DESCRIBE 单独采集，这里不会读到。
+                    if (tableMeta.getTableComment() == null || tableMeta.getTableComment().isBlank()) {
+                        tableMeta.setTableComment(value);
+                    }
+                }
                 case "location" -> {
                     if (tableMeta.getLocation() == null || tableMeta.getLocation().isBlank()) {
                         tableMeta.setLocation(value);

@@ -330,6 +330,7 @@ class KyuubiExecutionStrategyTest {
                     List.of("region", "string", ""),
                     List.of("# Detailed Table Information", "", ""),
                     List.of("Database:", "dw", ""),
+                    List.of("Comment", "门店渠道销售事实表", ""),
                     List.of("Location:", "jfs://myjfs/warehouse/dwd_order", ""),
                     List.of("Table Parameters:", "", ""),
                     List.of("totalSize", "1048576", ""),
@@ -347,6 +348,8 @@ class KyuubiExecutionStrategyTest {
             assertNull(table.getRowCount(), "行数不在采集范围，即使输出中有 numRows 也不解析");
             assertEquals(new java.util.Date(1712345678L * 1000L), table.getLastModifyTime());
             assertEquals("SNAPPY", table.getCompression());
+            assertEquals("门店渠道销售事实表", table.getTableComment(),
+                    "表注释应取自 Detailed Table Information 段的 Comment 行");
         }
 
         @Test
