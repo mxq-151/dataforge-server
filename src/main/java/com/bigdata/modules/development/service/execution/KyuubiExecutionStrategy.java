@@ -30,7 +30,18 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     private static final Logger log = LoggerFactory.getLogger(KyuubiExecutionStrategy.class);
     private static final int MAX_RESULT_ROWS = 1000;
+    /**
+     * 轮询间隔上限。轮询间隔从 {@link #MIN_POLL_INTERVAL_MS} 开始按倍递增，
+     * 最多增长到该值：短查询（元数据类几十~几百毫秒）能尽快拿到结果，
+     * 长查询也不会高频空转。
+     */
     private static final long ASYNC_POLL_INTERVAL_MS = 2000;
+    /** 首次轮询间隔：元数据类操作通常一次即可就绪 */
+    private static final long MIN_POLL_INTERVAL_MS = 100;
+    /** 执行中进度日志的最小输出间隔，避免自适应轮询导致日志刷屏 */
+    private static final long PROGRESS_LOG_INTERVAL_MS = 2000;
+    /** 元数据查询（SHOW/DESCRIBE）的超时时间 */
+    private static final long METADATA_QUERY_TIMEOUT_MS = 120000;
     private static final long SYNC_POLL_TIMEOUT_MS = 12000000; 
     private static final long ASYNC_POLL_TIMEOUT_MS = 12000000; 
 
@@ -209,23 +220,24 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                 // 2. 应用会话设置（通过执行SET语句）
                 applySessionSettingsViaRest(baseUrl, sessionHandle, context);
 
-                // 3. 提交SQL执行
-                String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
-                if (operationHandle == null) {
-                    return CodeExecutionResult.failure(executionId, "提交SQL操作失败");
-                }
-                operationHandleRef.set(operationHandle);  // 赋值给取消回调
-                executionLogListener.publishLog(executionId, "[Kyuubi] SQL已提交, operationHandle=" + operationHandle);
-
+                // 3. 提交SQL执行（异步提交，便于拿到handle后支持取消）
                 boolean asyncMode = isAsyncMode(context);
 
                 if (asyncMode) {
+                    
+                    String operationHandle = submitOperation(baseUrl, sessionHandle, sql, false);
+                    operationHandleRef.set(operationHandle);  // 赋值给取消回调
+                    executionLogListener.publishLog(executionId, "[Kyuubi] SQL已提交, operationHandle=" + operationHandle);
+
+                    if (operationHandle == null) {
+                        return CodeExecutionResult.failure(executionId, "提交SQL操作失败");
+                    }
                     // 异步模式：后台轮询，立即返回RUNNING
                     return executeAsync(executionId, baseUrl, sessionHandle, operationHandle,
                             sql, context, startTime, registeredId);
                 } else {
                     // 同步模式：阻塞等待结果
-                    return executeSync(executionId, baseUrl, sessionHandle, operationHandle,
+                    return executeSync(executionId, baseUrl, sessionHandle,
                             sql, context, startTime, registeredId);
                 }
             } finally {
@@ -260,11 +272,10 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
      * 同步执行：轮询直到操作完成，返回完整结果
      */
     private CodeExecutionResult executeSync(String executionId, String baseUrl, String sessionHandle,
-                                            String operationHandle, String sql, CodeExecutionContext context,
+                                             String sql, CodeExecutionContext context,
                                             long startTime, String registeredId) {
         try {
-            OperationResult opResult = pollForResult(baseUrl, sessionHandle, operationHandle,
-                    SYNC_POLL_TIMEOUT_MS, ASYNC_POLL_INTERVAL_MS, executionId);
+            OperationResult opResult = submitOperationSync(baseUrl, sessionHandle, sql,METADATA_QUERY_TIMEOUT_MS, "metadata-query");
 
             if (opResult.status == OperationStatus.ERROR) {
                 executionLogListener.publishLog(executionId, "[错误] SQL执行错误: " + opResult.errorMessage);
@@ -516,7 +527,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         for (Map.Entry<String, String> entry : getSettingsForStorageEngine(storageEngine).entrySet()) {
             String setSql = "SET " + entry.getKey() + "=" + entry.getValue();
             try {
-                submitOperation(baseUrl, sessionHandle, setSql);
+                submitOperation(baseUrl, sessionHandle, setSql, false);
                 log.debug("[Kyuubi REST] 应用会话设置: {}", setSql);
             } catch (Exception e) {
                 log.warn("[Kyuubi REST] 应用会话设置失败: {}, 错误: {}", setSql, e.getMessage());
@@ -555,13 +566,18 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         return settings;
     }
 
-    /** POST /api/v1/sessions/{session}/operations/statement 提交SQL操作 */
-    private String submitOperation(String baseUrl, String sessionHandle, String statement) {
+    /**
+     * POST /api/v1/sessions/{session}/operations/statement 提交SQL操作
+     *
+     * @param sync true=服务端同步执行（runAsync=false，请求阻塞到执行结束）；
+     *             false=异步提交（runAsync=true，立即返回 operationHandle，由调用方轮询）
+     */
+    private String submitOperation(String baseUrl, String sessionHandle, String statement, boolean sync) {
         try {
             String url = baseUrl + "/api/v1/sessions/" + sessionHandle + "/operations/statement";
             Map<String, Object> body = new LinkedHashMap<>();
             body.put("statement", statement);
-            body.put("runAsync", true);
+            body.put("runAsync", !sync);
 
             ResponseEntity<JsonNode> response = restTemplate.exchange(
                     URI.create(url), HttpMethod.POST,
@@ -571,6 +587,11 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             if (responseBody != null && responseBody.has("identifier")) {
                 return extractOperationHandle(responseBody.get("identifier"));
             }
+            return null;
+        } catch (org.springframework.web.client.HttpStatusCodeException e) {
+            // 同步提交（runAsync=false）时执行错误直接体现在HTTP响应里，这里把响应体打出来便于定位
+            log.error("[Kyuubi REST] 提交操作失败: HTTP {}, statement={}, 响应={}",
+                    e.getStatusCode(), statement, truncateForLog(e.getResponseBodyAsString(), 500));
             return null;
         } catch (Exception e) {
             log.error("[Kyuubi REST] 提交操作异常", e);
@@ -593,11 +614,36 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
         return raw;
     }
 
-    /** 轮询操作状态直到完成 GET /api/v1/operations/{operationHandle}/event */
+    /**
+     * 提交SQL并同步等待执行完成，返回操作结果（提交 + 轮询 + 取结果集一体化）。
+     * <p>供元数据查询（SHOW/DESCRIBE 等）使用，调用方只需关心最终 {@link OperationResult}：
+     * 提交失败或执行出错都通过 {@code status=ERROR} + {@code errorMessage} 返回。</p>
+     */
+    private OperationResult submitOperationSync(String baseUrl, String sessionHandle, String statement,
+                                                long timeoutMs, String executionId) {
+        String operationHandle = submitOperation(baseUrl, sessionHandle, statement, true);
+        if (operationHandle == null) {
+            OperationResult result = new OperationResult();
+            result.status = OperationStatus.ERROR;
+            result.errorMessage = "提交SQL操作失败";
+            return result;
+        }
+        log.debug("[Kyuubi REST] 提交操作(同步): handle={}, statement={}", operationHandle, statement);
+        return pollForResult(baseUrl, sessionHandle, operationHandle, timeoutMs, ASYNC_POLL_INTERVAL_MS, executionId);
+    }
+
+    /**
+     * 轮询操作状态直到完成 GET /api/v1/operations/{operationHandle}/event
+     * <p>轮询间隔自适应：从 {@link #MIN_POLL_INTERVAL_MS} 起步、每次未完成翻倍，
+     * 上限为 {@code maxPollIntervalMs}。元数据类语句（SHOW/DESCRIBE）通常百毫秒内完成，
+     * 固定睡眠会白等一整轮。</p>
+     */
     private OperationResult pollForResult(String baseUrl, String sessionHandle, String operationHandle,
-                                           long timeoutMs, long pollIntervalMs, String executionId) {
+                                           long timeoutMs, long maxPollIntervalMs, String executionId) {
         long deadline = System.currentTimeMillis() + timeoutMs;
         String eventUrl = baseUrl + "/api/v1/operations/" + operationHandle + "/event";
+        long pollIntervalMs = Math.min(MIN_POLL_INTERVAL_MS, maxPollIntervalMs);
+        long lastProgressLogAt = 0L;
 
         while (System.currentTimeMillis() < deadline) {
             try {
@@ -606,7 +652,11 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                         new HttpEntity<>(createAuthHeaders(null, null)), JsonNode.class);
 
                 JsonNode eventBody = eventResponse.getBody();
-                if (eventBody == null) { Thread.sleep(pollIntervalMs); continue; }
+                if (eventBody == null) {
+                    Thread.sleep(pollIntervalMs);
+                    pollIntervalMs = Math.min(pollIntervalMs * 2, maxPollIntervalMs);
+                    continue;
+                }
 
                 String state = parseOperationState(eventBody);
                 log.debug("[Kyuubi REST] 轮询状态: state={}", state);
@@ -640,10 +690,13 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                         return r;
                     }
                     default:
-                        if (executionLogListener != null) {
+                        long now = System.currentTimeMillis();
+                        if (executionLogListener != null && now - lastProgressLogAt >= PROGRESS_LOG_INTERVAL_MS) {
                             executionLogListener.publishLog(executionId, "[Kyuubi] 执行中... (" + state + ")");
+                            lastProgressLogAt = now;
                         }
                         Thread.sleep(pollIntervalMs);
+                        pollIntervalMs = Math.min(pollIntervalMs * 2, maxPollIntervalMs);
                         break;
                 }
             } catch (InterruptedException e) {
@@ -654,7 +707,10 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                 return r;
             } catch (Exception e) {
                 log.warn("[Kyuubi REST] 轮询操作状态异常, 将重试: {}", e.getMessage());
-                try { Thread.sleep(pollIntervalMs); } catch (InterruptedException ie) {
+                try {
+                    Thread.sleep(pollIntervalMs);
+                    pollIntervalMs = Math.min(pollIntervalMs * 2, maxPollIntervalMs);
+                } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     OperationResult r = new OperationResult();
                     r.status = OperationStatus.CANCELED;
@@ -1026,11 +1082,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
             log.info("[Kyuubi REST] listDatabases 开始(复用Session), sessionHandle={}", sessionHandle);
 
-            String operationHandle = submitOperation(baseUrl, sessionHandle, "SHOW DATABASES");
-            log.info("[Kyuubi REST] listDatabases operationHandle={}", operationHandle);
-            if (operationHandle == null) return databases;
-
-            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                    "SHOW DATABASES", METADATA_QUERY_TIMEOUT_MS, "metadata-query");
             log.info("[Kyuubi REST] listDatabases 轮询结果: status={}, columns={}, rows={}",
                     result.status, result.columns != null ? result.columns.size() : "null",
                     result.rows != null ? result.rows.size() : "null");
@@ -1064,10 +1117,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             String sessionHandle = entry.sessionHandle;
 
             String sql = "SHOW TABLES IN " + databaseName;
-            String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
-            if (operationHandle == null) return tables;
-
-            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                    sql, METADATA_QUERY_TIMEOUT_MS, "metadata-query");
             if (result.status == OperationStatus.FINISHED && result.rows != null) {
                 // Spark 3.x 的 SHOW TABLES 返回三列 [namespace, tableName, isTemporary]，
                 // 直接取第 0 列会把库名当表名（后续 DESCRIBE db.db 必失败）；Hive 2.x 才是单列 tab_name。
@@ -1117,11 +1168,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                                             String databaseName, TableMetadata tableMeta) {
         try {
             String sql = "DESCRIBE EXTENDED " + databaseName + "." + tableMeta.getTableName();
-            String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
-            if (operationHandle == null) {
-                return;
-            }
-            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                    sql, METADATA_QUERY_TIMEOUT_MS, "metadata-query");
             if (result.status == OperationStatus.FINISHED && result.rows != null) {
                 applyDescribeExtended(result.rows, tableMeta);
             }
@@ -1146,11 +1194,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                 return sizes;
             }
             String sessionHandle = entry.sessionHandle;
-            String operationHandle = submitOperation(baseUrl, sessionHandle, "SHOW TABLES IN " + databaseName);
-            if (operationHandle == null) {
-                return sizes;
-            }
-            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                    "SHOW TABLES IN " + databaseName, METADATA_QUERY_TIMEOUT_MS, "metadata-query");
             if (result.status != OperationStatus.FINISHED || result.rows == null) {
                 return sizes;
             }
@@ -1172,12 +1217,9 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     private Long fetchTableSizeBytes(String baseUrl, String sessionHandle, String databaseName, String tableName) {
         try {
-            String operationHandle = submitOperation(baseUrl, sessionHandle,
-                    "DESCRIBE EXTENDED " + databaseName + "." + tableName);
-            if (operationHandle == null) {
-                return null;
-            }
-            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                    "DESCRIBE EXTENDED " + databaseName + "." + tableName,
+                    METADATA_QUERY_TIMEOUT_MS, "metadata-query");
             if (result.status == OperationStatus.FINISHED && result.rows != null) {
                 TableMetadata probe = new TableMetadata();
                 applyDescribeExtended(result.rows, probe);
@@ -1229,12 +1271,9 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
     private TablePartitionSize fetchLatestPartition(String baseUrl, String sessionHandle,
                                                     String databaseName, String tableName) {
         try {
-            String operationHandle = submitOperation(baseUrl, sessionHandle,
-                    "SHOW PARTITIONS " + databaseName + "." + tableName);
-            if (operationHandle == null) {
-                return null;
-            }
-            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                    "SHOW PARTITIONS " + databaseName + "." + tableName,
+                    METADATA_QUERY_TIMEOUT_MS, "metadata-query");
             if (result.status != OperationStatus.FINISHED || result.rows == null) {
                 return null;
             }
@@ -1269,12 +1308,9 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
 
     private Long fetchPartitionSizeBytes(String baseUrl, String sessionHandle, String databaseName,
                                          String tableName, String partitionClause) {
-        String operationHandle = submitOperation(baseUrl, sessionHandle,
-                "DESCRIBE EXTENDED " + databaseName + "." + tableName + " PARTITION (" + partitionClause + ")");
-        if (operationHandle == null) {
-            return null;
-        }
-        OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+        OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                "DESCRIBE EXTENDED " + databaseName + "." + tableName + " PARTITION (" + partitionClause + ")",
+                METADATA_QUERY_TIMEOUT_MS, "metadata-query");
         if (result.status == OperationStatus.FINISHED && result.rows != null) {
             TableMetadata probe = new TableMetadata();
             applyDescribeExtended(result.rows, probe);
@@ -1421,10 +1457,8 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             String sessionHandle = entry.sessionHandle;
 
             String sql = "DESCRIBE " + databaseName + "." + tableName;
-            String operationHandle = submitOperation(baseUrl, sessionHandle, sql);
-            if (operationHandle == null) return columns;
-
-            OperationResult result = pollForResult(baseUrl, sessionHandle, operationHandle, 120000, 2000, "metadata-query");
+            OperationResult result = submitOperationSync(baseUrl, sessionHandle,
+                    sql, METADATA_QUERY_TIMEOUT_MS, "metadata-query");
             if (result.status == OperationStatus.FINISHED && result.rows != null) {
                 applyDescribeColumns(result.rows, columns, databaseName, tableName);
             }
