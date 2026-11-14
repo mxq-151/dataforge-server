@@ -7,12 +7,15 @@
 #
 #   * dataforge-server 一律在**宿主机**编译(mvn package -> build/dist/dataforge-server.jar),
 #     镜像内不再跑 Maven,因此两种模式都要求本机有可用的 mvn 与 JDK 17+。
+#   * Marquez(API + Web)同样在**宿主机**预编译(build/prepare-marquez.sh),Dockerfile 只 COPY;
+#     FULL=1 时产物未变会跳过编译, FORCE=1 强制重编。
 #   * 默认增量更新 dataforge-server 的 jar; FULL=1 全量重建基础镜像。
 #   * 首次多平台增量前,请先用 FULL=1 + REGISTRY 打好并推送基础镜像。
 #
 # 用法:
 #   REGISTRY=myrepo ./build-all.sh                                     # amd64+arm64 增量,push
 #   REGISTRY=myrepo FULL=1 ./build-all.sh                              # amd64+arm64 全量重建,push
+#   REGISTRY=myrepo FULL=1 FORCE=1 ./build-all.sh                      # 全量重建 + 强制重编 Marquez
 #   REGISTRY=myrepo PLATFORMS="linux/amd64,linux/arm64" ./build-all.sh  # 自定义平台列表(逗号分隔)
 #   REGISTRY=myrepo SKIP_TESTS=false ./build-all.sh                    # mvn 打包时执行单测
 #   REGISTRY=myrepo HADOOP_VERSION=3.3.6 ./build-all.sh                # 动态编译指定组件版本

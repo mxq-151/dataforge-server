@@ -14,6 +14,7 @@
 #   REGISTRY   多平台 push 的仓库前缀,如 docker.io/me
 #   IMAGE_NAME / IMAGE_TAG / IMAGE_VER  镜像命名
 #   PROXY      全量构建的宿主机代理地址;不设置 / off / none 走直连
+#   FORCE      1=强制重编 Marquez(忽略增量标记), 默认 0
 #   SKIP_TESTS  mvn 打包是否跳过单测(默认 true)
 #   JAVA_HOME  宿主机编译 dataforge-server 用的 JDK(需 17+);未设置时尝试用 macOS
 #              `/usr/libexec/java_home -v 17` 自动定位
@@ -21,6 +22,15 @@
 # dataforge-server 编译已移到 Docker 之外: 两种模式都在宿主机用本机 mvn `mvn package`,
 # 产物固定落 build/dist/dataforge-server.jar,Dockerfile 只做 COPY(不再有 Maven 构建阶段)。
 # 因此**两种模式都需要宿主机具备可用的 mvn 与 JDK 17+**(不再有"容器内编译"的退路)。
+#
+# Marquez 0.51.1(API + Web)也不再在镜像内编译:
+#   * FULL=1   先执行 build/prepare-marquez.sh(宿主机 JDK17 + Gradle 8.x + Node 16+),
+#              产物落 build/dist/marquez/ 与 build/dist/marquez-web/,Dockerfile 只 COPY;
+#              产物未变(源码包 sha256/工具链标记一致)则跳过编译, FORCE=1 强制重编;
+#   * 增量模式 只校验已有产物是否齐全, 缺失时提示(增量只覆盖 jar, 不含 Marquez 层)。
+#
+# 宿主机前置依赖(FULL=1 时全部需要): mvn + JDK17(dataforge-server)、
+#   JDK17 + Gradle 8.x + Node 16+/npm(Marquez)、rsync。缺任何一个都会明确报错并给安装提示。
 #
 # TPC-DS 基准数据(两种模式都会打进镜像 /opt/tpcds, 不再依赖宿主机 bind mount):
 #   TPCDS_DATA_SRC  宿主机数据目录(默认 /Users/mxq/Desktop/tpcds);
@@ -106,17 +116,70 @@ HOST_JAR="$SERVER_DIR/target/$JAR_NAME"
 # 宿主机编译产物统一落此处, Dockerfile 直接 COPY build/dist/dataforge-server.jar
 SERVER_JAR_IN_DIST="$DIST_DIR/dataforge-server.jar"
 
+# Marquez 宿主机预编译(见 build/prepare-marquez.sh 顶部说明)
+MARQUEZ_PREPARE="$BUILD_DIR/prepare-marquez.sh"
+MARQUEZ_FORCE="${FORCE:-0}"
+
+# ---------- Marquez 宿主机预编译 ----------
+# 原先 Dockerfile 里 gradle:8.7-jdk17 / node:18-bullseye 两个 builder 阶段的编译,
+# 全部搬到宿主机; 这里只负责调用 + 兜底报错, 不通过则中止(镜像内已无编译退路)。
+prepare_marquez() {
+  # 注意: macOS 自带 bash 3.2 在 set -u 下展开空数组会报 unbound variable, 这里不用数组
+  local force_note=""
+  if [ "$MARQUEZ_FORCE" = "1" ]; then force_note=" (--force)"; fi
+  echo "==> 宿主机预编译 Marquez API + Web$force_note"
+  if [ "$MARQUEZ_FORCE" = "1" ]; then
+    bash "$MARQUEZ_PREPARE" --force
+  else
+    bash "$MARQUEZ_PREPARE"
+  fi && return 0
+  echo "!! Marquez 预编译/校验失败, 已中止构建(镜像内不再编译 Marquez)"
+  echo "   排查后可单独重跑: bash build/prepare-marquez.sh --force"
+  exit 1
+}
+
+# 增量模式: 只校验, 不编译(增量层只覆盖 jar, 不含 Marquez 相关文件)
+check_marquez_artifacts() {
+  if bash "$MARQUEZ_PREPARE" --check >/dev/null 2>&1; then
+    echo "==> Marquez 产物校验通过(build/dist/marquez*, 增量模式不重建该层)"
+  else
+    echo "!! build/dist/marquez 或 build/dist/marquez-web 缺失/校验失败"
+    echo "   增量模式只覆盖 dataforge-server jar, 镜像沿用基础层里的 Marquez;"
+    echo "   需要刷新 Marquez 时: FULL=1 ./build.sh (或 bash build/prepare-marquez.sh)"
+  fi
+}
+
+# ---------- 回滚标签 ----------
+# 构建成功后把结果镜像打上 rollback-<YYYYMMDD>, 作为下一次构建失败时的手动回滚点
+# (此前出现过本地 rollback 标签被清理、无从回退的情况)。多平台 push 模式没有本地镜像, 跳过。
+tag_rollback() {
+  if [ "$MULTI_ARCH" = "1" ]; then
+    echo "==> 多平台 push 模式: 跳过本地回滚标签(请在仓库侧保留上一版 tag)"
+    return 0
+  fi
+  local tag="${IMAGE_NAME}:rollback-$(date +%Y%m%d)"
+  if docker tag "$FULL_TAG" "$tag" 2>/dev/null; then
+    echo "==> 已打回滚标签: $tag -> $(docker image inspect -f '{{.Id}}' "$FULL_TAG" | cut -c1-19)"
+    echo "    回滚方式: docker tag $tag $IMAGE_TAG && ./startup/macos/start-persist.sh"
+  else
+    echo "!! 回滚标签打标失败: $tag(不影响本次构建产物)"
+  fi
+}
+
 # ---------- 宿主机工具链定位 ----------
 # dataforge-server 的编译在 Docker 之外完成,两种模式都依赖宿主机的 mvn 与 JDK 17+。
 ensure_maven() {
   if ! command -v mvn >/dev/null 2>&1; then
     local d
-    for d in /opt/homebrew/bin /usr/local/bin "$HOME/.sdkman/candidates/maven/current/bin"; do
+    # 常见安装位置: Homebrew(intel/arm)、SDKMAN、本机免安装解压目录(~/.local/share/maven)
+    for d in /opt/homebrew/bin /usr/local/bin "$HOME/.sdkman/candidates/maven/current/bin" \
+             "$HOME/.local/share/maven/bin" "$HOME/apache-maven/bin"; do
       if [ -x "$d/mvn" ]; then PATH="$d:$PATH"; export PATH; break; fi
     done
   fi
   command -v mvn >/dev/null 2>&1 || {
-    echo "!! 未找到 mvn: dataforge-server 在宿主机编译,请安装 Maven 并确保其可执行文件在 PATH 中"
+    echo "!! 未找到 mvn: dataforge-server 在宿主机编译(镜像内不再有 Maven), 必须安装 Maven 3.8+"
+    echo "   安装: brew install maven   或解压 apache-maven 后把 bin 加入 PATH"
     exit 1
   }
 
@@ -248,6 +311,17 @@ stage_tpcds_data() {
   fi
   # test_db.db 是库目录, 允许为空; 运行时 entrypoint 也会确保存在
   mkdir -p "$stage/test_db.db"
+  # 版本 marker(DSGen 版本 / SCALE / store_sales 行数): entrypoint 与 init-hive-tables 用它
+  # 判断镜像基线与卷内数据是否一致, 不一致时替换旧数据并重建元数据
+  if [ -f "$src/.tpcds-version" ]; then
+    cp -f "$src/.tpcds-version" "$stage/.tpcds-version"
+  elif [ -f "$stage/.tpcds-version" ]; then
+    echo "    沿用已有 build/dist/tpcds-data/.tpcds-version($(head -1 "$stage/.tpcds-version"))"
+  else
+    echo "!! 缺少版本 marker($src/.tpcds-version 与 $stage/.tpcds-version 都不存在), 无法标记数据版本"
+    echo "   请用 build/scripts/gen-tpcds.sh 重新生成, 或设置 TPCDS_DATA_SRC 指向含 .tpcds-version 的数据目录"
+    exit 1
+  fi
   echo "    staged $(du -sh "$stage" | cut -f1), ${n_tbl} 张表 / ${n_parquet} 个 parquet"
 }
 
@@ -282,13 +356,16 @@ build_jar_only() {
     echo "!! 基础镜像 $BASE_IMAGE 不存在,请先执行: FULL=1 ./build.sh"; exit 1
   fi
 
-  echo "==> 1/5 构建 Spark 写入合规监听器 jar"
+  echo "==> 1/6 校验宿主机 Marquez 产物(增量模式不重建)"
+  check_marquez_artifacts
+
+  echo "==> 2/6 构建 Spark 写入合规监听器 jar"
   ensure_spark_listener
 
-  echo "==> 2/5 staging TPC-DS 基准数据"
+  echo "==> 3/6 staging TPC-DS 基准数据"
   stage_tpcds_data
 
-  echo "==> 3/5 宿主机编译 dataforge-server jar"
+  echo "==> 4/6 宿主机编译 dataforge-server jar"
   build_server_jar
 
   # 搭建独立的精简构建上下文(仅 jar + Dockerfile),避免 dataforge-server/.dockerignore
@@ -360,7 +437,7 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 DOCKEREOF
 
-  echo "==> 4/5 基于 $BASE_IMAGE 覆盖新 jar 构建 $FULL_TAG"
+  echo "==> 5/6 基于 $BASE_IMAGE 覆盖新 jar 构建 $FULL_TAG"
   docker buildx build --platform "$PLATFORMS" \
     $(load_push) \
     --provenance=false --sbom=false \
@@ -368,7 +445,8 @@ DOCKEREOF
     -t "$FULL_TAG" -f "$staging/Dockerfile" "$staging"
 
   rm -rf "$staging"
-  echo "==> 5/5 完成: $FULL_TAG(已更新 dataforge-server jar / 监听器 jar / Spark 默认配置 / 容器脚本 / 初始化 SQL / TPC-DS 数据层)"
+  echo "==> 6/6 完成: $FULL_TAG(已更新 dataforge-server jar / 监听器 jar / Spark 默认配置 / 容器脚本 / 初始化 SQL / TPC-DS 数据层)"
+  tag_rollback
 }
 
 # ---------- 2) 全量重建(基础镜像) ----------
@@ -407,16 +485,20 @@ ensure_dist() {
 }
 
 build_full() {
-  echo "==> 检查/补下本地发行包($DIST_DIR/)"
+  echo "==> 1/6 检查/补下本地发行包($DIST_DIR/)"
   ensure_dist
 
-  echo "==> 构建 Spark 写入合规监听器"
+  # 顺序要求: 宿主编译(Marquez -> 监听器 -> server jar)全部完成并通过校验后, 才进入 docker build。
+  echo "==> 2/6 宿主机预编译 Marquez(API + Web)"
+  prepare_marquez
+
+  echo "==> 3/6 构建 Spark 写入合规监听器"
   ensure_spark_listener
 
-  echo "==> staging TPC-DS 基准数据"
+  echo "==> 4/6 staging TPC-DS 基准数据"
   stage_tpcds_data
 
-  echo "==> 宿主机编译 dataforge-server"
+  echo "==> 5/6 宿主机编译 dataforge-server"
   build_server_jar
 
   # docker-container 构建器容器内通过 host.docker.internal 访问宿主代理
@@ -445,9 +527,10 @@ build_full() {
     builder="--builder proxied"
   fi
 
-  echo "==> 全量构建 $FULL_TAG(镜像内仅剩 Marquez 源码构建, 耗时较长)"
+  echo "==> 6/6 全量构建 $FULL_TAG(镜像内已无 gradle/npm 编译, 仅解包发行包 + COPY 产物)"
   docker buildx build $builder "${args[@]}" "$SERVER_DIR"
   echo "==> 全量构建完成: $FULL_TAG"
+  tag_rollback
 }
 
 # ---------- 统一执行 ----------

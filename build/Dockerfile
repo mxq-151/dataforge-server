@@ -11,9 +11,17 @@
 # 落到 build/dist/dataforge-server.jar, 本 Dockerfile 只负责 COPY 进来。
 # 这样免去容器内预热 ~/.m2、构建上下文不必再送 src/pom、编译错误直接可见、可离线构建。
 #
+# Marquez 0.51.1(API shadow jar + Web 静态产物)同样不在镜像内编译: 由
+# build/prepare-marquez.sh 在宿主机用本机 JDK17 + Gradle + Node 构建, 产物落
+# build/dist/marquez/ 与 build/dist/marquez-web/, 本文件只做 COPY。
+# 因此镜像构建阶段不再有 gradle / npm / gcc / make 任何编译动作, 也没有 gradle:8.7-jdk17
+# 与 node:18-bullseye 两个 builder 镜像(约 2.5GB)参与。
+#
 # 直接 docker build 前需自行准备(建议统一用 build/build.sh 或 build/build-all.sh 驱动):
 #   build/dist/dataforge-server.jar      宿主机 mvn package 产物
 #   build/dist/spark-listeners/*.jar     宿主机构建的写入合规监听器
+#   build/dist/marquez/                  宿主机构建的 Marquez API jar + marquez.dev.yml
+#   build/dist/marquez-web/              宿主机构建的 Marquez Web 静态产物(web/dist)
 #   build/dist/<其余发行包>               见 build-lib.sh ensure_dist
 #
 # 构建(需要代理时):
@@ -23,67 +31,12 @@
 #     -t dataforge-allinone:1.0 .
 # ============================================================
 
-# ---------- Stage 1: Marquez API 0.51.1(源码构建,不依赖官方镜像) ----------
-FROM gradle:8.7-jdk17 AS marquez-builder
-ARG BUILD_HTTP_PROXY=
-ARG BUILD_HTTPS_PROXY=
-ENV http_proxy=${BUILD_HTTP_PROXY} \
-    https_proxy=${BUILD_HTTPS_PROXY} \
-    HTTP_PROXY=${BUILD_HTTP_PROXY} \
-    HTTPS_PROXY=${BUILD_HTTPS_PROXY} \
-    no_proxy=127.0.0.1,localhost \
-    NO_PROXY=127.0.0.1,localhost
-# 源码包已预下载到本地 build/dist/(见 build.sh ensure_dist),构建不再联网下载
-COPY build/dist/marquez-0.51.1.tar.gz /tmp/marquez.tar.gz
-RUN mkdir -p /opt/marquez-src \
- && tar xzf /tmp/marquez.tar.gz -C /opt/marquez-src --strip-components=1 \
- && rm -f /tmp/marquez.tar.gz
-WORKDIR /opt/marquez-src
-# 直接用 base 镜像自带的 Gradle(base=gradle:8.7-jdk17,版本与 wrapper 要求的
-# gradle-8.7-bin.zip 一致),不走 ./gradlew:本机出网极慢(~0.2MB/s),wrapper 的
-# networkTimeout=10000 会在下载发行包时直接用超时中断构建。
-#
-# 依赖仓库统一改走阿里云镜像(见 build/conf/gradle-init-mirror.gradle 顶部说明):
-# 容器内直连 repo.maven.apache.org / plugins.gradle.org 会 TLS 握手失败,报
-#   Could not resolve io.dropwizard:dropwizard-json-logging:2.1.12
-#     > Remote host terminated the handshake
-# 且 Java/Gradle **不读** http_proxy/https_proxy 环境变量,靠上面的构建期代理参数
-# 兜不住这一步,只能从仓库层面改写。临时绕开可 --build-arg GRADLE_MIRROR=off。
-# 超时参数顺带放大,避免慢链路下握手被服务端提前断掉。
-# /root/.gradle 缓存挂载:缓存依赖与发行包,避免层失效后重下
-ARG GRADLE_MIRROR=aliyun
-ENV GRADLE_MIRROR=${GRADLE_MIRROR}
-COPY build/conf/gradle-init-mirror.gradle /opt/gradle-init/mirror.gradle
-RUN --mount=type=cache,target=/root/.gradle \
-    gradle --no-daemon -q \
-      --init-script /opt/gradle-init/mirror.gradle \
-      -Dorg.gradle.internal.http.connectionTimeout=60000 \
-      -Dorg.gradle.internal.http.socketTimeout=180000 \
-      :api:shadowJar -x test
+# ============================================================
+# 单阶段运行时镜像: 所有编译(server jar / 监听器 / Marquez API+Web)都在宿主机完成,
+# 本文件只解包发行包 + COPY 产物, 不含任何编译动作。
+# ============================================================
 
-# ---------- Stage 2: Marquez Web(源码构建,不依赖官方镜像) ----------
-FROM node:18-bullseye AS marquez-web-builder
-ARG BUILD_HTTP_PROXY=
-ARG BUILD_HTTPS_PROXY=
-ENV http_proxy=${BUILD_HTTP_PROXY} \
-    https_proxy=${BUILD_HTTPS_PROXY} \
-    HTTP_PROXY=${BUILD_HTTP_PROXY} \
-    HTTPS_PROXY=${BUILD_HTTPS_PROXY} \
-    no_proxy=127.0.0.1,localhost \
-    NO_PROXY=127.0.0.1,localhost
-COPY --from=marquez-builder /opt/marquez-src /opt/marquez-src
-WORKDIR /opt/marquez-src/web
-# 构建机内存受限时防止 webpack OOM（Killed/ResourceExhausted）：
-#   1) 关闭生产 sourcemap（devtool: false）——省去大块 map 的生成/驻留内存
-#   2) minimize: false —— 不跑 terser，避免默认按 CPU 核数 fork 多个压缩 worker 进程
-#   3) NODE_OPTIONS 限制 V8 堆上限，避免堆无节制膨胀
-# /root/.npm 缓存挂载:缓存 npm 包,避免层失效后重下 node_modules(同上)
-RUN --mount=type=cache,target=/root/.npm \
-    node -e 'const fs=require("fs");let s=fs.readFileSync("webpack.prod.js","utf8");s=s.replace(/devtool: '\''source-map'\''/,"devtool: false");s=s.replace("const webpackProd = {","const webpackProd = {\n  optimization: { minimize: false },");fs.writeFileSync("webpack.prod.js",s);' \
- && npm ci --no-audit --no-fund \
- && NODE_OPTIONS=--max-old-space-size=2048 npm run build
-
-# ---------- Stage 3: 运行时镜像 ----------
+# ---------- 运行时镜像 ----------
 FROM eclipse-temurin:17-jammy
 
 # 构建期代理(配合 --network=host 使用;最终会被清空,不写入运行时)
@@ -348,12 +301,22 @@ RUN sed -i 's|^\([[:space:]]*task-executor-thread-size:\).*$|\1 2|' \
  && grep -n -B2 'task-executor-thread-size' \
         /opt/dolphinscheduler/standalone-server/conf/application.yaml
 
+# ---------- Marquez 0.51.1 / Marquez Web：宿主机预编译产物，镜像内只 COPY ----------
+# 原实现是两个 builder 阶段(FROM gradle:8.7-jdk17 / node:18-bullseye)在镜像构建期
+# gradle :api:shadowJar + npm ci + webpack, 慢且依赖容器内工具链。现改由
+# build/prepare-marquez.sh 在宿主机完成, 产物固定落:
+#   build/dist/marquez/       marquez-api-0.51.1.jar + marquez.dev.yml(+ manifest.sha256)
+#   build/dist/marquez-web/   web/dist 静态资源(index.html / js / css / ...)
+# 目录与运行行为完全不变: /opt/marquez 下仍是 jar + 配置, /opt/marquez-web 仍是 nginx 站点根。
+# 校验(文件齐全 + sha256 + jar 内 Main-Class)由 prepare-marquez.sh 在 COPY 之前完成,
+# 不通过会直接中止构建, 不会把半成品打进镜像。
+
 # ---------- Marquez 0.51.1(自建产物) ----------
-COPY --from=marquez-builder /opt/marquez-src/api/build/libs/marquez-api-0.51.1.jar /opt/marquez/
-COPY --from=marquez-builder /opt/marquez-src/marquez.dev.yml /opt/marquez/
+COPY build/dist/marquez/marquez-api-0.51.1.jar /opt/marquez/
+COPY build/dist/marquez/marquez.dev.yml /opt/marquez/
 
 # ---------- Marquez Web(自建静态产物 + Nginx) ----------
-COPY --from=marquez-web-builder /opt/marquez-src/web/dist /opt/marquez-web
+COPY build/dist/marquez-web/ /opt/marquez-web/
 RUN rm -f /etc/nginx/sites-enabled/default
 COPY build/conf/marquez-web-nginx.conf /etc/nginx/conf.d/marquez-web.conf
 

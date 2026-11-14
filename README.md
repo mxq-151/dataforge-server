@@ -189,13 +189,16 @@ dataforge-server/
 │   ├── build.sh                        # 单平台构建（--load 到本地）
 │   ├── build-all.sh                    # 多平台构建（--push 到仓库）
 │   ├── build-lib.sh                    # 两者共享的构建逻辑
-│   ├── Dockerfile                      # 多阶段构建（Gradle 构建 Marquez API + Node 构建 Marquez Web）
+│   ├── prepare-marquez.sh              # 宿主机预编译 Marquez API（Gradle）+ Web（npm/webpack）
+│   ├── Dockerfile                      # 单阶段：仅解包发行包 + COPY 宿主机产物，镜像内不编译
 │   ├── conf/                           # spark-defaults.conf、supervisord.conf、marquez-web nginx.conf
 │   ├── scripts/                        # init-dataforge.sh / run-dataforge.sh / run-ds-standalone.sh
 │   │                                   # + set-write-compliance.sh（写入合规监听器开关）
 │   ├── dist/                           # 构建产物与预下载发行包
 │   │                                   # + dataforge-server.jar（宿主机 mvn 产物，Dockerfile 直接 COPY）
 │   │                                   # + spark-listeners/（宿主机构建的写入合规监听器 jar）
+│   │                                   # + marquez/（宿主机构建的 API jar + marquez.dev.yml）
+│   │                                   # + marquez-web/（宿主机构建的 Web 静态产物）
 │   │                                   # + spark / dolphinscheduler / marquez / openlineage 发行包
 │   └── hot-update-dataforge-server.sh  # 热替换 server jar（不改镜像）
 └── startup/          # 启停
@@ -204,24 +207,67 @@ dataforge-server/
     └── windows/                        # 与 macos 功能一一对应的 .bat 版本
 ```
 
-### dataforge-server 在宿主机编译（不在镜像内）
+### 所有编译都在宿主机完成（镜像内不编译）
 
-`dataforge-server` 的 jar **不由 Docker 构建**：`build/build.sh` 先用本机 `mvn package` 打包，
-产物固定写到 `build/dist/dataforge-server.jar`，`Dockerfile` 只做 `COPY`。因此：
+镜像构建阶段**没有任何 gradle / npm / mvn / gcc / make 调用**。Dockerfile 只做「解包发行包 + COPY 宿主机产物」，
+所有产物集中落在 `build/dist/<component>/`：
 
-- 两种构建模式（增量 / `FULL=1`）都要求宿主机有可用的 **mvn 与 JDK 17+**（`JAVA_HOME` 未设置时会尝试用
-  macOS 的 `/usr/libexec/java_home -v 17` 自动定位）；镜像内不再有 Maven 阶段，也没有"容器内编译"的退路。
-- 免去了容器内预热 `~/.m2/repository`（原 `M2_SEED_DIR` 已废弃），构建上下文不再需要 `pom.xml` / `src/main/java`，
-  依赖直接走宿主仓库、**可离线构建**，编译错误也在宿主终端直接可见。
-- `HADOOP_VERSION` / `HBASE_VERSION` / `JUICEFS_VERSION` / `PARQUET_VERSION` / `ORC_VERSION`
-  现在是作为 `-D` 参数透传给宿主机的 mvn。
+| 组件 | 宿主机编译入口 | 依赖工具链 | 产物（Dockerfile 只 COPY） |
+| --- | --- | --- | --- |
+| dataforge-server | `build-lib.sh build_server_jar()` | mvn + JDK 17+ | `build/dist/dataforge-server.jar` → `/opt/dataforge[ -image]/` |
+| spark-write-compliance | `build-lib.sh ensure_spark_listener()` | mvn + JDK 8+ | `build/dist/spark-listeners/*.jar` → `/opt/spark/jars/` |
+| Marquez API 0.51.1 | `build/prepare-marquez.sh` | JDK 17+ + Gradle 8.x | `build/dist/marquez/marquez-api-0.51.1.jar` + `marquez.dev.yml` → `/opt/marquez/` |
+| Marquez Web | `build/prepare-marquez.sh` | Node 16+ / npm | `build/dist/marquez-web/`（index.html + js/css） → `/opt/marquez-web/` |
 
-构建脚本可用的环境变量：`FULL`（全量重建基础镜像）、`PLATFORMS`、`REGISTRY`（多平台构建必须指定）、`SKIP_TESTS`、`JAVA_HOME`、`IMAGE_NAME` / `IMAGE_TAG` / `IMAGE_VER`；另有写入合规监听器相关的 `SPARK_LISTENER_DIR`（源码目录）、`SPARK_LISTENER_MODULES`（默认 `core,spark-3.5`）、`SKIP_SPARK_LISTENER=1`（跳过构建，沿用 `build/dist/spark-listeners/` 已有 jar）。
+要点：
+
+- `FULL=1` 的执行顺序固定为「下载发行包 → **宿主机预编译 Marquez → 监听器 → staging 数据 → server jar** →
+  `docker build`」，任一步失败都在宿主机终端直接报错，不会浪费一次镜像构建。
+- Marquez 预编译增量：`build/dist/marquez*` 内 `.build-stamp` 记录「源码包 sha256 + Gradle/JDK/Node 版本」，
+  一致且产物校验通过则整段跳过；`FORCE=1 ./build.sh` 或 `bash build/prepare-marquez.sh --force` 强制重编。
+- 产物校验（不通过直接中止，不会把半成品打进镜像）：必要文件存在、API jar ≥20MB 且含
+  `marquez/MarquezApp.class` 与 `Main-Class`、Web 产物含 `index.html` 与 js 且 ≥1MB、`manifest.sha256` 校验和一致。
+- 可复用缓存（固定位置，**不在仓库内**，避免 `build/dist` 的 macOS TCC 写入限制）：
+  `${DATAFORGE_BUILD_CACHE:-~/.cache/dataforge-build}/{gradle,npm,work/marquez-0.51.1}`。
+  首次构建后 Gradle/npm 依赖全部落在这里，后续优先 `--offline`（`GRADLE_REFRESH=1` 可强制联网）。
+
+### 宿主机前置依赖
+
+| 用途 | 依赖 | 缺失时的报错 |
+| --- | --- | --- |
+| 全部构建 | Docker + Buildx、`rsync` | 启动即报 `未找到 docker` / `未启用 buildx` |
+| server jar | Maven 3.8+、JDK 17+ | `未找到 mvn` / `找不到可用的 java` |
+| Marquez API | JDK 17+、Gradle 8.x | `未找到 gradle(需要 8.x)`（含三种安装方式提示） |
+| Marquez Web | Node 16+、npm | `未找到 node` / `Node 版本过低` |
+
+Gradle 解析顺序：`GRADLE_BIN` → PATH 里的 `gradle` → `$DATAFORGE_BUILD_CACHE/gradle-8.*` →
+`~/.gradle/wrapper/dists/gradle-8.*`（复用本机已下载的 wrapper 发行版）。
+JAVA_HOME 未设置时在 macOS 上自动用 `/usr/libexec/java_home -v 17` 定位。
+
+常见失败处理：
+
+| 现象 | 原因 / 处理 |
+| --- | --- |
+| `未找到 gradle` | `brew install gradle`，或下载 `gradle-8.7-bin.zip` 解压到 `~/.cache/dataforge-build/gradle-8.7`，或 `export GRADLE_BIN=...` |
+| gradle 报 `Could not resolve ... Remote host terminated the handshake` | 仓库直连不通，默认已走阿里云镜像（`conf/gradle-init-mirror.gradle`）；`GRADLE_MIRROR=off` 可回退排查 |
+| 离线模式失败并提示「回退联网解析」 | 本地 gradle 缓存缺依赖，脚本会自动联网重试一次；`GRADLE_REFRESH=1` 可显式刷新 |
+| `npm ci` 失败 / 404 | `NPM_REGISTRY=https://registry.npmjs.org` 换源重试；`NPM_REFRESH=1` 丢弃 node_modules 缓存 |
+| webpack 阶段 `Killed` / OOM | 脚本已关 sourcemap + minimize 并限堆 2GB；仍失败可手动调大 `--max-old-space-size` |
+| `build/dist` 报 `Permission denied`（macOS） | TCC 限制：脚本已用「临时目录 + mv/rsync」规避；仍失败时把仓库移出 `~/Desktop`、或在「系统设置 → 隐私与安全性 → 完全磁盘访问」里给终端授权，**不要**用「把整个仓库复制到 /tmp 再构建」当长期方案 |
+| Marquez 产物校验失败 | `bash build/prepare-marquez.sh --force` 重编；`--check` 可单独校验 |
+
+### 构建脚本可用的环境变量
+
+`FULL`（全量重建基础镜像）、`FORCE`（强制重编 Marquez）、`PLATFORMS`、`REGISTRY`（多平台构建必须指定）、`SKIP_TESTS`、`JAVA_HOME`、`IMAGE_NAME` / `IMAGE_TAG` / `IMAGE_VER`；写入合规监听器相关的 `SPARK_LISTENER_DIR`（源码目录）、`SPARK_LISTENER_MODULES`（默认 `core,spark-3.5`）、`SKIP_SPARK_LISTENER=1`（跳过构建，沿用已有 jar）；Marquez 相关的 `MARQUEZ_VERSION`、`DATAFORGE_BUILD_CACHE`、`GRADLE_BIN`、`GRADLE_MIRROR`、`NPM_REGISTRY`。
+
+构建成功后脚本会给结果镜像打 `dataforge-allinone:rollback-<YYYYMMDD>` 标签，作为下次构建失败时的手动回滚点
+（`docker tag dataforge-allinone:rollback-<日期> dataforge-allinone:1.0` 即可回退）。
 
 ```bash
 # 单平台：宿主机编译 server jar + 增量覆盖（日常迭代最快）
 ./build/build.sh
 FULL=1 ./build/build.sh          # 全量重建基础镜像（首次或基础层变更时）
+FORCE=1 FULL=1 ./build/build.sh  # 同时强制重编 Marquez
 
 # 多平台：需先注册 binfmt，且必须指定 REGISTRY（多平台产物无法 --load）
 docker run --privileged --rm tonistiigi/binfmt --install all

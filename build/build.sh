@@ -6,13 +6,17 @@
 #
 #   * dataforge-server 一律在**宿主机**编译(mvn package -> build/dist/dataforge-server.jar),
 #     镜像内不再跑 Maven,因此两种模式都要求本机有可用的 mvn 与 JDK 17+。
+#   * Marquez(API + Web)同样在**宿主机**预编译(build/prepare-marquez.sh, 需要 JDK 17+ /
+#     Gradle 8.x / Node 16+),产物落 build/dist/marquez{,-web}/,Dockerfile 只 COPY。
+#     FULL=1 时产物未变会跳过编译, FORCE=1 强制重编。
 #   * 默认仅增量更新 jar(宿主机重编译 -> 基于已有基础镜像覆盖新 jar),秒级完成。
-#   * FULL=1 时全量重建基础镜像(Marquez + Spark + DolphinScheduler
-#     + PostgreSQL + dataforge-server),首次或基础变更时执行。
+#   * FULL=1 时全量重建基础镜像(Spark + DolphinScheduler + PostgreSQL + dataforge-server
+#     + 宿主机预编译的 Marquez),首次或基础变更时执行。
 #
 # 用法:
 #   ./build.sh                                                        # 单平台增量更新 jar(最快)
 #   FULL=1 ./build.sh                                                 # 单平台全量重建基础镜像
+#   FULL=1 FORCE=1 ./build.sh                                         # 全量重建 + 强制重编 Marquez
 #   PLATFORMS="linux/arm64" ./build.sh                                # 指定某单平台
 #   PROXY="" ./build.sh                                               # 全量构建直连模式(网络不受限时)
 #   SKIP_TESTS=false ./build.sh                                       # mvn 打包时执行单测

@@ -1,15 +1,15 @@
 // ============================================================
-// Gradle 仓库镜像初始化脚本(镜像构建期专用,见 build/Dockerfile 的 marquez-builder 阶段)
+// Gradle 仓库镜像初始化脚本(Marquez 宿主机预编译专用, 见 build/prepare-marquez.sh)
 //
 // 为什么需要
-//   容器内直连 repo.maven.apache.org / plugins.gradle.org 会 TLS 握手失败,报
+//   国内网络直连 repo.maven.apache.org / plugins.gradle.org 时 TLS 握手/解析经常失败,报
 //     Could not resolve io.dropwizard:dropwizard-json-logging:2.1.12
 //       > Remote host terminated the handshake
-//   而 Java/Gradle **不读** http_proxy/https_proxy 环境变量,Dockerfile 的构建期代理
-//   参数兜不住依赖解析,只能在仓库层面把地址改写掉。
+//   而 Java/Gradle **不读** http_proxy/https_proxy 环境变量,只能在仓库层面把地址改写掉。
+//   (该脚本原先是给 Dockerfile 里 gradle:8.7-jdk17 阶段用的, 现已改为宿主机 gradle 使用。)
 //
 // 怎么用
-//   gradle --init-script /opt/gradle-init/mirror.gradle ...
+//   gradle --init-script build/conf/gradle-init-mirror.gradle ...
 //   由环境变量 GRADLE_MIRROR 控制:aliyun(默认)=改写为阿里云镜像;off / 空=完全不动,
 //   保持项目自带的仓库地址(网络直连可用时用这个排查"到底是网络还是镜像问题")。
 //

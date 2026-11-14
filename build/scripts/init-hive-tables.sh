@@ -72,6 +72,16 @@ case "$DBLOC" in
   *) NEED_RESET=1 ;;
 esac
 
+# 数据基线版本变化（例如 SF=0.5 -> SF=2）：即使表名/路径没变，也重建一次元数据，
+# 让表统计/分区信息与当前数据一致，避免"按表数判断 skip"导致旧规模残留。
+# marker 由 entrypoint 从镜像 /opt/tpcds/.tpcds-version 同步到卷根目录。
+VER_FILE="$WAREHOUSE_ROOT/.tpcds-version"
+APPLIED_FILE="$WAREHOUSE_ROOT/.tpcds-applied"
+if [ -f "$VER_FILE" ] && ! cmp -s "$VER_FILE" "$APPLIED_FILE"; then
+  log "检测到数据基线版本变化: $(tr '\n' ' ' < "$VER_FILE")"
+  NEED_RESET=1
+fi
+
 spark_sql() {
   # 以 test_tenant 运行，保持 warehouse 属主一致
   su -s /bin/bash test_tenant -c "cd /tmp && HOME=/home/test_tenant $SPARK_HOME/bin/spark-sql \
@@ -95,8 +105,13 @@ if [ "$NEED_RESET" = "1" ]; then
   CNT=0
 fi
 
+mark_applied() {
+  [ -f "$VER_FILE" ] && cp -f "$VER_FILE" "$APPLIED_FILE" 2>/dev/null || true
+}
+
 if [ "${CNT:-0}" -ge "$EXPECTED_TABLES" ]; then
   log "all ${EXPECTED_TABLES} tables already registered with correct locations, skip"
+  mark_applied
   exit 0
 fi
 
@@ -109,4 +124,5 @@ CNT2=$(pg_scalar "SELECT count(*)
 FROM \"TBLS\" t JOIN \"DBS\" d ON t.\"DB_ID\" = d.\"DB_ID\"
 WHERE d.\"NAME\" = 'test_db';")
 log "done, registered tables: ${CNT2:-0}"
+mark_applied
 exit 0

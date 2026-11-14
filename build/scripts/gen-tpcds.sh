@@ -15,7 +15,7 @@
 # 参数：
 #   --dsgen       <dir>     DSGen 4.0.0 源码目录（含 tools/，或直接指向 tools/）；
 #                           也可用环境变量 DSGEN_SRC 指定。不再内置下载旧版 tpcds-kit
-#   -s|--scale    <0.01~1>  数据规模（0.5 ≈ 500MB 原始数据），默认 0.5
+#   -s|--scale    <0.01~N>  数据规模，SF=1 ≈ 1GB 原始文本；支持小数(<1)与整数(如 2)，默认 0.5
 #   -f|--format   <parquet|orc>  输出格式，默认 parquet
 #   -o|--output   <dir>     输出目录，默认 /tmp/tpcds（造数用；镜像内的基线数据在 /opt/tpcds，
 #                          由构建期 TPCDS_DATA_SRC staging 进镜像，本脚本不会直接改写它）
@@ -56,6 +56,7 @@ WORKDIR="/tmp/tpcds-work"
 KEEP_DAT=0
 FORCE=0
 CORES="4"
+DRIVER_MEM="${TPCDS_DRIVER_MEM:-4g}"
 DSGEN_SRC="${DSGEN_SRC:-}"
 
 while [ $# -gt 0 ]; do
@@ -84,15 +85,19 @@ log() { echo "[tpcds $(date +%H:%M:%S)] $*"; }
 die() { echo "[tpcds] ERROR: $*" >&2; exit 1; }
 
 # ---- 参数校验 ----
-python3 - "$SCALE" <<'PY' || die "scale 必须是 (0,1] 之间的数字"
+python3 - "$SCALE" <<'PY' || die "scale 必须是正数（<=1 为小数缩放，>=1 建议取整数）"
 import sys
 s=float(sys.argv[1])
-assert 0 < s <= 1.0, s
+assert s > 0, s
 PY
 [ "$FORMAT" = "parquet" ] || [ "$FORMAT" = "orc" ] || die "format 只支持 parquet / orc"
 
-INT_SCALE=$(python3 -c "import sys,math;print(max(1,int(math.floor(float('$SCALE')))))")
-FRAC=$(python3 -c "print(float('$SCALE'))")
+# 口径：SF=1 约等于 1GB 的 `|` 分隔原始文本。
+#   * scale < 1：-SCALE 1 + DF_TPCDS_FRAC=scale（线性/对数表按比例缩放，维表不变）
+#   * scale >= 1：-SCALE floor(scale) + DF_TPCDS_FRAC=scale/floor(scale)
+#     整数 scale 时 FRAC=1，即标准 SF（如 SF=2 -> -SCALE 2，文本约 2GB）
+INT_SCALE=$(python3 -c "import math;print(max(1,int(math.floor(float('$SCALE')))))")
+FRAC=$(python3 -c "print(float('$SCALE')/$INT_SCALE)")
 
 # ---- 目标目录检查：已存在且非空时先中止（--force 才覆盖） ----
 if [ -d "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then
@@ -127,6 +132,8 @@ cp -a "$SRC_TOOLS/." "$KIT_DIR/tools/"
 
 log "生成器版本证据（$KIT_DIR/tools/release.h）:"
 grep -E '^#define[[:space:]]+(VERSION|RELEASE|MODIFICATION|PATCH|C_DATES)' "$KIT_DIR/tools/release.h" | sed 's/^/    /'
+DSGEN_VER=$(awk '/^#define[[:space:]]+VERSION/{v=$3} /^#define[[:space:]]+RELEASE/{r=$3} /^#define[[:space:]]+MODIFICATION/{m=$3} END{print v"."r"."m}' "$KIT_DIR/tools/release.h" | tr -d '\r')
+log "DSGen 版本号: ${DSGEN_VER:-unknown}"
 
 # 补丁：支持小数 SF（原实现 get_int("SCALE") 把 0.5 变 0，越界段错误）
 if grep -q "DF_TPCDS_FRAC" "$KIT_DIR/tools/scaling.c"; then
@@ -246,13 +253,13 @@ if [ "$(id -u)" -eq 0 ] && id "$RUN_USER" >/dev/null 2>&1; then
   # 必须切到可写目录：spark-sql 默认用 Hive 元数据（Derby），会在 cwd 建 metastore_db；
   # 用 su 时 cwd 是 /，test_tenant 无法写。这里同时显式使用内存 catalog，彻底规避 Derby。
   su -s /bin/bash "$RUN_USER" -c \
-    "cd $WORKDIR && HOME=/home/$RUN_USER $SPARK_HOME/bin/spark-sql --master 'local[$CORES]' --driver-memory 4g \
+    "cd $WORKDIR && HOME=/home/$RUN_USER $SPARK_HOME/bin/spark-sql --master 'local[$CORES]' --driver-memory $DRIVER_MEM \
      --conf spark.sql.catalogImplementation=in-memory \
      --conf spark.sql.shuffle.partitions=8 --conf spark.sql.extensions= \
      --conf spark.ui.enabled=false -f $SQL_FILE" >>"$LOG" 2>&1 \
     || die "Spark 转换失败，详见 $LOG"
 else
-  ( cd "$WORKDIR" && "$SPARK_HOME/bin/spark-sql" --master "local[$CORES]" --driver-memory 4g \
+  ( cd "$WORKDIR" && "$SPARK_HOME/bin/spark-sql" --master "local[$CORES]" --driver-memory "$DRIVER_MEM" \
     --conf spark.sql.catalogImplementation=in-memory \
     --conf spark.sql.shuffle.partitions=8 --conf spark.sql.extensions= \
     --conf spark.ui.enabled=false -f "$SQL_FILE" ) >>"$LOG" 2>&1 \
@@ -272,6 +279,23 @@ for d in "$OUT"/*/; do
   printf "%-24s %12s %8sMB\n" "$t" "$rows" "$sz"
 done
 log "合计: ${total}MB（du 实测 $(du -sh "$OUT" | cut -f1)）"
+
+# ---- 6.1) 写版本 marker（数据基线标识：镜像/卷据此判断是否需要替换旧数据）----
+SS_ROWS="unknown"
+[ -f "$DAT_DIR/store_sales.dat" ] && SS_ROWS=$(wc -l < "$DAT_DIR/store_sales.dat" | tr -d ' ')
+{
+  echo "DSGEN=${DSGEN_VER:-unknown}"
+  echo "SCALE=${SCALE}"
+  echo "INT_SCALE=${INT_SCALE}"
+  echo "FRAC=${FRAC}"
+  echo "FORMAT=${FORMAT}"
+  echo "GENERATED=$(date '+%Y-%m-%d %H:%M:%S')"
+  echo "STORE_SALES_ROWS=${SS_ROWS}"
+  if [ -f "$DAT_DIR/dbgen_version.dat" ]; then
+    echo "DBGEN_VERSION=$(cut -d'|' -f1-3 "$DAT_DIR/dbgen_version.dat" | tr -d '\r')"
+  fi
+} > "$OUT/.tpcds-version"
+log "版本 marker: $OUT/.tpcds-version（DSGen ${DSGEN_VER:-unknown}, SCALE=${SCALE}, store_sales=${SS_ROWS}）"
 
 # ---- 7) 清理中间 .dat ----
 if [ "$KEEP_DAT" -ne 1 ]; then

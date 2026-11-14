@@ -187,17 +187,45 @@ seed_tpcds_data() {
     return 0
   fi
   mkdir -p "$dst" "$dst/test_db.db" 2>/dev/null || true
-  local d name seeded=0
-  for d in "$src"/*/; do
-    [ -d "$d" ] || continue
-    name="$(basename "$d")"
-    [ "$name" = "test_db.db" ] && continue
-    if [ ! -e "$dst/$name" ]; then
-      cp -a "$d" "$dst/$name" 2>/dev/null && seeded=$((seeded + 1))
+
+  # 版本比对：镜像基线换了（如 SF=0.5 -> SF=2）就把卷内同名表目录整体替换，
+  # 避免"卷里还是旧规模、镜像已更新"，也避免下次删卷后回退到旧基线。
+  local ver_src="$src/.tpcds-version" ver_dst="$dst/.tpcds-version"
+  local replace=0
+  if [ -f "$ver_src" ]; then
+    if [ ! -f "$ver_dst" ] || ! cmp -s "$ver_src" "$ver_dst"; then
+      replace=1
     fi
-  done
+  fi
+
+  local d name seeded=0
+  if [ "$replace" -eq 1 ]; then
+    echo "[entrypoint] TPC-DS 基线版本变化，替换卷内旧数据（$(tr '\n' ' ' < "$ver_src" 2>/dev/null)）"
+    for d in "$src"/*/; do
+      [ -d "$d" ] || continue
+      name="$(basename "$d")"
+      [ "$name" = "test_db.db" ] && continue
+      rm -rf "$dst/$name"
+      cp -a "$d" "$dst/$name" && seeded=$((seeded + 1))
+    done
+    cp -f "$ver_src" "$ver_dst" 2>/dev/null || true
+  else
+    for d in "$src"/*/; do
+      [ -d "$d" ] || continue
+      name="$(basename "$d")"
+      [ "$name" = "test_db.db" ] && continue
+      if [ ! -e "$dst/$name" ]; then
+        cp -a "$d" "$dst/$name" && seeded=$((seeded + 1))
+      fi
+    done
+  fi
+
   if [ "$seeded" -gt 0 ]; then
-    echo "[entrypoint] TPC-DS 数据已播种到 ${dst}（本次新增 ${seeded} 张表）"
+    if [ "$replace" -eq 1 ]; then
+      echo "[entrypoint] TPC-DS 数据已替换到 ${dst}（${seeded} 张表）"
+    else
+      echo "[entrypoint] TPC-DS 数据已补齐到 ${dst}（新增 ${seeded} 张表）"
+    fi
     if id test_tenant >/dev/null 2>&1; then
       chown -R test_tenant:test_tenant "$dst" 2>/dev/null || true
     fi
