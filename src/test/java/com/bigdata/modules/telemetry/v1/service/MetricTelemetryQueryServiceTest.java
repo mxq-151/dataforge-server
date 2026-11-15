@@ -2,9 +2,19 @@ package com.bigdata.modules.telemetry.v1.service;
 
 import com.bigdata.modules.telemetry.shared.LogCircuitBreaker;
 import com.bigdata.modules.telemetry.model.CapabilityCode;
+import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.telemetry.v1.catalog.CatalogContributor;
+import com.bigdata.modules.telemetry.v1.catalog.FlinkMetricSemantics;
+import com.bigdata.modules.telemetry.v1.catalog.RestMetricSemanticsRegistry;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
+import com.bigdata.modules.telemetry.v1.discovery.DiscoveredMetric;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryProvider;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryQuery;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryRegistry;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryResult;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryService;
 import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogRegistry;
+import com.bigdata.modules.telemetry.v1.metadata.config.TelemetryMetadataProperties;
 import com.bigdata.modules.telemetry.v1.dto.MetricQueryV1Request;
 import com.bigdata.modules.telemetry.v1.model.BackendBinding;
 import com.bigdata.modules.telemetry.v1.model.BackendStatus;
@@ -34,10 +44,11 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MetricTelemetryQueryServiceTest {
 
-    private static final Target TARGET = new Target("flink", "flink.jobmanager", "cluster");
+    private static final Target TARGET = new Target("kafka", "kafka.broker", "cluster");
 
     @Test
     @DisplayName("首选成功：outcome=ok，selected 为首选，不回退")
@@ -140,7 +151,90 @@ class MetricTelemetryQueryServiceTest {
         assertThat(first.fetches).isZero();
     }
 
+    @Test
+    @DisplayName("发现到的 counter 类型来自运行时元数据：rate=true 可正确通过")
+    void discoveredCounterTypeAllowsRate() {
+        FakeBackend first = new FakeBackend("a");
+        FakeDiscovery discovery = new FakeDiscovery(List.of(new DiscoveredMetric(
+                "kafka_new_total", "fake", "victoriametrics:label/__name__/values",
+                "counter", "count")));
+        TelemetryQueryV1Response response =
+                serviceWithDiscovery(first, discovery).query(request("kafka_new_total", true));
+
+        assertThat(response.outcome()).isEqualTo("ok");
+        assertThat(first.fetches).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("发现到但元数据没有 type：rate=true 拒绝并说明类型未知")
+    void discoveredUnknownTypeRejectsRate() {
+        FakeBackend first = new FakeBackend("a");
+        FakeDiscovery discovery = new FakeDiscovery(List.of(new DiscoveredMetric(
+                "kafka_mystery", "fake", "victoriametrics:label/__name__/values",
+                null, null)));
+        assertThatThrownBy(() -> serviceWithDiscovery(first, discovery)
+                .query(request("kafka_mystery", true)))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("类型未知");
+        assertThat(first.fetches).isZero();
+    }
+
+    @Test
+    @DisplayName("发现结果里没有该指标：UNAVAILABLE + METRIC_NOT_EXPOSED，不再 400 未知指标")
+    void discoveredMetricMissingReturnsUnavailable() {
+        FakeBackend first = new FakeBackend("a");
+        FakeDiscovery discovery = new FakeDiscovery(List.of());
+        TelemetryQueryV1Response response =
+                serviceWithDiscovery(first, discovery).query(request("kafka_missing", false));
+
+        assertThat(response.outcome()).isEqualTo("unavailable");
+        assertThat(response.error().code()).isEqualTo(CapabilityCode.METRIC_NOT_EXPOSED);
+        assertThat(first.fetches).isZero();
+    }
+
+    @Test
+    @DisplayName("已知语义缺少必填 ref.jobId：先报参数错误，不误报未暴露")
+    void knownDefinitionMissingRefFailsBeforeDiscovery() {
+        FakeBackend first = new FakeBackend("a");
+        MetricDefinition definition = new MetricDefinition("m", "gauge", "count", "job",
+                List.of(), List.of("jobId"), Map.of(),
+                List.of(new BackendBinding("a", BackendType.PROMETHEUS,
+                        BackendStatus.IMPLEMENTED, 10,
+                        Set.of(QueryMode.RANGE, QueryMode.INSTANT), Set.of(Sampling.STEP),
+                        true, null, null)));
+
+        assertThatThrownBy(() -> service(first, null, false, definition).query(request()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("ref.jobId");
+        assertThat(first.fetches).isZero();
+    }
+
     // ------------------------------------------------------------------ 辅助
+
+    private MetricQueryV1Request request(String metric, boolean rate) {
+        MetricQueryV1Request request = request();
+        request.setMetric(metric);
+        request.setRate(rate);
+        return request;
+    }
+
+    private MetricTelemetryQueryService serviceWithDiscovery(FakeBackend backend,
+                                                             FakeDiscovery discovery) {
+        TelemetryBackendRegistry registry = new TelemetryBackendRegistry(List.of(backend), List.of());
+        RoutingProperties routing = new RoutingProperties();
+        routing.getRouting().getMetric().setDefaultOrder(List.of("a"));
+        BackendRouter router = new BackendRouter(routing, registry);
+        RestMetricSemanticsRegistry semantics = new RestMetricSemanticsRegistry(
+                new FlinkMetricSemantics());
+        TelemetryCatalogRegistry catalog = new TelemetryCatalogRegistry(
+                List.of((CatalogContributor) () -> List.of(new ComponentCatalogEntry(
+                        "kafka", "kafka.broker", List.of(), List.of(), List.of(),
+                        CatalogStatus.IMPLEMENTED, List.of()))), semantics);
+        return new MetricTelemetryQueryService(catalog, new MetadataCatalogRegistry(List.of()),
+                router, registry, new LogCircuitBreaker(),
+                new MetricDiscoveryService(new MetricDiscoveryRegistry(List.of(discovery)), catalog),
+                new TelemetryMetadataProperties());
+    }
 
     private MetricTelemetryQueryService service(FakeBackend first, FakeBackend second,
                                                 boolean ratifyEquivalence) {
@@ -164,17 +258,21 @@ class MetricTelemetryQueryServiceTest {
         if (ratifyEquivalence) {
             RoutingProperties.EquivalenceGroup group = new RoutingProperties.EquivalenceGroup();
             group.setBackends(List.of("a", "b"));
-            group.setServiceType("flink");
+            group.setServiceType("kafka");
             routing.getRouting().getEquivalenceGroups().put("g", group);
         }
         BackendRouter router = new BackendRouter(routing, registry);
+        RestMetricSemanticsRegistry semantics = new RestMetricSemanticsRegistry(
+                new FlinkMetricSemantics());
         TelemetryCatalogRegistry catalog = new TelemetryCatalogRegistry(
                 List.of((CatalogContributor) () -> List.of(new ComponentCatalogEntry(
-                        "flink", "flink.jobmanager", List.of(definition), List.of(), List.of(),
-                        CatalogStatus.IMPLEMENTED, List.of()))));
+                        "kafka", "kafka.broker", List.of(definition), List.of(), List.of(),
+                        CatalogStatus.IMPLEMENTED, List.of()))), semantics);
         return new MetricTelemetryQueryService(catalog,
                 new MetadataCatalogRegistry(List.of()), router, registry,
-                new LogCircuitBreaker());
+                new LogCircuitBreaker(),
+                new MetricDiscoveryService(new MetricDiscoveryRegistry(List.of()), catalog),
+                new TelemetryMetadataProperties());
     }
 
     private MetricDefinition definition(List<BackendBinding> bindings,
@@ -193,6 +291,35 @@ class MetricTelemetryQueryServiceTest {
         request.setStep("15s");
         request.setRef(Map.of());
         return request;
+    }
+
+    private static final class FakeDiscovery implements MetricDiscoveryProvider {
+
+        private final List<DiscoveredMetric> metrics;
+
+        private FakeDiscovery(List<DiscoveredMetric> metrics) {
+            this.metrics = metrics;
+        }
+
+        @Override
+        public String providerId() {
+            return "fake-discovery";
+        }
+
+        @Override
+        public String providerType() {
+            return "test";
+        }
+
+        @Override
+        public boolean supports(Target target) {
+            return true;
+        }
+
+        @Override
+        public MetricDiscoveryResult discover(MetricDiscoveryQuery query) {
+            return MetricDiscoveryResult.supported(providerId(), metrics, List.of());
+        }
     }
 
     private static final class FakeBackend implements MetricBackend {

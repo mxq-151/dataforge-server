@@ -15,6 +15,16 @@ scrape_configs:
         target_label: component_id
         replacement: kafka.controller
 
+  # Spark History Server 进程自身（jmx_exporter，:18083）。
+  # 只覆盖 SHS JVM 与 Spark MetricsSystem；作业级 executor/stage/shuffle 指标不在其中。
+  - job_name: spark-shs
+    static_configs:
+      - targets: ["dataforge-allinone:18083"]
+        labels:
+          service_type: spark
+          component_id: spark.shs
+          host_id: cluster
+
   # YARN 3.3.x 只有 REST JSON，无 Prometheus 端点，经最小导出器转换。
   - job_name: yarn
     static_configs:

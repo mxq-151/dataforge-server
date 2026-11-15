@@ -7,14 +7,21 @@ import com.bigdata.modules.telemetry.model.CapabilityCode;
 import com.bigdata.modules.telemetry.model.Requirement;
 import com.bigdata.modules.telemetry.model.RequirementKind;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
+import com.bigdata.modules.telemetry.v1.discovery.DiscoveredMetric;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryResult;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryService;
 import com.bigdata.modules.telemetry.v1.dto.MetricQueryV1Request;
 import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogEntry;
 import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogRegistry;
+import com.bigdata.modules.telemetry.v1.metadata.config.TelemetryMetadataProperties;
 import com.bigdata.modules.telemetry.v1.model.BackendWarning;
 import com.bigdata.modules.telemetry.v1.model.CatalogStatus;
 import com.bigdata.modules.telemetry.v1.model.ComponentCatalogEntry;
 import com.bigdata.modules.telemetry.v1.model.MetricDefinition;
+import com.bigdata.modules.telemetry.v1.model.MetricDiscoveryMode;
+import com.bigdata.modules.telemetry.v1.model.MetricPattern;
 import com.bigdata.modules.telemetry.v1.model.QueryMode;
+import com.bigdata.modules.telemetry.v1.model.Sampling;
 import com.bigdata.modules.telemetry.v1.model.Target;
 import com.bigdata.modules.telemetry.v1.routing.BackendCandidate;
 import com.bigdata.modules.telemetry.v1.routing.BackendRouter;
@@ -35,8 +42,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 状态数据查询编排：目录 → 路由 → 能力判定 → 取数 → 回退判定。
@@ -54,17 +63,23 @@ public class MetricTelemetryQueryService {
     private final BackendRouter router;
     private final TelemetryBackendRegistry backendRegistry;
     private final LogCircuitBreaker circuitBreaker;
+    private final MetricDiscoveryService discoveryService;
+    private final TelemetryMetadataProperties metadataProperties;
 
     public MetricTelemetryQueryService(TelemetryCatalogRegistry catalogRegistry,
                                        MetadataCatalogRegistry metadataCatalogRegistry,
                                        BackendRouter router,
                                        TelemetryBackendRegistry backendRegistry,
-                                       LogCircuitBreaker circuitBreaker) {
+                                       LogCircuitBreaker circuitBreaker,
+                                       MetricDiscoveryService discoveryService,
+                                       TelemetryMetadataProperties metadataProperties) {
         this.catalogRegistry = catalogRegistry;
         this.metadataCatalogRegistry = metadataCatalogRegistry;
         this.router = router;
         this.backendRegistry = backendRegistry;
         this.circuitBreaker = circuitBreaker;
+        this.discoveryService = discoveryService;
+        this.metadataProperties = metadataProperties;
     }
 
     public TelemetryQueryV1Response query(MetricQueryV1Request request) {
@@ -84,15 +99,62 @@ public class MetricTelemetryQueryService {
         if (isBlank(request.getMetric())) {
             throw new BusinessException(400, "缺少必填参数: metric");
         }
+        String requestedMetric = request.getMetric();
         MetricDefinition definition = entry.metrics().stream()
-                .filter(metric -> metric.name().equals(request.getMetric()))
+                .filter(metric -> metric.name().equals(requestedMetric))
                 .findFirst()
                 .orElse(null);
+        if (definition != null) {
+            // 已知语义需要 ref 时先报参数错误，避免发现校验把「缺 ref」误报成「未暴露」。
+            requireRefs(definition.requiredRefs(), request.getRef());
+        }
+        MetricDiscoveryResult discovery;
         if (definition == null) {
             if (entry.metricCatalogStatus() == CatalogStatus.DECLARED_NOT_IMPLEMENTED) {
                 return notImplemented(target, queryMode, entry.metricRequirements(), start);
             }
-            throw new BusinessException(400, "未知指标: " + request.getMetric());
+            discovery = discover(target, request);
+            PatternMatch match = matchByPattern(entry, requestedMetric);
+            if (match.ambiguous()) {
+                return failed(target, queryMode, emptySelection(), List.of(), List.of(),
+                        CapabilityCode.METRIC_PATTERN_AMBIGUOUS,
+                        "指标名 " + requestedMetric + " 命中多个语义模式，拒绝猜测: "
+                                + match.candidates().stream().map(MetricDefinition::name).toList(),
+                        List.of(), null, start);
+            }
+            if (match.definition() != null) {
+                definition = match.definition();
+            } else if (!discovery.supported()) {
+                return unavailable(target, queryMode, emptySelection(), List.of(), List.of(),
+                        CapabilityCode.METRIC_DISCOVERY_UNSUPPORTED,
+                        discovery.reason() == null ? "该引擎不支持指标名发现" : discovery.reason(),
+                        discovery.requirements(), start);
+            } else if (!containsMetric(discovery, requestedMetric)) {
+                return unavailable(target, queryMode, emptySelection(), List.of(), List.of(),
+                        CapabilityCode.METRIC_NOT_EXPOSED,
+                        discovery.manual()
+                                ? "手工名字表中没有该指标: " + requestedMetric
+                                : "实例未暴露该指标: " + requestedMetric,
+                        discovery.requirements(), start);
+            } else {
+                definition = unknownDefinition(requestedMetric, entry,
+                        discoveredMetric(discovery, requestedMetric));
+                if (definition == null) {
+                    return unavailable(target, queryMode, emptySelection(), List.of(), List.of(),
+                            CapabilityCode.METRIC_TYPE_UNKNOWN,
+                            "指标类型未知，且目录没有可路由的后端: " + requestedMetric,
+                            List.of(), start);
+                }
+            }
+        } else {
+            discovery = discover(target, request);
+            if (definition.discovery() == MetricDiscoveryMode.DISCOVERED
+                    && discovery.authoritative() && !matchesDefinition(definition, discovery)) {
+                return unavailable(target, queryMode, emptySelection(), List.of(), List.of(),
+                        CapabilityCode.METRIC_NOT_EXPOSED,
+                        "实例未暴露该指标: " + definition.name(),
+                        discovery.requirements(), start);
+            }
         }
         requireRefs(definition.requiredRefs(), request.getRef());
         validateRate(request, definition, queryMode);
@@ -100,6 +162,105 @@ public class MetricTelemetryQueryService {
         BackendSelection selection = router.selectMetric(target, definition, queryMode);
         return execute(target, queryMode, spec, selection,
                 Boolean.TRUE.equals(request.getIncludeBackendCandidates()), start);
+    }
+
+    // ------------------------------------------------------------------ 发现与语义匹配
+
+    private MetricDiscoveryResult discover(Target target, MetricQueryV1Request request) {
+        int limit = Math.max(metadataProperties.getQuery().getMaxMetrics(), 1);
+        Duration timeout = Duration.ofMillis(
+                Math.max(metadataProperties.getQuery().getTimeoutMs(), 1));
+        return discoveryService.discover(target, request.getRef(), timeout, limit);
+    }
+
+    private PatternMatch matchByPattern(ComponentCatalogEntry entry, String metricName) {
+        List<MetricDefinition> candidates = entry.metrics().stream()
+                .filter(metric -> metric.patternMatches(metricName))
+                .toList();
+        if (candidates.isEmpty()) {
+            return new PatternMatch(null, false, List.of());
+        }
+        int best = candidates.stream()
+                .mapToInt(metric -> metric.pattern().specificity())
+                .max().orElse(0);
+        List<MetricDefinition> bestCandidates = candidates.stream()
+                .filter(metric -> metric.pattern().specificity() == best)
+                .toList();
+        if (bestCandidates.size() > 1) {
+            return new PatternMatch(null, true, bestCandidates);
+        }
+        MetricDefinition matched = bestCandidates.get(0);
+        return new PatternMatch(new MetricDefinition(matched.name(), matched.type(), matched.unit(),
+                matched.scope(), matched.labels(), matched.requiredRefs(),
+                matched.backendPreference(), matched.supportedBackends(), metricName,
+                matched.endpoint(), matched.verified(), matched.note(), matched.pattern(),
+                matched.discovery()), false, List.of());
+    }
+
+    private boolean containsMetric(MetricDiscoveryResult discovery, String metricName) {
+        return discovery.metrics().stream().anyMatch(metric -> metric.name().equals(metricName));
+    }
+
+    private boolean matchesDefinition(MetricDefinition definition, MetricDiscoveryResult discovery) {
+        if (definition.pattern() == null) {
+            return containsMetric(discovery, definition.name());
+        }
+        return discovery.metrics().stream()
+                .anyMatch(metric -> definition.patternMatches(metric.name()));
+    }
+
+    /**
+     * 发现到了名字但没有任何语义模式命中：类型/单位直接采用发现来源（如 VM /api/v1/metadata
+     * 或 Prometheus 文本 # TYPE）。类型仍未知时允许查询，但 rate=true 会被拒绝。
+     */
+    private MetricDefinition unknownDefinition(String metricName, ComponentCatalogEntry entry,
+                                               DiscoveredMetric discovered) {
+        Map<String, com.bigdata.modules.telemetry.v1.model.BackendBinding> bindings =
+                new java.util.LinkedHashMap<>();
+        for (MetricDefinition metric : entry.metrics()) {
+            for (com.bigdata.modules.telemetry.v1.model.BackendBinding binding : metric.supportedBackends()) {
+                bindings.putIfAbsent(binding.backendId(), binding);
+            }
+        }
+        if (bindings.isEmpty()) {
+            for (com.bigdata.modules.telemetry.v1.spi.MetricBackend backend
+                    : backendRegistry.metricBackends()) {
+                bindings.putIfAbsent(backend.backendId(),
+                        new com.bigdata.modules.telemetry.v1.model.BackendBinding(
+                                backend.backendId(), backend.backendType(),
+                                com.bigdata.modules.telemetry.v1.model.BackendStatus.IMPLEMENTED,
+                                100 + bindings.size(),
+                                Set.of(QueryMode.RANGE, QueryMode.INSTANT),
+                                Set.of(Sampling.STEP), false, null,
+                                "运行时发现指标，按后端能力动态路由"));
+            }
+        }
+        if (bindings.isEmpty()) {
+            return null;
+        }
+        String type = discovered == null ? null : discovered.type();
+        String unit = discovered == null ? null : discovered.unit();
+        return new MetricDefinition(metricName, type, unit, "unknown", List.of(), List.of(),
+                Map.of(), new ArrayList<>(bindings.values()), metricName, null, null,
+                type == null
+                        ? "发现结果未命中语义模式，类型未知；禁止 rate=true"
+                        : "类型来自运行时元数据（" + (discovered == null ? "unknown" : discovered.source())
+                        + "）",
+                MetricPattern.exact(metricName), MetricDiscoveryMode.DISCOVERED);
+    }
+
+    private DiscoveredMetric discoveredMetric(MetricDiscoveryResult discovery, String metricName) {
+        return discovery.metrics().stream()
+                .filter(metric -> metric.name().equals(metricName))
+                .findFirst().orElse(null);
+    }
+
+    private BackendSelection emptySelection() {
+        return new BackendSelection(List.of(), List.of(), null);
+    }
+
+    private record PatternMatch(MetricDefinition definition, boolean ambiguous,
+                                List<MetricDefinition> candidates) {
     }
 
     // ------------------------------------------------------------------ 编排
@@ -242,13 +403,94 @@ public class MetricTelemetryQueryService {
                 .filter(entry -> filter == null || isBlank(filter.componentId())
                         || entry.componentId().equals(filter.componentId()))
                 .toList();
+        List<TelemetryQueryV1Response.MetricCatalogView> views = new ArrayList<>();
+        List<BackendWarning> warnings = new ArrayList<>();
+        Set<String> warningKeys = new HashSet<>();
+        int limit = Math.max(metadataProperties.getQuery().getMaxMetrics(), 1);
+        Duration timeout = Duration.ofMillis(Math.max(metadataProperties.getQuery().getTimeoutMs(), 1));
+        for (ComponentCatalogEntry entry : components) {
+            Target target = new Target(entry.serviceType(), entry.componentId(), Target.CLUSTER_HOST);
+            MetricDiscoveryResult discovery = discoveryService.discover(target, Map.of(), timeout, limit);
+            for (BackendWarning warning : discovery.warnings()) {
+                if (warningKeys.add(warning.code() + "|" + warning.message())) {
+                    warnings.add(warning);
+                }
+            }
+            if (entry.metrics().isEmpty()) {
+                if (discovery.supported()) {
+                    for (DiscoveredMetric discovered : discovery.metrics()) {
+                        boolean typeKnown = discovered.type() != null && !discovered.type().isBlank();
+                        views.add(new TelemetryQueryV1Response.MetricCatalogView(
+                                entry.serviceType(), entry.componentId(), discovered.name(),
+                                discovered.type(), discovered.unit(),
+                                "counter".equalsIgnoreCase(discovered.type()),
+                                null, "DISCOVERED", true, typeKnown, discovered.source(),
+                                discovery.manual(),
+                                typeKnown ? "类型来自运行时元数据"
+                                        : "发现结果未给出类型；rate=true 将被拒绝"));
+                    }
+                }
+                continue;
+            }
+            for (MetricDefinition metric : entry.metrics()) {
+                views.add(catalogView(entry, metric, discovery));
+            }
+            if (discovery.authoritative()) {
+                for (DiscoveredMetric discovered : discovery.metrics()) {
+                    boolean matched = entry.metrics().stream()
+                            .anyMatch(metric -> metric.patternMatches(discovered.name()));
+                    if (!matched) {
+                        boolean typeKnown = discovered.type() != null && !discovered.type().isBlank();
+                        views.add(new TelemetryQueryV1Response.MetricCatalogView(
+                                entry.serviceType(), entry.componentId(), discovered.name(),
+                                discovered.type(), discovered.unit(),
+                                "counter".equalsIgnoreCase(discovered.type()),
+                                null, "DISCOVERED", true, typeKnown, discovered.source(), false,
+                                typeKnown ? "类型来自运行时元数据"
+                                        : "发现结果未命中语义模式，类型未知；rate=true 将被拒绝"));
+                    }
+                }
+            }
+        }
         TelemetryQueryV1Response.CatalogData data = new TelemetryQueryV1Response.CatalogData(
-                catalogRegistry.catalog().version(), components, metadataOf(filter));
+                catalogRegistry.catalog().version(), components, metadataOf(filter), views, warnings);
         return new TelemetryQueryV1Response("ok", false, filter, "catalog",
                 emptyBackend(), data, null,
                 new TelemetryQueryV1Response.MetaView(System.currentTimeMillis() - start,
-                        false, false, List.of(), null, Instant.now().toString(),
+                        false, false, warnings, null, Instant.now().toString(),
                         null, false, null));
+    }
+
+    private TelemetryQueryV1Response.MetricCatalogView catalogView(
+            ComponentCatalogEntry entry, MetricDefinition metric, MetricDiscoveryResult discovery) {
+        boolean typeKnown = metric.type() != null && !metric.type().isBlank();
+        String pattern = metric.pattern() == null ? null : metric.pattern().wire();
+        if (!discovery.supported()) {
+            boolean manual = metric.discovery() == MetricDiscoveryMode.MANUAL;
+            return new TelemetryQueryV1Response.MetricCatalogView(entry.serviceType(),
+                    entry.componentId(), metric.name(), metric.type(), metric.unit(),
+                    metric.rateApplicable(), pattern, metric.discovery().name(),
+                    manual, typeKnown, manual ? "manual" : null, manual,
+                    manual ? "该引擎无发现能力，名字表为手工维护" : metric.note());
+        }
+        if (metric.discovery() == MetricDiscoveryMode.MANUAL) {
+            return new TelemetryQueryV1Response.MetricCatalogView(entry.serviceType(),
+                    entry.componentId(), metric.name(), metric.type(), metric.unit(),
+                    metric.rateApplicable(), pattern, metric.discovery().name(),
+                    true, typeKnown, "manual", true,
+                    "该引擎无发现能力，名字表为手工维护");
+        }
+        DiscoveredMetric matched = discovery.metrics().stream()
+                .filter(item -> metric.patternMatches(item.name()))
+                .findFirst().orElse(null);
+        boolean available = matched != null;
+        String note = available ? metric.note()
+                : "实例未暴露该指标";
+        return new TelemetryQueryV1Response.MetricCatalogView(entry.serviceType(),
+                entry.componentId(), metric.name(), metric.type(), metric.unit(),
+                metric.rateApplicable(), pattern, metric.discovery().name(),
+                available, typeKnown, matched == null ? null : matched.source(),
+                discovery.manual(), note);
     }
 
     /** metadata 目录与指标目录共用同一套 target 过滤规则。 */
@@ -386,6 +628,11 @@ public class MetricTelemetryQueryService {
         }
         if (mode != QueryMode.RANGE) {
             throw new BusinessException(400, "rate 只允许用于 range 查询，当前 mode=" + mode.wire());
+        }
+        if (definition.type() == null || definition.type().isBlank()) {
+            throw new BusinessException(400,
+                    "指标类型未知，禁止 rate=true: " + definition.name()
+                            + "（发现结果未命中任何语义模式）");
         }
         if (!"counter".equalsIgnoreCase(definition.type())) {
             throw new BusinessException(400,

@@ -18,11 +18,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CatalogDataContractTest {
 
     @Test
-    @DisplayName("CatalogData 字段顺序固定：catalogVersion / components / metadata")
+    @DisplayName("CatalogData 字段顺序固定：legacy 三字段 + metricSemantics + warnings")
     void legacyFieldsKeepOrderAndNames() {
         assertThat(Arrays.stream(TelemetryQueryV1Response.CatalogData.class.getRecordComponents())
                 .map(RecordComponent::getName))
-                .containsExactly("catalogVersion", "components", "metadata");
+                .containsExactly("catalogVersion", "components", "metadata",
+                        "metricSemantics", "warnings");
     }
 
     @Test

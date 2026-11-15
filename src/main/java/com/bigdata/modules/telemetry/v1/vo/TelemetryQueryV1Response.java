@@ -76,9 +76,30 @@ public record TelemetryQueryV1Response(String outcome,
     /**
      * 目录快照。{@code metadata} 是「服务版本与配置」的目录，只增字段：
      * {@code catalogVersion} 与 {@code components} 的结构与含义保持不变。
+     * {@code metricSemantics} 是身份目录 × 语义声明 × 运行时发现的聚合视图。
      */
     public record CatalogData(String catalogVersion, List<ComponentCatalogEntry> components,
-                              List<MetadataCatalogEntry> metadata) {
+                              List<MetadataCatalogEntry> metadata,
+                              List<MetricCatalogView> metricSemantics,
+                              List<BackendWarning> warnings) {
+
+        public CatalogData(String catalogVersion, List<ComponentCatalogEntry> components,
+                           List<MetadataCatalogEntry> metadata) {
+            this(catalogVersion, components, metadata, List.of(), List.of());
+        }
+    }
+
+    /**
+     * 单个指标语义的聚合视图。
+     *
+     * <p>{@code available=false} 表示发现结果里没有该指标；{@code typeKnown=false}
+     * 表示发现到了名字但没有语义模式命中，可查但 rate=true 必须拒绝。</p>
+     */
+    public record MetricCatalogView(String serviceType, String componentId, String name,
+                                    String type, String unit, boolean rateApplicable,
+                                    String pattern, String discoveryMode, boolean available,
+                                    boolean typeKnown, String discoverySource, boolean manual,
+                                    String note) {
     }
 
     /**

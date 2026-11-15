@@ -4,6 +4,8 @@ import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.telemetry.model.CapabilityCode;
 import com.bigdata.modules.telemetry.shared.LogCircuitBreaker;
 import com.bigdata.modules.telemetry.v1.catalog.CatalogContributor;
+import com.bigdata.modules.telemetry.v1.catalog.FlinkMetricSemantics;
+import com.bigdata.modules.telemetry.v1.catalog.RestMetricSemanticsRegistry;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.dto.ExceptionQueryV1Request;
 import com.bigdata.modules.telemetry.v1.model.BackendStatus;
@@ -168,7 +170,8 @@ class ExceptionTelemetryQueryServiceTest {
         ComponentCatalogEntry entry = new ComponentCatalogEntry("flink", "flink.jobmanager",
                 List.of(), List.of(), evidence, CatalogStatus.IMPLEMENTED, List.of());
         TelemetryCatalogRegistry catalog = new TelemetryCatalogRegistry(
-                List.of((CatalogContributor) () -> List.of(entry)));
+                List.of((CatalogContributor) () -> List.of(entry)),
+                new RestMetricSemanticsRegistry(new FlinkMetricSemantics()));
         return new ExceptionTelemetryQueryService(catalog, router, registry,
                 new LogCircuitBreaker());
     }

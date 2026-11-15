@@ -16,6 +16,10 @@
 #   SPARK_SHS_ENABLED=true|false   默认跟随 YARN_ENABLED（YARN 不开也没必要开 SHS）
 #   SPARK_EVENT_LOG_DIR=/opt/dataforge/spark-events
 #   SPARK_SHS_PORT=18080
+#   SPARK_JMX_ENABLED=true|false  默认 false；开启后以 -javaagent 挂 JMX exporter
+#   SPARK_JMX_PORT=18083          JMX exporter 文本端点端口
+#   SPARK_JMX_JAR=/opt/spark-jmx/jmx_prometheus_javaagent.jar
+#   SPARK_JMX_CONFIG=/opt/spark-jmx-conf/spark-shs.yml
 # ============================================================
 set -u
 
@@ -37,12 +41,28 @@ fi
 
 mkdir -p "$EVENT_LOG_DIR" "$LOG_DIR" 2>/dev/null || true
 
+JMX_ENABLED="${SPARK_JMX_ENABLED:-false}"
+JMX_PORT="${SPARK_JMX_PORT:-18083}"
+JMX_JAR="${SPARK_JMX_JAR:-/opt/spark-jmx/jmx_prometheus_javaagent.jar}"
+JMX_CONFIG="${SPARK_JMX_CONFIG:-/opt/spark-jmx-conf/spark-shs.yml}"
+JMX_OPTS=""
+if [ "$JMX_ENABLED" = "true" ]; then
+  if [ -f "$JMX_JAR" ] && [ -f "$JMX_CONFIG" ]; then
+    JMX_OPTS="-javaagent:${JMX_JAR}=${JMX_PORT}:${JMX_CONFIG} \
+-Dspark.metrics.conf.*.sink.jmx.class=org.apache.spark.metrics.sink.JmxSink \
+-Dspark.metrics.namespace=spark_shs"
+    log "JMX exporter 已启用: port=${JMX_PORT} jar=${JMX_JAR} config=${JMX_CONFIG}"
+  else
+    log "WARN JMX exporter 已开启但文件不存在（jar=${JMX_JAR} config=${JMX_CONFIG}），本次不挂载"
+  fi
+fi
+
 log "启动 Spark History Server: port=${SHS_PORT} eventLog=${EVENT_LOG_DIR}"
 export SPARK_HISTORY_OPTS="\
 -Dspark.history.fs.logDirectory=file://${EVENT_LOG_DIR} \
 -Dspark.history.ui.port=${SHS_PORT} \
 -Dspark.history.retainedApplications=50 \
--Dspark.history.fs.cleaner.enabled=false"
+-Dspark.history.fs.cleaner.enabled=false ${JMX_OPTS}"
 
 # spark-class 会 exec java，supervisord 的 SIGTERM 可直接到达 JVM（触发优雅关闭）
 exec "$SPARK_HOME/bin/spark-class" org.apache.spark.deploy.history.HistoryServer

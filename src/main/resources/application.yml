@@ -158,11 +158,22 @@ telemetry:
   #       path-prefix: /api/v1
   #       auth: { type: none }
   #       limits: { max-series: 5000, max-points-per-series: 11000, timeout-ms: 15000 }
+  #       # metadata/query scope=metrics 的发现范围；默认 kafka/yarn/spark。
+  #       # Spark 由 SHS 的 jmx_exporter 暴露、VM 抓取后即可发现。
+  #       discovery-service-types: [kafka, yarn, spark]
+  #       # 当 /api/v1/metadata 为空时，从抓取文本的 # TYPE / # HELP / # UNIT 补类型与单位。
+  #       metric-metadata-urls: []
   #   victoriametrics:
   #     - id: vm-prod
   #       base-url: http://vm:8428
-  #       path-prefix: /prometheus
+  #       path-prefix: /api/v1   # VM 也支持 /prometheus/api/v1，但代码按 <prefix>/label 拼接
   #       query: { partial-response: false, max-points-per-timeseries: 11000 }
+  #       discovery-service-types: [kafka, yarn, spark]
+  #       # 实测 VM 1.106 的 /api/v1/metadata 为空；Kafka/YARN/Spark 的类型需从 exporter 文本补全：
+  #       # metric-metadata-urls:
+  #       #   - 'http://kafka:7071/metrics'
+  #       #   - 'http://yarn-exporter:18090/metrics'
+  #       #   - 'http://dataforge-allinone:18083/metrics'
   #   local-disk:
   #     - id: local-disk
   #       allow-root-dirs: ['/var/log', '/data/logs']
@@ -260,6 +271,12 @@ telemetry:
 
   # ---------------------------------------------------------------------------
   # 服务版本与配置查询（POST /telemetry/v1/metadata/query）。
+  # scope=version|config|both|metrics；metrics 为运行时指标名发现：
+  #   - Prometheus / VictoriaMetrics：/api/v1/label/__name__/values（match[] 按 service_type 过滤）
+  #   - Flink：/jobmanager/metrics、/taskmanagers/{id}/metrics；job/vertex 级需 ref.jobId/ref.vertexId
+  #   - ClickHouse：system.metrics / system.events / system.asynchronous_metrics
+  #   - Doris：FE/BE 的 GET /metrics
+  #   - Spark SHS：实测无法以 Prometheus 格式暴露，保留最小手工语义表并显式标注
   # 默认全部关闭；未启用的 provider 不参与路由，查询返回 UNAVAILABLE + NOT_CONFIGURED。
   # 密码统一走 password-ref（env: / file: / config: / plain:），不要明文写在 yml 里。
   # Doris / StarRocks 走独立 JDBC 连接池（上限 2、connectTimeout/socketTimeout），
@@ -268,7 +285,7 @@ telemetry:
   # 示例（按需取消注释）：
   #
   # metadata:
-  #   query: { max-targets: 20, max-config-items: 500, timeout-ms: 10000 }
+  #   query: { max-targets: 20, max-config-items: 500, max-metrics: 5000, timeout-ms: 10000 }
   #   providers:
   #     ambari:
   #       enabled: false
@@ -282,12 +299,17 @@ telemetry:
   #       base-url: http://127.0.0.1:8123
   #       auth: { type: basic, username: default, password-ref: 'env:CLICKHOUSE_PASSWORD' }
   #       sections: [server_settings, settings, merge_tree_settings]
+  #       # scope=metrics 走 system.metrics / system.events / system.asynchronous_metrics，
+  #       # 只列名字与类型；ClickHouse 没有指标查询后端，metrics/query 仍返回 NOT_IMPLEMENTED。
   #     doris-fe:
   #       enabled: false
   #       order: 30
   #       jdbc-url: jdbc:mysql://127.0.0.1:9030
   #       username: root
   #       password-ref: 'env:DORIS_PASSWORD'
+  #       # scope=metrics 走 FE/BE 的 Prometheus 文本端点；Doris 没有系统表指标目录。
+  #       fe-metrics-url: http://127.0.0.1:8030/metrics
+  #       be-metrics-url: http://127.0.0.1:8040/metrics
   #     starrocks-fe:            # 未对真实实例验证
   #       enabled: false
   #       order: 40

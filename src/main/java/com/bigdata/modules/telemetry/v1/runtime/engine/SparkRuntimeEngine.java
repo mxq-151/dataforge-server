@@ -432,8 +432,14 @@ public class SparkRuntimeEngine implements RuntimeEngine {
 
     private List<MetricDefinition> catalogMetrics(String scope, List<String> families) {
         List<MetricDefinition> result = new ArrayList<>();
-        for (MetricDefinition definition : RuntimeFamilies.catalogMetrics(serviceType(),
-                catalogRegistry.catalog())) {
+        // Spark 不再向指标目录写手工语义；作业级快照字段只服务 /api/runtime/**，
+        // 不进入 metrics/query，也不冒充运行时发现。
+        List<MetricDefinition> source = new ArrayList<>(
+                RuntimeFamilies.catalogMetrics(serviceType(), catalogRegistry.catalog()));
+        if (source.isEmpty()) {
+            source.addAll(SparkRuntimeMetricSpecs.DEFINITIONS);
+        }
+        for (MetricDefinition definition : source) {
             if (!scope.equals(definition.scope())) {
                 continue;
             }

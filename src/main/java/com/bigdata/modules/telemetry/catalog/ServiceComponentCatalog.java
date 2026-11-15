@@ -70,7 +70,7 @@ public final class ServiceComponentCatalog {
 
     private static Map<String, List<String>> build() {
         Map<String, List<String>> catalog = new LinkedHashMap<>();
-        catalog.put("spark", List.of("spark.driver", "spark.executor"));
+        catalog.put("spark", List.of("spark.driver", "spark.executor", "spark.shs"));
         catalog.put("flink", List.of("flink.jobmanager", "flink.taskmanager"));
         catalog.put("doris", List.of("doris.fe", "doris.be"));
         catalog.put("starrocks", List.of("starrocks.fe", "starrocks.be", "starrocks.cn"));

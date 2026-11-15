@@ -19,7 +19,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class SeedCatalogContributorTest {
 
-    private final List<ComponentCatalogEntry> entries = new SeedCatalogContributor().contribute();
+    private final List<ComponentCatalogEntry> identityEntries =
+            new SeedCatalogContributor().contribute();
+    private final TelemetryCatalogRegistry merged = new TelemetryCatalogRegistry(
+            List.of(new SeedCatalogContributor()),
+            new RestMetricSemanticsRegistry(new FlinkMetricSemantics()));
+    private final List<ComponentCatalogEntry> entries = List.copyOf(merged.catalog().entries());
+
+    @Test
+    @DisplayName("身份目录不再包含任何指标物理名/类型/单位")
+    void identityCatalogHasNoMetricSemantics() {
+        assertThat(identityEntries).allSatisfy(entry -> assertThat(entry.metrics()).isEmpty());
+    }
 
     @Test
     @DisplayName("log.service 只挂 local-disk / ES，log.task 只挂 yarn")
@@ -139,21 +150,25 @@ class SeedCatalogContributorTest {
     }
 
     @Test
-    @DisplayName("Spark stage/executor 快照已实现，只声明 instant")
-    void sparkRestCapabilities() {
-        MetricDefinition gc = metric(entry("spark", "spark.executor"),
-                "spark_executor_gc_seconds_total");
-        BackendBinding rest = binding(gc, BackendType.SPARK_REST);
-
-        assertThat(rest.status()).isEqualTo(BackendStatus.IMPLEMENTED);
-        assertThat(rest.queryModes()).containsExactly(QueryMode.INSTANT);
+    @DisplayName("Spark 不再有手工指标语义，仅声明作业级指标缺口")
+    void sparkHasNoMetricSemanticsButDeclaresGap() {
+        for (String componentId : List.of("spark.driver", "spark.executor", "spark.shs")) {
+            ComponentCatalogEntry entry = entry("spark", componentId);
+            assertThat(entry.metrics()).as(componentId).isEmpty();
+            assertThat(entry.metricRequirements()).as(componentId)
+                    .singleElement()
+                    .satisfies(requirement -> {
+                        assertThat(requirement.key()).isEqualTo("spark.job.metrics");
+                        assertThat(requirement.description()).contains("SHS 只有事件日志");
+                    });
+        }
     }
 
     @Test
-    @DisplayName("Flink/Spark 指标带真实 raw 名与端点，新增族非空")
+    @DisplayName("Flink 指标带真实 raw 名与端点，新增族非空")
     void engineRawMetricsAreDeclared() {
         for (ComponentCatalogEntry entry : entries) {
-            if (!"flink".equals(entry.serviceType()) && !"spark".equals(entry.serviceType())) {
+            if (!"flink".equals(entry.serviceType())) {
                 continue;
             }
             for (MetricDefinition metric : entry.metrics()) {
@@ -176,11 +191,6 @@ class SeedCatalogContributorTest {
                 .isEqualTo("numBytesInRemote");
         assertThat(metric(taskManager, "flink_vertex_records_in_rate").rawMetric())
                 .isEqualTo("numRecordsInPerSecond");
-
-        ComponentCatalogEntry driver = entry("spark", "spark.driver");
-        assertThat(metric(driver, "spark_application_attempt_count").rawMetric())
-                .isEqualTo("attempts");
-        assertThat(metric(driver, "spark_stage_attempts").note()).contains("attemptId");
     }
 
     @Test

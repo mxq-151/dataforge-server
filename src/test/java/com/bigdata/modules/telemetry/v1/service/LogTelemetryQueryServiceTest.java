@@ -4,6 +4,8 @@ import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.telemetry.shared.LogCircuitBreaker;
 import com.bigdata.modules.telemetry.model.CapabilityCode;
 import com.bigdata.modules.telemetry.v1.catalog.CatalogContributor;
+import com.bigdata.modules.telemetry.v1.catalog.FlinkMetricSemantics;
+import com.bigdata.modules.telemetry.v1.catalog.RestMetricSemanticsRegistry;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.dto.LogQueryV1Request;
 import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogRegistry;
@@ -196,7 +198,8 @@ class LogTelemetryQueryServiceTest {
         TelemetryCatalogRegistry catalog = new TelemetryCatalogRegistry(
                 List.of((CatalogContributor) () -> List.of(new ComponentCatalogEntry(
                         TARGET.serviceType(), TARGET.componentId(), List.of(), streams, List.of(),
-                        CatalogStatus.IMPLEMENTED, List.of()))));
+                        CatalogStatus.IMPLEMENTED, List.of()))),
+                new RestMetricSemanticsRegistry(new FlinkMetricSemantics()));
         return new LogTelemetryQueryService(catalog, new MetadataCatalogRegistry(List.of()),
                 router, registry, new LogCircuitBreaker());
     }

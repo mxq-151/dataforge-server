@@ -1,6 +1,8 @@
 package com.bigdata.modules.telemetry.v1.runtime.service;
 
 import com.bigdata.common.exception.BusinessException;
+import com.bigdata.modules.telemetry.v1.catalog.FlinkMetricSemantics;
+import com.bigdata.modules.telemetry.v1.catalog.RestMetricSemanticsRegistry;
 import com.bigdata.modules.telemetry.v1.catalog.SeedCatalogContributor;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.model.BackendType;
@@ -49,7 +51,8 @@ class RuntimeTelemetryQueryServiceTest {
         when(registry.enginesFor("flink")).thenReturn(List.of(engine));
         RuntimeV1Properties properties = new RuntimeV1Properties();
         service = new RuntimeTelemetryQueryService(registry,
-                new TelemetryCatalogRegistry(List.of(new SeedCatalogContributor())),
+                new TelemetryCatalogRegistry(List.of(new SeedCatalogContributor()),
+                        new RestMetricSemanticsRegistry(new FlinkMetricSemantics())),
                 properties, new SnapshotHistory(properties), new SensitiveDataMasker());
     }
 

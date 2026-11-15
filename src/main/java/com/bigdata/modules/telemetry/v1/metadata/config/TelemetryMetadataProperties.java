@@ -42,6 +42,8 @@ public class TelemetryMetadataProperties {
         private int maxTargets = 20;
         /** 单个 target 的配置条数上限。 */
         private int maxConfigItems = 500;
+        /** 单个 target 的指标名发现条数上限。 */
+        private int maxMetrics = 5000;
         /** 单次 provider 调用超时。 */
         private long timeoutMs = 10000;
 
@@ -59,6 +61,14 @@ public class TelemetryMetadataProperties {
 
         public void setMaxConfigItems(int maxConfigItems) {
             this.maxConfigItems = maxConfigItems;
+        }
+
+        public int getMaxMetrics() {
+            return maxMetrics;
+        }
+
+        public void setMaxMetrics(int maxMetrics) {
+            this.maxMetrics = maxMetrics;
         }
 
         public long getTimeoutMs() {

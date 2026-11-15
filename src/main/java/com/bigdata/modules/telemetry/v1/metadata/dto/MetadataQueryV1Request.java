@@ -7,9 +7,9 @@ import java.util.List;
 /**
  * 服务版本与配置查询请求。
  *
- * <p>{@code targets} 必填，1..{@code max-targets}；{@code scope} 取 version / config / both，
+ * <p>{@code targets} 必填，1..{@code max-targets}；{@code scope} 取 version / config / both / metrics，
  * 缺省 both；{@code sections} / {@code keys} 为空表示不过滤；{@code limit} 是单个 target 的
- * 配置条数上限。</p>
+ * 配置条数或指标名条数上限。</p>
  */
 public class MetadataQueryV1Request {
 

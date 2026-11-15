@@ -4,7 +4,20 @@ import com.bigdata.common.exception.BusinessException;
 import com.bigdata.modules.telemetry.model.CapabilityCode;
 import com.bigdata.modules.telemetry.model.Requirement;
 import com.bigdata.modules.telemetry.model.RequirementKind;
+import com.bigdata.modules.telemetry.model.CapabilityCode;
+import com.bigdata.modules.telemetry.v1.catalog.FlinkMetricSemantics;
+import com.bigdata.modules.telemetry.v1.catalog.RestMetricSemanticsRegistry;
+import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
+import com.bigdata.modules.telemetry.v1.discovery.DiscoveredMetric;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryProvider;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryQuery;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryRegistry;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryResult;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryService;
 import com.bigdata.modules.telemetry.v1.metadata.config.TelemetryMetadataProperties;
+import com.bigdata.modules.telemetry.v1.metadata.model.MetadataTarget;
+import com.bigdata.modules.telemetry.v1.metadata.model.MetricNameView;
+import com.bigdata.modules.telemetry.v1.model.Target;
 import com.bigdata.modules.telemetry.v1.metadata.dto.MetadataQueryV1Request;
 import com.bigdata.modules.telemetry.v1.metadata.model.MetadataTarget;
 import com.bigdata.modules.telemetry.v1.metadata.model.TargetAttempt;
@@ -26,6 +39,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -262,12 +276,98 @@ class MetadataTelemetryQueryServiceTest {
 
     // ------------------------------------------------------------------ 辅助
 
+    @Test
+    @DisplayName("scope=metrics：返回运行时发现的指标名与来源")
+    void metricsScopeReturnsDiscoveredNames() {
+        MetadataTelemetryQueryService service = serviceWithDiscovery(
+                new FakeDiscovery(List.of(
+                        new DiscoveredMetric("Status.JVM.Memory.Heap.Used", "flink-rest-discovery",
+                                "flink:taskmanagers/tm-1/metrics", null, null),
+                        new DiscoveredMetric("Status.JVM.Threads.Count", "flink-rest-discovery",
+                                "flink:taskmanagers/tm-1/metrics", null, null))));
+        MetadataQueryV1Request request = new MetadataQueryV1Request();
+        request.setTargets(List.of(new MetadataTarget(
+                new Target("flink", "flink.taskmanager", "cluster"), Map.of())));
+        request.setScope("metrics");
+
+        TelemetryMetadataV1Response response = service.query(request);
+
+        assertThat(response.outcome()).isEqualTo("ok");
+        assertThat(response.data().metrics()).hasSize(2);
+        assertThat(response.data().metrics()).extracting(MetricNameView::name)
+                .containsExactly("Status.JVM.Memory.Heap.Used", "Status.JVM.Threads.Count");
+        assertThat(response.data().metrics()).allSatisfy(metric ->
+                assertThat(metric.providerId()).isEqualTo("flink-rest-discovery"));
+    }
+
+    @Test
+    @DisplayName("scope=metrics 无发现能力：UNAVAILABLE + METRIC_DISCOVERY_UNSUPPORTED")
+    void metricsScopeWithoutDiscoveryIsUnavailable() {
+        MetadataTelemetryQueryService service = serviceWithDiscovery(null);
+        MetadataQueryV1Request request = new MetadataQueryV1Request();
+        request.setTargets(List.of(new MetadataTarget(
+                new Target("spark", "spark.driver", "cluster"), Map.of())));
+        request.setScope("metrics");
+
+        TelemetryMetadataV1Response response = service.query(request);
+
+        assertThat(response.outcome()).isEqualTo("unavailable");
+        assertThat(response.error().code()).isEqualTo(CapabilityCode.METRIC_DISCOVERY_UNSUPPORTED);
+    }
+
+    private MetadataTelemetryQueryService serviceWithDiscovery(MetricDiscoveryProvider provider) {
+        TelemetryCatalogRegistry catalog = new TelemetryCatalogRegistry(
+                List.of(), new RestMetricSemanticsRegistry(
+                        new FlinkMetricSemantics()));
+        List<MetricDiscoveryProvider> providers = provider == null
+                ? List.of() : List.of(provider);
+        return new MetadataTelemetryQueryService(
+                new ServiceMetadataProviderRegistry(List.of()),
+                new MetadataMasker(new SensitiveDataMasker()),
+                new VersionNormalizer(),
+                new TelemetryMetadataProperties(),
+                new MetricDiscoveryService(new MetricDiscoveryRegistry(providers), catalog));
+    }
+
+    private static final class FakeDiscovery implements MetricDiscoveryProvider {
+
+        private final List<DiscoveredMetric> metrics;
+
+        private FakeDiscovery(List<DiscoveredMetric> metrics) {
+            this.metrics = metrics;
+        }
+
+        @Override
+        public String providerId() {
+            return "flink-rest-discovery";
+        }
+
+        @Override
+        public String providerType() {
+            return "flink-rest";
+        }
+
+        @Override
+        public boolean supports(Target target) {
+            return "flink".equals(target.serviceType());
+        }
+
+        @Override
+        public MetricDiscoveryResult discover(MetricDiscoveryQuery query) {
+            return MetricDiscoveryResult.supported(providerId(), metrics, List.of());
+        }
+    }
+
     private MetadataTelemetryQueryService service(ServiceMetadataProvider... providers) {
+        TelemetryCatalogRegistry catalog = new TelemetryCatalogRegistry(
+                List.of(), new RestMetricSemanticsRegistry(
+                        new FlinkMetricSemantics()));
         return new MetadataTelemetryQueryService(
                 new ServiceMetadataProviderRegistry(List.of(providers)),
                 new MetadataMasker(new SensitiveDataMasker()),
                 new VersionNormalizer(),
-                new TelemetryMetadataProperties());
+                new TelemetryMetadataProperties(),
+                new MetricDiscoveryService(new MetricDiscoveryRegistry(List.of()), catalog));
     }
 
     private ServiceMetadataProvider provider(String id, boolean enabled,

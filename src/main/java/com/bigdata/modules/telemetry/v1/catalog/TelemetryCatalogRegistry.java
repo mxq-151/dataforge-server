@@ -24,15 +24,25 @@ public class TelemetryCatalogRegistry {
 
     private final TelemetryCatalog catalog;
 
-    public TelemetryCatalogRegistry(List<CatalogContributor> contributors) {
+    public TelemetryCatalogRegistry(List<CatalogContributor> contributors,
+                                    RestMetricSemanticsRegistry semanticsRegistry) {
         List<ComponentCatalogEntry> merged = new ArrayList<>();
         Set<String> componentKeys = new HashSet<>();
         for (CatalogContributor contributor : contributors) {
-            for (ComponentCatalogEntry entry : contributor.contribute()) {
-                String key = TelemetryCatalog.key(entry.serviceType(), entry.componentId());
+            for (ComponentCatalogEntry identity : contributor.contribute()) {
+                String key = TelemetryCatalog.key(identity.serviceType(), identity.componentId());
                 if (!componentKeys.add(key)) {
                     throw new IllegalStateException("重复的目录组件: " + key);
                 }
+                List<MetricDefinition> metrics =
+                        semanticsRegistry.forComponent(identity.serviceType(), identity.componentId());
+                if (metrics.isEmpty()) {
+                    metrics = identity.metrics();
+                }
+                ComponentCatalogEntry entry = new ComponentCatalogEntry(
+                        identity.serviceType(), identity.componentId(), metrics,
+                        identity.logStreams(), identity.engineEvidence(),
+                        identity.metricCatalogStatus(), identity.metricRequirements());
                 validateEntry(entry);
                 merged.add(entry);
             }

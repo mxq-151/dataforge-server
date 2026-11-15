@@ -50,7 +50,17 @@ public enum CapabilityCode {
     /** 日志源全部不可取（如 YARN 聚合未完成且 NM 本地目录未挂载）：带 reason 返回，不用空串兜底。 */
     LOG_SOURCE_UNAVAILABLE(false),
     /** 结果触达条数/字节上限被截断：数据可用但不完整，必须显式标记。 */
-    RESULT_TRUNCATED(false);
+    RESULT_TRUNCATED(false),
+
+    // ---- v1 指标运行时发现新增 ----
+    /** 实例的可列举结果里没有该指标：按不可用返回，不再统一 400「未知指标」。 */
+    METRIC_NOT_EXPOSED(false),
+    /** 引擎没有指标名列举能力，且目录没有可用的手工名字表。 */
+    METRIC_DISCOVERY_UNSUPPORTED(false),
+    /** 发现到了指标但没有任何语义模式命中：可查，但类型/单位未知，禁止 rate=true。 */
+    METRIC_TYPE_UNKNOWN(false),
+    /** 同一指标名命中多个语义模式，拒绝猜测。 */
+    METRIC_PATTERN_AMBIGUOUS(false);
 
     private final boolean retryable;
 

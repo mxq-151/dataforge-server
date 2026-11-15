@@ -13,7 +13,9 @@ import org.springframework.web.bind.annotation.RestController;
  * 服务版本与配置查询（第五类取数能力）。
  *
  * <p>{@code POST /telemetry/v1/metadata/query}：按 serviceType / componentId / hostId 查版本与配置，
- * 取数方式由可插拔的 {@code ServiceMetadataProvider} 决定；响应沿用四态外壳。</p>
+ * 取数方式由可插拔的 {@code ServiceMetadataProvider} 决定；响应沿用四态外壳。
+ * {@code scope=metrics} 改走 {@code MetricDiscoveryProvider} 列举实例真实暴露的指标名，
+ * 并在可用时从 Prometheus / VictoriaMetrics 元数据补类型与单位。</p>
  */
 @RestController
 @RequestMapping("/telemetry/v1")

@@ -10,7 +10,7 @@
 | `df-victoriametrics` | `victoriametrics/victoria-metrics:v1.106.1` | `8428` | TSDB + PromQL API |
 | `df-kafka` | `apache/kafka:3.9.0` | `9092` / `7071` | Kafka Broker，JMX exporter 走 7071 |
 | `df-yarn-exporter` | `dataforge-allinone:1.0`（自带 python3） | `18090` | YARN RM/NM JSON → Prometheus |
-| `dataforge-allinone` | 现有 | `8088` / `8042` | YARN RM / NM（Hadoop 3.3.6，已内置运行） |
+| `dataforge-allinone` | 现有 | `8088` / `8042` / `18083` | YARN RM / NM；SHS JMX exporter（18083） |
 | dataforge-server | 本地 jar | `8083` | v1 接口 |
 
 Docker 网络：`dataforge-docker_default`。上述容器名可直接互相解析。
@@ -20,6 +20,8 @@ Docker 网络：`dataforge-docker_default`。上述容器名可直接互相解�
 - VictoriaMetrics：`http://127.0.0.1:8428`（UI `/vmui`）
 - Kafka JMX：`http://127.0.0.1:7071/metrics`
 - YARN 导出器：`http://127.0.0.1:18090/metrics`
+- Spark SHS JMX：`http://127.0.0.1:18083/metrics`（配置见
+  [`spark-jmx/README.md`](engines/spark-jmx/README.md)）
 - v1 接口：`http://127.0.0.1:8083/api/telemetry/v1/metrics/query`
 
 > Docker Hub 直连超时，VM 镜像经 `docker.m.daocloud.io` 拉取后重打标签：
@@ -154,6 +156,12 @@ scrape_configs:
         regex: "yarn_cluster_.*"
         target_label: component_id
         replacement: yarn.resourcemanager
+
+  # Spark History Server 进程自身（jmx_exporter，:18083）
+  - job_name: spark-shs
+    static_configs:
+      - targets: ["dataforge-allinone:18083"]
+        labels: {service_type: spark, component_id: spark.shs, host_id: cluster}
 ```
 
 标签必须与 v1 的 target 对齐，否则 `PromqlSelectorBuilder` 注入的

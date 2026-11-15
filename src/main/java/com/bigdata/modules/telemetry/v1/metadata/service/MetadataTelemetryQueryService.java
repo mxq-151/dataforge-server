@@ -11,9 +11,13 @@ import com.bigdata.modules.telemetry.v1.metadata.model.ConfigEntryView;
 import com.bigdata.modules.telemetry.v1.metadata.model.MetadataData;
 import com.bigdata.modules.telemetry.v1.metadata.model.MetadataScope;
 import com.bigdata.modules.telemetry.v1.metadata.model.MetadataTarget;
+import com.bigdata.modules.telemetry.v1.metadata.model.MetricNameView;
 import com.bigdata.modules.telemetry.v1.metadata.model.NormalizedVersion;
 import com.bigdata.modules.telemetry.v1.metadata.model.TargetAttempt;
 import com.bigdata.modules.telemetry.v1.metadata.model.VersionView;
+import com.bigdata.modules.telemetry.v1.discovery.DiscoveredMetric;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryResult;
+import com.bigdata.modules.telemetry.v1.discovery.MetricDiscoveryService;
 import com.bigdata.modules.telemetry.v1.metadata.registry.ServiceMetadataProviderRegistry;
 import com.bigdata.modules.telemetry.v1.metadata.spi.MetadataCapability;
 import com.bigdata.modules.telemetry.v1.metadata.spi.MetadataFetchResult;
@@ -57,15 +61,18 @@ public class MetadataTelemetryQueryService {
     private final MetadataMasker masker;
     private final VersionNormalizer versionNormalizer;
     private final TelemetryMetadataProperties properties;
+    private final MetricDiscoveryService metricDiscoveryService;
 
     public MetadataTelemetryQueryService(ServiceMetadataProviderRegistry registry,
                                          MetadataMasker masker,
                                          VersionNormalizer versionNormalizer,
-                                         TelemetryMetadataProperties properties) {
+                                         TelemetryMetadataProperties properties,
+                                         MetricDiscoveryService metricDiscoveryService) {
         this.registry = registry;
         this.masker = masker;
         this.versionNormalizer = versionNormalizer;
         this.properties = properties;
+        this.metricDiscoveryService = metricDiscoveryService;
     }
 
     public TelemetryMetadataV1Response query(MetadataQueryV1Request request) {
@@ -81,6 +88,10 @@ public class MetadataTelemetryQueryService {
         List<String> sections = request.getSections() == null ? List.of() : request.getSections();
         List<String> keys = request.getKeys() == null ? List.of() : request.getKeys();
         long capturedAt = System.currentTimeMillis();
+
+        if (scopes.size() == 1 && scopes.contains(MetadataScope.METRICS)) {
+            return queryMetrics(targets, request, timeout, capturedAt, start);
+        }
 
         List<VersionView> versions = new ArrayList<>();
         List<ConfigEntryView> configs = new ArrayList<>();
@@ -155,6 +166,106 @@ public class MetadataTelemetryQueryService {
                 Instant.now().toString(), truncated);
         return new TelemetryMetadataV1Response(outcome, retryable, targets,
                 MetadataScope.wire(scopes), providers, data, error, meta);
+    }
+
+    // ------------------------------------------------------------------ 指标名发现
+
+    private TelemetryMetadataV1Response queryMetrics(List<MetadataTarget> targets,
+                                                     MetadataQueryV1Request request,
+                                                     Duration timeout, long capturedAt,
+                                                     long start) {
+        int maxMetrics = properties.getQuery().getMaxMetrics();
+        int limit = request.getLimit() == null ? maxMetrics : request.getLimit();
+        if (limit < 1 || limit > maxMetrics) {
+            throw new BusinessException(400, "limit 必须在 1.." + maxMetrics);
+        }
+
+        List<MetricNameView> metrics = new ArrayList<>();
+        List<TargetAttempt> attempts = new ArrayList<>();
+        List<TelemetryMetadataV1Response.Selected> selected = new ArrayList<>();
+        List<TelemetryMetadataV1Response.Skip> skipped = new ArrayList<>();
+        List<BackendWarning> warnings = new ArrayList<>();
+        List<Failure> failures = new ArrayList<>();
+        int success = 0;
+        boolean truncated = false;
+
+        for (MetadataTarget target : targets) {
+            long began = System.currentTimeMillis();
+            MetricDiscoveryResult result = metricDiscoveryService.discover(
+                    target.target(), target.ref(), timeout, limit);
+            long elapsed = System.currentTimeMillis() - began;
+            warnings.addAll(result.warnings());
+            if (result.supported()) {
+                success++;
+                for (DiscoveredMetric metric : result.metrics()) {
+                    metrics.add(new MetricNameView(target, metric.providerId(), metric.name(),
+                            metric.source(), metric.type(), metric.unit(), result.manual()));
+                }
+                selected.add(new TelemetryMetadataV1Response.Selected(target, result.providerId(),
+                        result.manual() ? "manual" : "metric-discovery", 0));
+                attempts.add(TargetAttempt.success(target, result.providerId(), elapsed));
+                if (result.metrics().isEmpty()) {
+                    warnings.add(BackendWarning.of("NO_METRICS_DISCOVERED",
+                            target.target().serviceType() + "/" + target.target().componentId()
+                                    + " 的发现结果为空"));
+                }
+                if (result.metrics().size() >= limit) {
+                    truncated = true;
+                    warnings.add(BackendWarning.of("RESULT_TRUNCATED",
+                            "指标名发现条数达到上限 " + limit));
+                }
+            } else {
+                CapabilityCode code = result.code() == null
+                        ? CapabilityCode.METRIC_DISCOVERY_UNSUPPORTED : result.code();
+                String reason = result.reason() == null ? "指标名发现不可用" : result.reason();
+                attempts.add(new TargetAttempt(target, result.providerId(), outcomeOf(code), code,
+                        elapsed, code.retryable(), safeMessage(reason)));
+                failures.add(new Failure(target, code, reason, result.requirements(),
+                        isAvailability(code), code.retryable()));
+            }
+        }
+
+        boolean partial = success > 0 && success < targets.size();
+        if (partial) {
+            warnings.add(BackendWarning.of("PARTIAL",
+                    "部分 target 的指标名发现失败，失败原因见 providers.attempts[]"));
+        }
+
+        String outcome;
+        CapabilityCode code = CapabilityCode.OK;
+        String message = null;
+        List<Requirement> requirements = List.of();
+        boolean retryable = false;
+        if (success > 0) {
+            outcome = "ok";
+        } else if (!failures.isEmpty()) {
+            boolean allAvailability = failures.stream().allMatch(Failure::availability);
+            Failure first = allAvailability ? failures.get(0) : firstNonAvailability(failures);
+            code = first.code();
+            message = first.reason();
+            requirements = first.requirements();
+            retryable = allAvailability && failures.stream().allMatch(Failure::retryable);
+            outcome = allAvailability ? "unavailable" : "failed";
+        } else {
+            outcome = "not_implemented";
+            code = CapabilityCode.METRIC_DISCOVERY_UNSUPPORTED;
+            message = "没有可用的指标名发现 provider";
+            requirements = List.of(new Requirement(RequirementKind.IMPLEMENTATION,
+                    "MetricDiscoveryProvider", "实现并注册指标发现 provider"));
+        }
+
+        MetadataData data = "ok".equals(outcome)
+                ? new MetadataData("metrics", capturedAt, List.of(), List.of(), warnings, metrics)
+                : null;
+        TelemetryMetadataV1Response.ProviderView providers = new TelemetryMetadataV1Response.ProviderView(
+                selected, attempts, skipped);
+        TelemetryMetadataV1Response.ErrorView error = "ok".equals(outcome) ? null
+                : new TelemetryMetadataV1Response.ErrorView(code, message, requirements);
+        TelemetryMetadataV1Response.MetaView meta = new TelemetryMetadataV1Response.MetaView(
+                System.currentTimeMillis() - start, partial, false, warnings,
+                Instant.now().toString(), truncated);
+        return new TelemetryMetadataV1Response(outcome, retryable, targets, "metrics", providers,
+                data, error, meta);
     }
 
     // ------------------------------------------------------------------ 单 target
@@ -358,7 +469,8 @@ public class MetadataTelemetryQueryService {
     private boolean isAvailability(CapabilityCode code) {
         return switch (code) {
             case UPSTREAM_TIMEOUT, UPSTREAM_ERROR, IO_ERROR, RATE_LIMITED, BACKEND_UNAVAILABLE,
-                    NOT_CONFIGURED, SOURCE_DISABLED, NO_PROVIDER -> true;
+                    NOT_CONFIGURED, SOURCE_DISABLED, NO_PROVIDER, METRIC_NOT_EXPOSED,
+                    METRIC_DISCOVERY_UNSUPPORTED -> true;
             default -> false;
         };
     }

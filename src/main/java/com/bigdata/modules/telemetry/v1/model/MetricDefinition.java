@@ -4,13 +4,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 指标目录定义：名称、类型、单位、标签与可用后端。
+ * 指标语义声明：名称、类型、单位、模式与可用后端。
  *
- * <p>指标名、类型、单位遵循 Prometheus 约定；{@code backendPreference} 按查询模式给出
- * 目录级默认顺序，配置规则可以覆盖。</p>
+ * <p>目录不再存物理全名；{@code pattern} 负责把运行时发现到的指标名映射到本语义。
+ * {@code rawMetric} 只保留给必须精确绑定的 REST 字段（如 Flink / Spark），
+ * 可发现指标应使用族/前缀/后缀/正则模式。</p>
  *
- * <p>可选的 {@code rawMetric} / {@code endpoint} / {@code verified} / {@code note} 描述引擎原始指标来源：
- * 只有能从真实端点取到的字段才填写，未核实的填 {@code verified=false} 并在 note 里说明。</p>
+ * <p>{@code discovery=MANUAL} 表示该语义所在引擎没有指标名列举能力，名字表为手工维护；
+ * 查询时跳过发现校验，但必须在文档与目录里显式标注。</p>
  */
 public record MetricDefinition(String name,
                                String type,
@@ -23,21 +24,62 @@ public record MetricDefinition(String name,
                                String rawMetric,
                                String endpoint,
                                Boolean verified,
-                               String note) {
+                               String note,
+                               MetricPattern pattern,
+                               MetricDiscoveryMode discovery) {
 
     public record LabelDefinition(String name, boolean required, String description) {
     }
 
-    /** 兼容既有目录声明：不带引擎原始指标信息。 */
+    public MetricDefinition {
+        labels = labels == null ? List.of() : List.copyOf(labels);
+        requiredRefs = requiredRefs == null ? List.of() : List.copyOf(requiredRefs);
+        backendPreference = backendPreference == null ? Map.of() : Map.copyOf(backendPreference);
+        supportedBackends = supportedBackends == null ? List.of() : List.copyOf(supportedBackends);
+        if (pattern == null) {
+            pattern = MetricPattern.exact(rawMetric != null && !rawMetric.isBlank() ? rawMetric : name);
+        }
+        if (discovery == null) {
+            discovery = MetricDiscoveryMode.MANUAL;
+        }
+    }
+
+    /** 兼容既有目录声明：不带引擎原始指标信息，按手工维护处理。 */
     public MetricDefinition(String name, String type, String unit, String scope,
                             List<LabelDefinition> labels, List<String> requiredRefs,
                             Map<String, List<String>> backendPreference,
                             List<BackendBinding> supportedBackends) {
         this(name, type, unit, scope, labels, requiredRefs, backendPreference, supportedBackends,
-                null, null, null, null);
+                null, null, null, null, MetricPattern.exact(name), MetricDiscoveryMode.MANUAL);
+    }
+
+    /** 兼容既有带 raw 名的声明：模式取 raw 名精确匹配，默认按可发现处理。 */
+    public MetricDefinition(String name, String type, String unit, String scope,
+                            List<LabelDefinition> labels, List<String> requiredRefs,
+                            Map<String, List<String>> backendPreference,
+                            List<BackendBinding> supportedBackends, String rawMetric,
+                            String endpoint, Boolean verified, String note) {
+        this(name, type, unit, scope, labels, requiredRefs, backendPreference, supportedBackends,
+                rawMetric, endpoint, verified, note,
+                MetricPattern.exact(rawMetric != null && !rawMetric.isBlank() ? rawMetric : name),
+                MetricDiscoveryMode.DISCOVERED);
     }
 
     public List<String> preferenceFor(QueryMode mode) {
         return backendPreference.getOrDefault(mode.wire(), List.of());
+    }
+
+    /** rate 仅适用于 counter；类型未知（null）时一律拒绝。 */
+    public boolean rateApplicable() {
+        return "counter".equalsIgnoreCase(type);
+    }
+
+    /** 原始查询名：REST 字段名 / Flink 原始指标 ID；未声明时退回语义名。 */
+    public String rawName() {
+        return rawMetric == null || rawMetric.isBlank() ? name : rawMetric;
+    }
+
+    public boolean patternMatches(String metricName) {
+        return pattern != null && pattern.matches(metricName);
     }
 }

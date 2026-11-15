@@ -1,5 +1,7 @@
 package com.bigdata.modules.telemetry.v1.runtime.engine;
 
+import com.bigdata.modules.telemetry.v1.catalog.FlinkMetricSemantics;
+import com.bigdata.modules.telemetry.v1.catalog.RestMetricSemanticsRegistry;
 import com.bigdata.modules.telemetry.v1.catalog.SeedCatalogContributor;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.SparkRestConfig;
@@ -105,7 +107,8 @@ class SparkRuntimeEngineTest {
         config.setMode("history");
         config.getLimits().setTimeoutMs(3000);
         return new SparkRuntimeEngine("spark-rest", config, null, null, new ObjectMapper(),
-                new TelemetryCatalogRegistry(List.of(new SeedCatalogContributor())),
+                new TelemetryCatalogRegistry(List.of(new SeedCatalogContributor()),
+                        new RestMetricSemanticsRegistry(new FlinkMetricSemantics())),
                 new RuntimeV1Properties());
     }
 

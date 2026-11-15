@@ -1,0 +1,115 @@
+# ============================================================
+# Spark History Server (SHS) 的 JMX exporter 规则
+#
+# 用法（与 Kafka / YARN 相同）：把 jmx_prometheus_javaagent 作为 -javaagent
+# 挂到 SHS 进程，本文件作为 agent 的配置参数，暴露 Prometheus 文本端点。
+#
+# 暴露范围：
+#   * JVM：堆/非堆内存、内存池、GC 次数/耗时、线程、类加载、CPU、文件描述符；
+#   * Spark：SHS 进程内 Spark MetricsSystem 的 JMX sink（如果该版本注册了 bean）。
+#
+# 注意：SHS 只读事件日志，不创建 SparkContext，也没有 driver/executor 的运行时
+# 时间序列。作业级 executor 内存、stage 耗时、shuffle 量不在本文件覆盖范围内，
+# 目录里作为缺口单独声明。
+# ============================================================
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+whitelistObjectNames:
+  - "java.lang:*"
+  - "org.apache.spark:*"
+
+rules:
+  # ---------------- JVM 内存 ----------------
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>(used|committed|max)'
+    name: spark_shs_jvm_heap_memory_$1_bytes
+    type: GAUGE
+  - pattern: 'java.lang<type=Memory><NonHeapMemoryUsage>(used|committed|max)'
+    name: spark_shs_jvm_nonheap_memory_$1_bytes
+    type: GAUGE
+  # ObjectName 的 key 顺序由 JVM 规范化（实测 name 在 type 前），两种顺序都兼容。
+  - pattern: 'java.lang<name=(.+), type=MemoryPool><Usage>(used|committed|max)'
+    name: spark_shs_jvm_memory_pool_$2_bytes
+    labels:
+      pool: "$1"
+    type: GAUGE
+  - pattern: 'java.lang<type=MemoryPool, name=(.+)><Usage>(used|committed|max)'
+    name: spark_shs_jvm_memory_pool_$2_bytes
+    labels:
+      pool: "$1"
+    type: GAUGE
+
+  # ---------------- JVM GC ----------------
+  - pattern: 'java.lang<name=(.+), type=GarbageCollector><>CollectionCount'
+    name: spark_shs_jvm_gc_collection_count_total
+    labels:
+      collector: "$1"
+    type: COUNTER
+  - pattern: 'java.lang<name=(.+), type=GarbageCollector><>CollectionTime'
+    name: spark_shs_jvm_gc_collection_time_milliseconds_total
+    labels:
+      collector: "$1"
+    type: COUNTER
+  - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionCount'
+    name: spark_shs_jvm_gc_collection_count_total
+    labels:
+      collector: "$1"
+    type: COUNTER
+  - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionTime'
+    name: spark_shs_jvm_gc_collection_time_milliseconds_total
+    labels:
+      collector: "$1"
+    type: COUNTER
+
+  # ---------------- JVM 线程 / 类加载 ----------------
+  - pattern: 'java.lang<type=Threading><>ThreadCount'
+    name: spark_shs_jvm_threads_current
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>DaemonThreadCount'
+    name: spark_shs_jvm_threads_daemon
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>PeakThreadCount'
+    name: spark_shs_jvm_threads_peak
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>TotalStartedThreadCount'
+    name: spark_shs_jvm_threads_started_total
+    type: COUNTER
+  - pattern: 'java.lang<type=ClassLoading><>LoadedClassCount'
+    name: spark_shs_jvm_classes_loaded
+    type: GAUGE
+  - pattern: 'java.lang<type=ClassLoading><>UnloadedClassCount'
+    name: spark_shs_jvm_classes_unloaded_total
+    type: COUNTER
+  - pattern: 'java.lang<type=ClassLoading><>TotalLoadedClassCount'
+    name: spark_shs_jvm_classes_loaded_total
+    type: COUNTER
+
+  # ---------------- JVM CPU / 文件描述符 ----------------
+  - pattern: 'java.lang<type=OperatingSystem><>SystemCpuLoad'
+    name: spark_shs_jvm_cpu_system_ratio
+    type: GAUGE
+  - pattern: 'java.lang<type=OperatingSystem><>ProcessCpuLoad'
+    name: spark_shs_jvm_cpu_process_ratio
+    type: GAUGE
+  - pattern: 'java.lang<type=OperatingSystem><>FreePhysicalMemorySize'
+    name: spark_shs_jvm_memory_physical_free_bytes
+    type: GAUGE
+  - pattern: 'java.lang<type=OperatingSystem><>TotalPhysicalMemorySize'
+    name: spark_shs_jvm_memory_physical_total_bytes
+    type: GAUGE
+  - pattern: 'java.lang<type=OperatingSystem><>OpenFileDescriptorCount'
+    name: spark_shs_jvm_file_descriptors_open
+    type: GAUGE
+  - pattern: 'java.lang<type=OperatingSystem><>MaxFileDescriptorCount'
+    name: spark_shs_jvm_file_descriptors_max
+    type: GAUGE
+
+  # ---------------- Spark MetricsSystem（若 SHS 注册了 JMX bean） ----------------
+  # SHS 不创建 SparkContext，是否能导出应用计数取决于该版本 HistoryServer 是否
+  # 初始化 MetricsSystem 并注册 JMX sink；没有 bean 时这些规则不会产生指标。
+  - pattern: 'org.apache.spark<type=([^,>]+), name=([^>]+)><>(\w+)'
+    name: spark_shs_$1_$3
+    labels:
+      name: "$2"
+  - pattern: 'org.apache.spark<type=([^,>]+)><>(\w+)'
+    name: spark_shs_$1_$2

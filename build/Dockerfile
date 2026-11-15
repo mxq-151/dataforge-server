@@ -366,10 +366,10 @@ ENV JAVA_HOME=/opt/java/openjdk \
     MARQUEZ_CONFIG=/opt/marquez/marquez.dev.yml \
     PATH=/opt/java/openjdk/bin:/opt/spark/bin:/opt/hadoop/bin:/opt/hadoop/sbin:/opt/hive/bin:/opt/kyuubi/bin:/opt/dolphinscheduler/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# 8088 RM UI/REST、8042 NM REST、18080 Spark History Server
+# 8088 RM UI/REST、8042 NM REST、18080 Spark History Server、18083 SHS JMX exporter
 # 9083 Hive Metastore Thrift、10009 Kyuubi Thrift/JDBC、10099 Kyuubi REST API
 # （8030/8031/8032/8033 与 8041/8043 为 RM/NM 内部 RPC，仅容器内可达，不对外映射）
-EXPOSE 8082 5432 12345 5000 5001 3000 8088 8042 18080 9083 10009 10099
+EXPOSE 8082 5432 12345 5000 5001 3000 8088 8042 18080 18083 9083 10009 10099
 
 # entrypoint 先把镜像里的 sql/ 与 scripts/ 同步进可能被命名卷遮蔽的 /opt/dataforge，
 # 再exec CMD 启动 supervisord（详见 build/scripts/docker-entrypoint.sh 顶部说明）
