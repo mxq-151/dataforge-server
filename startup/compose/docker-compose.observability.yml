@@ -1,0 +1,44 @@
+# ============================================================
+# 任务诊断取数 —— 观测后端（独立编排，可单独起停）
+#
+# 只包含 VictoriaMetrics 单节点；不触碰 engines 编排中的 Kafka / HBase /
+# ClickHouse / Doris / Flink 等容器。
+# 网络复用 dataforge-docker_default，容器名可被 dataforge-allinone 解析。
+#
+# 用法：
+#   docker compose -f startup/compose/docker-compose.observability.yml up -d
+#   curl http://127.0.0.1:8428/health
+# ============================================================
+name: dataforge-docker
+
+networks:
+  default:
+    name: dataforge-docker_default
+    external: true
+
+volumes:
+  df-vm-data:
+
+services:
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.1
+    container_name: df-victoriametrics
+    restart: unless-stopped
+    ports:
+      - "${VM_HTTP_PORT:-8428}:8428"
+    volumes:
+      - df-vm-data:/victoria-metrics-data
+      - ../engines/victoriametrics/scrape.yml:/etc/vm/scrape.yml:ro
+    command:
+      - -storageDataPath=/victoria-metrics-data
+      - -httpListenAddr=:8428
+      - -promscrape.config=/etc/vm/scrape.yml
+      - -retentionPeriod=1
+      - -selfScrapeInterval=15s
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8428/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

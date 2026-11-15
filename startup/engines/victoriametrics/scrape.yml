@@ -1,0 +1,33 @@
+# VictoriaMetrics 抓取配置（单节点）
+# 目标均在同一 Docker 网络 dataforge-docker_default，用容器名解析。
+# 打标规则与 v1 目录的 target 对齐：service_type / component_id / host_id。
+scrape_configs:
+  - job_name: kafka-jmx
+    static_configs:
+      - targets: ["df-kafka:7071"]
+        labels:
+          service_type: kafka
+          component_id: kafka.broker
+          host_id: cluster
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "kafka_controller_.*"
+        target_label: component_id
+        replacement: kafka.controller
+
+  # YARN 3.3.x 只有 REST JSON，无 Prometheus 端点，经最小导出器转换。
+  - job_name: yarn
+    static_configs:
+      - targets: ["df-yarn-exporter:18090"]
+        labels:
+          service_type: yarn
+          host_id: cluster
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "yarn_nodemanager_.*"
+        target_label: component_id
+        replacement: yarn.nodemanager
+      - source_labels: [__name__]
+        regex: "yarn_cluster_.*"
+        target_label: component_id
+        replacement: yarn.resourcemanager

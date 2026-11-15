@@ -77,6 +77,8 @@ services:
     restart: unless-stopped
     ports:
       - "${KAFKA_PORT:-9092}:9092"
+      # JMX exporter（只读指标，仅绑定宿主本机调试用）
+      - "${KAFKA_JMX_PORT:-7071}:7071"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -93,8 +95,13 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+      # 以 javaagent 方式挂 JMX exporter，不改变 broker 配置、不额外起进程。
+      # 规则文件与 jar 见 startup/engines/kafka-jmx/README（jar 不入库，首次按文档下载）。
+      KAFKA_OPTS: "-javaagent:/opt/jmx-exporter/jmx_prometheus_javaagent.jar=7071:/opt/jmx-conf/kafka.yml"
     volumes:
       - df-kafka-data:/var/lib/kafka/data
+      - ${KAFKA_JMX_DIR:-/Users/mxq/dataforge-jmx}:/opt/jmx-exporter:ro
+      - ../engines/kafka-jmx:/opt/jmx-conf:ro
       # apache/kafka 镜像默认就在 /opt/kafka/logs 写 server.log / controller.log 等文件
       - ${DATAFORGE_LOG_ROOT:-/Users/mxq/dataforge-logs}/kafka:/opt/kafka/logs
     mem_limit: 768m

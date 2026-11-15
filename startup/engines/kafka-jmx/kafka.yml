@@ -1,0 +1,59 @@
+# Kafka Broker JMX → Prometheus 规则（jmx_prometheus_javaagent 0.20.0）
+# 只暴露 broker 侧关键指标；producer/consumer 客户端指标在客户端 JVM 内，
+# broker JMX 不提供（见 startup/engines/README-victoriametrics.md）。
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+whitelistObjectNames:
+  - "kafka.server:*"
+  - "kafka.controller:*"
+  - "kafka.network:*"
+  - "kafka.log:*"
+  - "java.lang:*"
+rules:
+  # ---- 按 topic 的消息/流量 ----
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=([^,]+), topic=(.+)><>Count"
+    name: kafka_server_broker_topic_metrics_$1_total
+    labels:
+      topic: "$2"
+    type: COUNTER
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=([^,]+), topic=(.+)><>(OneMinuteRate|MeanRate)"
+    name: kafka_server_broker_topic_metrics_$1_$3
+    labels:
+      topic: "$2"
+    type: GAUGE
+
+  # ---- broker 聚合指标 ----
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=([^,]+)><>Count"
+    name: kafka_server_broker_topic_metrics_$1_total
+    type: COUNTER
+  - pattern: "kafka.server<type=BrokerTopicMetrics, name=([^,]+)><>(OneMinuteRate|MeanRate)"
+    name: kafka_server_broker_topic_metrics_$1_$2
+    type: GAUGE
+
+  # ---- 副本 / 请求处理 / 会话 ----
+  - pattern: "kafka.server<type=(ReplicaManager|KafkaRequestHandlerPool|SessionExpireListener), name=([^,]+)><>(Value|Count|Mean|OneMinuteRate)"
+    name: kafka_server_$1_$2_$3
+    type: GAUGE
+
+  # ---- controller ----
+  - pattern: "kafka.controller<type=KafkaController, name=([^,]+)><>Value"
+    name: kafka_controller_$1
+    type: GAUGE
+
+  # ---- 网络 ----
+  - pattern: "kafka.network<type=RequestChannel, name=([^,]+)><>(Value|Count)"
+    name: kafka_network_request_channel_$1_$2
+    type: GAUGE
+
+  # ---- 日志管理 ----
+  - pattern: "kafka.log<type=LogManager, name=([^,]+)><>Value"
+    name: kafka_log_manager_$1
+    type: GAUGE
+
+  # ---- JVM ----
+  - pattern: "java.lang<type=Memory><HeapMemoryUsage>(used|committed|max)"
+    name: jvm_memory_heap_$1_bytes
+    type: GAUGE
+  - pattern: "java.lang<type=Threading><>(ThreadCount|DaemonThreadCount)"
+    name: jvm_threads_$1
+    type: GAUGE

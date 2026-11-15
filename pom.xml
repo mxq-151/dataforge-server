@@ -134,6 +134,13 @@
             <version>4.5.14</version>
         </dependency>
 
+        <!-- RE2/J：日志关键词正则（本地磁盘与 ES regexp 共用同一线性时间语法子集，防 ReDoS） -->
+        <dependency>
+            <groupId>com.google.re2j</groupId>
+            <artifactId>re2j</artifactId>
+            <version>1.7</version>
+        </dependency>
+
         <!-- Guava (Kyuubi JDBC 元数据操作/HBase 运行时依赖) -->
         <dependency>
             <groupId>com.google.guava</groupId>

@@ -53,6 +53,8 @@ public final class ServiceComponentCatalog {
         catalog.put("hudi", List.of());
         catalog.put("kafka", List.of("kafka.broker", "kafka.controller"));
         catalog.put("pulsar", List.of("pulsar.broker", "pulsar.bookkeeper", "pulsar.proxy"));
+        // YARN：不作为引擎服务进入调度域，但 RM/NM 的集群指标需要独立 target。
+        catalog.put("yarn", List.of("yarn.resourcemanager", "yarn.nodemanager"));
         return java.util.Collections.unmodifiableMap(catalog);
     }
 }
