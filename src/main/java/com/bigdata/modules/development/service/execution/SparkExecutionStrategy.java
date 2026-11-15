@@ -266,7 +266,7 @@ public class SparkExecutionStrategy extends AbstractBaseExecutionStrategy {
                 command.add(confPrefix + ".metastore.uris=" + dsConfig.getUrl());
                 if (storageEngine == DatasourceType.HUDI) {
                     command.add("--conf");
-                    command.add(confPrefix + ".sql.extensions=org.apache.spark.sql.hudi.HudiSparkSessionExtension");
+                    command.add(confPrefix + ".sql.extensions=org.apache.spark.sql.hudi.HoodieSparkSessionExtension");
                     command.add("--conf");
                     command.add(confPrefix + ".serializer=org.apache.spark.serializer.KryoSerializer");
                 } else if (storageEngine == DatasourceType.ICEBERG) {

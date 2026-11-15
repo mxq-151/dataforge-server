@@ -58,7 +58,7 @@ public class UserController {
     @AuditLog(module = "用户管理", operation = "创建用户", targetType = "User")
     @PostMapping
     @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public Result<Void> save(@Validated(UserDTO.Create.class) @RequestBody UserDTO dto) {
+    public Result<Void> save(@Validated({UserDTO.Create.class, Default.class}) @RequestBody UserDTO dto) {
         sysUserService.saveUser(dto);
         return Result.success();
     }

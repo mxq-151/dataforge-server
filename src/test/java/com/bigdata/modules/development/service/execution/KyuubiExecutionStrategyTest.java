@@ -17,7 +17,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * KyuubiExecutionStrategy 集成测试（直连真实Kyuubi服务）
  * <p>
- * 连接目标：kyuubi.com:10099
+ * 连接目标由 {@code KYUUBI_REST_URL} 环境变量（或 {@code -Dkyuubi.rest.url}）指定，
+ * 未配置或 REST 不可达时集成用例按条件跳过，不伪造通过。
  * 验证完整REST API调用链：
  * 1. buildBaseUrl / createAuthHeaders / buildSessionConfiguration（纯逻辑方法，反射测试）
  * 2. testConnection（创建Session + 关闭Session）
@@ -25,20 +26,35 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * 4. listTables（同上流程，SQL为 SHOW TABLES IN xxx）
  * 5. listColumns（同上流程，SQL为 DESCRIBE db.table）
  */
-@DisplayName("KyuubiExecutionStrategy 集成测试（直连kyuubi.com:10099）")
+@DisplayName("KyuubiExecutionStrategy 集成测试（直连 Kyuubi REST）")
 class KyuubiExecutionStrategyTest {
 
-    private static final String KYUUBI_URL = "http://kyuubi.com:10099";
-    private static final String KYUUBI_USERNAME = "mxq";
+    private static final String KYUUBI_URL = resolveKyuubiUrl();
+    private static final String KYUUBI_USERNAME = "test_tenant";
     private static final String KYUUBI_PASSWORD = "";
 
     /** 外部 Kyuubi 是否可达；不可达时集成测试按条件跳过，不伪造通过。 */
-    private static final boolean KYUUBI_REACHABLE = probeKyuubi();
+    private static final boolean KYUUBI_REACHABLE = probeKyuubi(KYUUBI_URL);
 
-    private static boolean probeKyuubi() {
-        try (java.net.Socket socket = new java.net.Socket()) {
-            socket.connect(new java.net.InetSocketAddress("kyuubi.com", 10099), 1500);
-            return true;
+    private static String resolveKyuubiUrl() {
+        String url = System.getProperty("kyuubi.rest.url");
+        if (url == null || url.isBlank()) {
+            url = System.getenv("KYUUBI_REST_URL");
+        }
+        return url == null || url.isBlank() ? null : url.trim().replaceAll("/+$", "");
+    }
+
+    private static boolean probeKyuubi(String baseUrl) {
+        if (baseUrl == null) {
+            return false;
+        }
+        try {
+            java.net.HttpURLConnection conn =
+                    (java.net.HttpURLConnection) java.net.URI.create(baseUrl + "/api/v1/version").toURL().openConnection();
+            conn.setConnectTimeout(1500);
+            conn.setReadTimeout(1500);
+            conn.setRequestMethod("GET");
+            return conn.getResponseCode() == 200;
         } catch (Exception e) {
             return false;
         }
@@ -46,8 +62,8 @@ class KyuubiExecutionStrategyTest {
 
     private static void requireKyuubi() {
         assumeTrue(KYUUBI_REACHABLE,
-                "Kyuubi 服务 kyuubi.com:10099 不可达，跳过集成测试；"
-                        + "需要运行这批用例时请先接入 Kyuubi 集群");
+                "Kyuubi REST 不可达：请设置 KYUUBI_REST_URL（或 -Dkyuubi.rest.url）指向 Kyuubi "
+                        + "REST 服务，且 /api/v1/version 返回 200；当前未配置时跳过集成测试");
     }
 
     private KyuubiExecutionStrategy strategy;
@@ -174,7 +190,7 @@ class KyuubiExecutionStrategyTest {
 
             boolean result = strategy.testConnection(config);
 
-            assertTrue(result, "连接kyuubi.com:10099应成功");
+            assertTrue(result, "连接 " + KYUUBI_URL + " 应成功");
         }
     }
 

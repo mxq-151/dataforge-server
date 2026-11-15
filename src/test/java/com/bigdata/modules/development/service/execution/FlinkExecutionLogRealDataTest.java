@@ -1,6 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +10,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -16,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @SpringBootTest
 @DisplayName("Flink执行策略 - 日志实时推送与客户端拉取集成测试")
@@ -30,6 +34,9 @@ class FlinkExecutionLogRealDataTest {
     @Autowired
     private ProcessManager processManager;
 
+    @Autowired
+    private EngineProperties engineProperties;
+
     @BeforeEach
     void setUp() {
         SecurityContextHolder.clearContext();
@@ -37,6 +44,35 @@ class FlinkExecutionLogRealDataTest {
         List<String> activeIds = processManager.getRunningProcesses(1L)
                 .stream().map(p -> (String) p.get("executionId")).toList();
         executionLogListener.cleanupCompletedBuffers(activeIds);
+    }
+
+    /**
+     * FlinkExecutionStrategy 通过本地 CLI（{@code ${engine.flink.home}/bin/flink}）提交，
+     * 不会连接 Docker 内 JM 的 REST 端口，因此只认本机可执行文件。
+     */
+    private void requireLocalFlinkCli() {
+        String command = engineProperties.getFlink().getFlinkCommand();
+        assumeTrue(isExecutableCommand(command),
+                () -> "需要本机 Flink CLI：" + command
+                        + " 不存在或不可执行（engine.flink.home 指向本地安装目录，"
+                        + "Docker 内 Flink 无法被 CLI 提交复用）");
+    }
+
+    private static boolean isExecutableCommand(String command) {
+        if (command == null || command.isBlank()) {
+            return false;
+        }
+        Path path = Path.of(command);
+        if (command.contains("/")) {
+            return Files.isExecutable(path);
+        }
+        String pathEnv = System.getenv().getOrDefault("PATH", "");
+        for (String dir : pathEnv.split(java.io.File.pathSeparator)) {
+            if (!dir.isBlank() && Files.isExecutable(Path.of(dir, command))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @AfterEach
@@ -79,9 +115,9 @@ class FlinkExecutionLogRealDataTest {
     class LogPushMechanismTests {
 
         @Test
-        @Disabled("需要真实Flink环境，集成测试时启用")
         @DisplayName("✅ Flink SQL执行 - 日志通过ExecutionLogListener推送到消费者")
         void testFlinkSqlExecution_LogsPushedToConsumer() {
+            requireLocalFlinkCli();
             System.out.println("\n=== 场景1.1: Flink SQL日志推送验证 ===");
             setUpAdminSecurityContext();
 
@@ -126,9 +162,9 @@ class FlinkExecutionLogRealDataTest {
         }
 
         @Test
-        @Disabled("需要真实Flink环境，集成测试时启用")
         @DisplayName("✅ Flink Job执行 - 日志推送到消费者")
         void testFlinkJobExecution_LogsPushedToConsumer() {
+            requireLocalFlinkCli();
             System.out.println("\n=== 场景1.2: Flink Job日志推送验证 ===");
             setUpAdminSecurityContext();
 

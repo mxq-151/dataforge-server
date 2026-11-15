@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  HBase standalone（单 JVM：内嵌 ZooKeeper + HMaster + HRegionServer）。
+
+  与镜像自带配置的差异：
+    * rootdir / zk 数据 / tmp 全部落到 /hbase-data（命名卷 df-hbase-data），
+      避免容器重建丢表；
+    * 保持 distributed=false，保证 Master 与 RegionServer 同进程；
+    * unsafe.stream.capability.enforce=false：本地文件系统（file://）下必需。
+-->
+<configuration>
+  <property>
+    <name>hbase.cluster.distributed</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hbase.rootdir</name>
+    <value>file:///hbase-data/hbase</value>
+  </property>
+  <property>
+    <name>hbase.tmp.dir</name>
+    <value>/hbase-data/tmp</value>
+  </property>
+  <property>
+    <name>hbase.zookeeper.property.dataDir</name>
+    <value>/hbase-data/zk</value>
+  </property>
+  <property>
+    <name>hbase.zookeeper.property.clientPort</name>
+    <value>2181</value>
+  </property>
+  <property>
+    <name>hbase.unsafe.stream.capability.enforce</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>hbase.master.info.port</name>
+    <value>16010</value>
+  </property>
+  <property>
+    <name>hbase.regionserver.info.port</name>
+    <value>16030</value>
+  </property>
+</configuration>

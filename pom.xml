@@ -81,6 +81,17 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- ClickHouse JDBC 驱动（classifier=all 为 shaded 包，自带 http client 等依赖）。
+             DatasourceConnectionPoolManager 以 Class.forName("com.clickhouse.jdbc.ClickHouseDriver")
+             反射加载，驱动必须在应用 classpath 上，因此打入 fat jar；
+             engine.jar.base-path 只用于 Spark/Flink 提交时的 jar 依赖，不能给服务端补驱动。 -->
+        <dependency>
+            <groupId>com.clickhouse</groupId>
+            <artifactId>clickhouse-jdbc</artifactId>
+            <version>0.7.2</version>
+            <classifier>all</classifier>
+        </dependency>
+
         <!-- PostgreSQL Driver (All-in-One 镜像使用 PG 作为元数据库,同时支持 PG 外部数据源) -->
         <dependency>
             <groupId>org.postgresql</groupId>

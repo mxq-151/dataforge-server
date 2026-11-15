@@ -2,6 +2,7 @@ package com.bigdata.modules.system.controller;
 
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.common.test.ContractMockMvcSupport;
 import com.bigdata.common.utils.AesUtils;
 import com.bigdata.common.utils.PasswordUtils;
 import com.bigdata.common.vo.Result;
@@ -12,14 +13,18 @@ import com.bigdata.modules.system.mapper.SysUserMapper;
 import com.bigdata.modules.system.vo.SysUserVO;
 import com.bigdata.modules.system.vo.UserInfoVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.hamcrest.Matcher;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import java.util.concurrent.CountDownLatch;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.annotation.Rollback;
 
@@ -27,7 +32,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @Transactional
@@ -44,9 +54,14 @@ class UserControllerIntegrationTest {
     @Autowired
     private AesUtils aesUtils;
 
+    private static final ObjectMapper MAPPER = ContractMockMvcSupport.productionObjectMapper();
+
+    private MockMvc mockMvc;
+
     @BeforeEach
     void setUp() {
         SecurityContextHolder.clearContext();
+        mockMvc = ContractMockMvcSupport.productionMockMvc(userController);
     }
 
     @AfterEach
@@ -90,6 +105,19 @@ class UserControllerIntegrationTest {
         dto.setPhone("13800138000");
         dto.setStatus(1);
         return dto;
+    }
+
+    /**
+     * 走 MockMvc 而不是直接调用 Controller 方法：{@code @Validated} 标注在 @RequestBody 参数上，
+     * 由 Spring MVC 的参数解析器触发校验；直接调用普通方法会绕过整段 MVC 处理链。
+     */
+    private void assertCreateRejected(UserDTO dto, Matcher<? super String> messageMatcher) throws Exception {
+        mockMvc.perform(post("/system/user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(MAPPER.writeValueAsString(dto)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(messageMatcher));
     }
 
     @Nested
@@ -139,28 +167,29 @@ class UserControllerIntegrationTest {
             System.out.println("  非管理员创建用户被正确拒绝 ✓");
         }
 
-        @Disabled("直接调用Controller方法时，Spring的@Validated注解不会触发（需要AOP拦截器），因此空用户名无法被自动校验")
         @Test
         @DisplayName("❌ 创建用户时用户名为空 - 校验失败")
-        void testCreateUserWithEmptyUsername() {
+        void testCreateUserWithEmptyUsername() throws Exception {
             System.out.println("\n=== 场景1.3: 用户名为空 ===");
 
             SysUser adminUser = createTestUser("test_admin_empty", "123456", 1);
             setUpSecurityContext(adminUser.getId(), "test_admin_empty", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("", "password123");
+            // buildCreateUserDTO 由用户名拼邮箱，空用户名会得到 "@test.com"，
+            // 那样会同时触发 @Email 校验、掩盖本用例要验证的用户名约束。
+            dto.setEmail("empty_name@test.com");
 
-            assertThrows(Exception.class, () -> {
-                userController.save(dto);
-            }, "用户名为空应抛出校验异常");
+            // 空串同时违反 @NotBlank(Create) 与 @Size(Default)，两个分组各自报错，
+            // Hibernate Validator 不保证跨分组顺序，这里接受两种合法提示。
+            assertCreateRejected(dto, anyOf(is("用户名不能为空"), is("用户名长度必须在3-50字符之间")));
 
             System.out.println("  空用户名校验通过 ✓");
         }
 
-        @Disabled("直接调用Controller方法时，Spring的@Validated注解不会触发（需要AOP拦截器），因此短密码无法被自动校验")
         @Test
         @DisplayName("❌ 创建用户时密码过短 - 校验失败")
-        void testCreateUserWithShortPassword() {
+        void testCreateUserWithShortPassword() throws Exception {
             System.out.println("\n=== 场景1.4: 密码过短 ===");
 
             SysUser adminUser = createTestUser("test_admin_shortpwd", "123456", 1);
@@ -168,17 +197,14 @@ class UserControllerIntegrationTest {
 
             UserDTO dto = buildCreateUserDTO("user_short_pwd", "12345");
 
-            assertThrows(Exception.class, () -> {
-                userController.save(dto);
-            }, "密码过短应抛出校验异常");
+            assertCreateRejected(dto, is("密码长度必须在6-20位之间"));
 
             System.out.println("  短密码校验通过 ✓");
         }
 
-        @Disabled("直接调用Controller方法时，Spring的@Validated注解不会触发（需要AOP拦截器），因此无效邮箱格式无法被自动校验")
         @Test
         @DisplayName("❌ 创建用户时邮箱格式错误 - 校验失败")
-        void testCreateUserWithInvalidEmail() {
+        void testCreateUserWithInvalidEmail() throws Exception {
             System.out.println("\n=== 场景1.5: 邮箱格式错误 ===");
 
             SysUser adminUser = createTestUser("test_admin_email", "123456", 1);
@@ -187,9 +213,7 @@ class UserControllerIntegrationTest {
             UserDTO dto = buildCreateUserDTO("user_bad_email", "password123");
             dto.setEmail("invalid-email");
 
-            assertThrows(Exception.class, () -> {
-                userController.save(dto);
-            }, "无效邮箱格式应抛出校验异常");
+            assertCreateRejected(dto, is("邮箱格式不正确"));
 
             System.out.println("  无效邮箱格式校验通过 ✓");
         }
@@ -823,10 +847,9 @@ class UserControllerIntegrationTest {
             System.out.println("  最小长度用户名(3字符)创建成功 ✓");
         }
 
-        @Disabled("直接调用Controller方法时，Spring的@Validated注解不会触发（需要AOP拦截器），因此短用户名无法被自动校验")
         @Test
         @DisplayName("❌ 用户名长度边界 - 低于最小长度")
-        void testUsername_BelowMinLength() {
+        void testUsername_BelowMinLength() throws Exception {
             System.out.println("\n=== 场景9.2: 用户名低于最小长度 ===");
 
             SysUser adminUser = createTestUser("test_admin_belowmin", "123456", 1);
@@ -834,9 +857,7 @@ class UserControllerIntegrationTest {
 
             UserDTO dto = buildCreateUserDTO("ab", "password123");
 
-            assertThrows(Exception.class, () -> {
-                userController.save(dto);
-            }, "低于最小长度的用户名应被拒绝");
+            assertCreateRejected(dto, is("用户名长度必须在3-50字符之间"));
 
             System.out.println("  过短用户名被正确拒绝 ✓");
         }

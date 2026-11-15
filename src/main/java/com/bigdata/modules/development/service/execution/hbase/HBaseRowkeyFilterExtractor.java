@@ -1,6 +1,7 @@
 package com.bigdata.modules.development.service.execution.hbase;
 
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.*;
@@ -56,6 +57,8 @@ public class HBaseRowkeyFilterExtractor {
         } else if (expr instanceof OrExpression) {
             extractFromExpression(((OrExpression) expr).getLeftExpression(), conditions);
             extractFromExpression(((OrExpression) expr).getRightExpression(), conditions);
+        } else if (expr instanceof Parenthesis) {
+            extractFromExpression(((Parenthesis) expr).getExpression(), conditions);
         } else if (isRowkeyComparison(expr)) {
             HBaseRowkeyCondition cond = parseComparison(expr);
             if (cond != null) {
@@ -65,21 +68,28 @@ public class HBaseRowkeyFilterExtractor {
     }
 
     private static boolean isRowkeyComparison(Expression expr) {
-        if (expr instanceof EqualsTo || expr instanceof NotEqualsTo ||
-                expr instanceof GreaterThan || expr instanceof GreaterThanEquals ||
-                expr instanceof MinorThan || expr instanceof MinorThanEquals ||
-                expr instanceof LikeExpression || expr instanceof Between) {
-            ComparisonOperator binaryExpr = (ComparisonOperator) expr;
-            String leftColName = getColumnName(binaryExpr.getLeftExpression());
-            String rightColName = getColumnName(binaryExpr.getRightExpression());
-            return "ROWKEY".equalsIgnoreCase(leftColName) || "ROWKEY".equalsIgnoreCase(rightColName);
+        if (expr instanceof ComparisonOperator) {
+            ComparisonOperator comparison = (ComparisonOperator) expr;
+            return isRowkeyColumn(comparison.getLeftExpression())
+                    || isRowkeyColumn(comparison.getRightExpression());
+        }
+        if (expr instanceof LikeExpression) {
+            LikeExpression like = (LikeExpression) expr;
+            return isRowkeyColumn(like.getLeftExpression())
+                    || isRowkeyColumn(like.getRightExpression());
+        }
+        if (expr instanceof Between) {
+            return isRowkeyColumn(((Between) expr).getLeftExpression());
         }
         if (expr instanceof InExpression) {
             InExpression inExpr = (InExpression) expr;
-            String colName = getColumnName(inExpr.getLeftExpression());
-            return "ROWKEY".equalsIgnoreCase(colName);
+            return isRowkeyColumn(inExpr.getLeftExpression());
         }
         return false;
+    }
+
+    private static boolean isRowkeyColumn(Expression expr) {
+        return "ROWKEY".equalsIgnoreCase(getColumnName(expr));
     }
 
     private static String getColumnName(Expression expr) {

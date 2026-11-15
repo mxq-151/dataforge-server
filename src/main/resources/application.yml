@@ -424,3 +424,18 @@ runtime:
 
 
 
+
+# ============================================================================
+# 统一取数（/api/telemetry/**）
+#
+# 服务类型只收敛到 agentkit 的九个引擎；file 是 transport、ds/yarn 是接入方式，
+# 都不作为服务节点。os.cpu/os.memory/os.disk/log.slow_query 为声明未实现，
+# 查询会返回 NOT_IMPLEMENTED 且 data 恒为 null。
+# ============================================================================
+telemetry:
+  jmx:
+    # Jolokia 直连模板；{host} 在 host inventory 落地后替换。留空表示未配置。
+    jolokia-url-template: ''
+    # 服务端 JMX 桥地址模板；桥未部署时留空。两者都留空时
+    # spark.driver / flink.jobmanager 的 jvm.* 能力返回 NOT_CONFIGURED。
+    server-url-template: ''

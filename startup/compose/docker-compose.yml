@@ -25,4 +25,30 @@ services:
     # 宿主机 /Users/mxq/Desktop/tpcds 仅作为构建期 staging 源，容器运行不依赖它。
     # PostgreSQL 与 /opt/dataforge 默认仍写容器内，需要持久化时叠加
     # docker-compose.persist.yml（命名卷 df-pgdata / df-data）。
-    mem_limit: 8g
+    #
+    # 引擎验证环境（Doris/StarRocks/ClickHouse/HBase/Kafka/Pulsar）不在这里，
+    # 见 docker-compose.engines.yml；Hudi 复用本容器的 Spark，只需要 bundle jar。
+    environment:
+      # Flink 日志/运行时指标源地址；起 engines 的 flink profile 时由 .env.engines 注入。
+      # 留空表示未接入，/api/logs/sources 会如实显示 flink 源不可用。
+      FLINK_REST_URL: ${FLINK_REST_URL:-}
+      # standalone Flink 未开鉴权，但 runtime 源要求 token-ref 非空才启用；
+      # 这里给一个占位值（请求会带上该 header，Flink 忽略）。真实开鉴权时覆盖本变量。
+      FLINK_REST_TOKEN: ${FLINK_REST_TOKEN:-diag-local-noauth}
+      # 日志源覆盖配置（挂载自宿主机，见 volumes）. 只覆盖 logs.sources，其余配置走镜像内 application.yml。
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:/opt/dataforge-config/application-logs.yml
+    volumes:
+      # Hudi Spark bundle（由 build/dist/hudi 下载）；只在 Hudi 表读写时需要
+      - ../../build/dist/hudi/hudi-spark3.5-bundle_2.12-0.15.0.jar:/opt/spark/jars/hudi-spark3.5-bundle_2.12-0.15.0.jar:ro
+      # 引擎日志目录（宿主机 -> 容器只读）。各引擎把自身日志目录 bind 到同一宿主机根下，
+      # 主容器只读挂载，供 logs.sources[file].root-dirs 与 Flink jobmanager/taskmanager-log-dirs 读取。
+      - ${DATAFORGE_LOG_ROOT:-/Users/mxq/dataforge-logs}:/var/log/engines:ro
+      - ${DATAFORGE_LOG_ROOT:-/Users/mxq/dataforge-logs}/config:/opt/dataforge-config:ro
+    mem_limit: 7g
+    # 为什么是 7g：实测空闲占用约 4.0 GiB，7g 留出 3g 余量，同时给引擎验证环境腾内存。
+    # 跑 Spark 任务压测（多 executor / 大 shuffle）时如需调回 8g，按以下现象判断：
+    #   * docker stats 的 MEM USAGE 贴近 7GiB（>90%）且不回落；
+    #   * 容器日志出现 java.lang.OutOfMemoryError 或 YARN 容器被 kill（NM 日志 container ... killed）；
+    #   * Spark 任务失败信息含 "Container killed by YARN for exceeding memory limits"。
+    # 调回方式：临时把本行改成 8g 后 `docker compose up -d --force-recreate`（会重启主容器），
+    # 或直接 `docker update --memory 8g dataforge-allinone`（不重启，立即生效）。

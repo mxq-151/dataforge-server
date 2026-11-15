@@ -47,18 +47,33 @@ public class LogQueryDTO {
         this.cluster = cluster;
     }
 
+    /**
+     * @deprecated 由 telemetry 四元组的 {@code componentId} 取代；
+     *     在 agentkit v4 标识落地、调用方全部迁移到 {@code /api/telemetry/query} 后，
+     *     随下一个大版本一起移除。
+     */
+    @Deprecated(since = "2026-11")
     public String getComponentRole() {
         return componentRole;
     }
 
+    /** @deprecated 同上，改用 {@code componentId}。 */
+    @Deprecated(since = "2026-11")
     public void setComponentRole(String componentRole) {
         this.componentRole = componentRole;
     }
 
+    /**
+     * @deprecated 由 telemetry 四元组的 {@code dataTypeId} 取代（runtime→log.runtime 等）；
+     *     移除节点同 {@link #getComponentRole()}。
+     */
+    @Deprecated(since = "2026-11")
     public String getLogKind() {
         return logKind;
     }
 
+    /** @deprecated 同上，改用 {@code dataTypeId}。 */
+    @Deprecated(since = "2026-11")
     public void setLogKind(String logKind) {
         this.logKind = logKind;
     }

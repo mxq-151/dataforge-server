@@ -2,6 +2,7 @@ package com.bigdata.modules.system.controller;
 
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.common.test.ContractMockMvcSupport;
 import com.bigdata.common.utils.PasswordUtils;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.RoleDTO;
@@ -13,13 +14,16 @@ import com.bigdata.modules.system.vo.RoleDetailVO;
 import com.bigdata.modules.system.vo.SysRoleVO;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.annotation.Rollback;
 
@@ -27,6 +31,9 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @Transactional
@@ -76,9 +83,14 @@ class RoleControllerIntegrationTest {
     @Autowired
     private SysRoleProjectPermissionService sysRoleProjectPermissionService;
 
+    private static final ObjectMapper MAPPER = ContractMockMvcSupport.productionObjectMapper();
+
+    private MockMvc mockMvc;
+
     @BeforeEach
     void setUp() {
         SecurityContextHolder.clearContext();
+        mockMvc = ContractMockMvcSupport.productionMockMvc(roleController);
         setUpAdminSecurityContext();
     }
 
@@ -457,10 +469,9 @@ class RoleControllerIntegrationTest {
             System.out.println("  更新结果: 成功 ✓ (允许保持相同code)");
         }
 
-        @Disabled("直接调用Controller方法时，Spring的@Validated注解不会触发（需要AOP拦截器），因此空字段无法被自动校验")
         @Test
         @DisplayName("❌ 创建角色时必填字段缺失 - 校验失败")
-        void testCreateRole_MissingRequiredFields() {
+        void testCreateRole_MissingRequiredFields() throws Exception {
             System.out.println("\n=== 场景2.4: 创建角色 - 缺失必填字段 ===");
 
             RoleDTO dto1 = new RoleDTO();
@@ -468,20 +479,29 @@ class RoleControllerIntegrationTest {
             dto1.setRoleCode("TEST_CODE");
             dto1.setRoleType("BUSINESS_REQUESTER");
 
-            assertThrows(Exception.class, () -> {
-                roleController.save(dto1);
-            }, "roleName为空应校验失败");
+            assertCreateRoleRejected(dto1, "角色名称不能为空");
 
             RoleDTO dto2 = new RoleDTO();
             dto2.setRoleName("Test Role");
             dto2.setRoleCode("");
             dto2.setRoleType("BUSINESS_REQUESTER");
 
-            assertThrows(Exception.class, () -> {
-                roleController.save(dto2);
-            }, "roleCode为空应校验失败");
+            assertCreateRoleRejected(dto2, "角色编码不能为空");
 
             System.out.println("  校验结果: 必填字段校验通过 ✓");
+        }
+
+        /**
+         * 走 MockMvc 触发 @RequestBody 上的 {@code @Valid}；直接调用 Controller 方法会绕过
+         * Spring MVC 的参数校验链路，校验注解永远不会执行。
+         */
+        private void assertCreateRoleRejected(RoleDTO dto, String expectedMessage) throws Exception {
+            mockMvc.perform(post("/system/role")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(MAPPER.writeValueAsString(dto)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value(400))
+                    .andExpect(jsonPath("$.message").value(expectedMessage));
         }
     }
 

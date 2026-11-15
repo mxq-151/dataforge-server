@@ -45,13 +45,16 @@ public class LogController {
     private final LogChainService chainService;
     private final LogAccessProperties properties;
     private final LogExecutorRegistry executorRegistry;
+    private final com.bigdata.modules.telemetry.compat.LegacyLogTelemetryRouter engineRouter;
 
     public LogController(LogQueryService queryService, LogChainService chainService,
-                         LogAccessProperties properties, LogExecutorRegistry executorRegistry) {
+                         LogAccessProperties properties, LogExecutorRegistry executorRegistry,
+                         com.bigdata.modules.telemetry.compat.LegacyLogTelemetryRouter engineRouter) {
         this.queryService = queryService;
         this.chainService = chainService;
         this.properties = properties;
         this.executorRegistry = executorRegistry;
+        this.engineRouter = engineRouter;
     }
 
     /** 已配置的日志源；未配置地址的源返回 enabled=false 与原因 */
@@ -60,10 +63,11 @@ public class LogController {
         return Result.success(queryService.listSources());
     }
 
-    /** 统一检索 */
+    /** 统一检索：spark/flink 内部走 telemetry core，ds/yarn/file 保持旧实现 */
     @PostMapping("/query")
     public Result<LogQueryResultVO> query(@RequestBody LogQueryDTO dto) {
-        return Result.success(queryService.query(dto));
+        LogQueryResultVO routed = engineRouter.queryIfEngine(dto);
+        return Result.success(routed != null ? routed : queryService.query(dto));
     }
 
     /**
@@ -119,7 +123,8 @@ public class LogController {
                         && System.currentTimeMillis() < deadline) {
                     LogQueryDTO pageRequest = copy(base);
                     pageRequest.setCursor(pageCursor);
-                    LogQueryResultVO result = queryService.query(pageRequest);
+                    LogQueryResultVO routed = engineRouter.queryIfEngine(pageRequest);
+                    LogQueryResultVO result = routed != null ? routed : queryService.query(pageRequest);
                     emitter.send(SseEmitter.event().name("page")
                             .data(result, MediaType.APPLICATION_JSON));
                     pages++;

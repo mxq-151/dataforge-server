@@ -4,7 +4,6 @@ import org.apache.hadoop.hbase.filter.CompareFilter;
 import org.apache.hadoop.hbase.filter.SubstringComparator;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -66,8 +65,6 @@ class HBaseRowkeyFilterExtractorTest {
                 HBaseRowkeyFilterExtractor.extract("SELECT * FROM t WHERE ROWKEY <= 'z'").get(0).compareOp);
     }
 
-    @Disabled("待修复：LikeExpression 不实现 ComparisonOperator，isRowkeyComparison 强转抛 CCE，"
-            + "extract 吞异常后返回空列表，LIKE 条件整体丢失（阶段二报告 BUG-H1）")
     @Test
     @DisplayName("LIKE 'abc%'：按前缀处理（PREFIX）")
     void extractsPrefixLike() {
@@ -79,7 +76,6 @@ class HBaseRowkeyFilterExtractorTest {
         assertNull(conditions.get(0).compareOp);
     }
 
-    @Disabled("待修复：同 BUG-H1，LIKE 走强转分支直接抛 CCE，提取结果为空")
     @Test
     @DisplayName("LIKE '%abc%'：退化为正则比较器")
     void extractsContainsLikeAsRegex() {
@@ -90,7 +86,6 @@ class HBaseRowkeyFilterExtractorTest {
         assertEquals("%abc%", conditions.get(0).value);
     }
 
-    @Disabled("待修复：同 BUG-H1，LIKE 走强转分支直接抛 CCE")
     @Test
     @DisplayName("LIKE 中的正则元字符被转义")
     void escapesRegexMetacharactersInLike() {
@@ -103,7 +98,6 @@ class HBaseRowkeyFilterExtractorTest {
         assertTrue(regex.contains("\\."), regex);
     }
 
-    @Disabled("待修复：Between 不实现 ComparisonOperator，强转抛 CCE，BETWEEN 条件整体丢失（BUG-H2）")
     @Test
     @DisplayName("BETWEEN：保留 start/stop 字节")
     void extractsBetween() {
@@ -136,7 +130,6 @@ class HBaseRowkeyFilterExtractorTest {
         assertEquals(3, conditions.size());
     }
 
-    @Disabled("待修复：括号表达式(Parenthesis)未递归，括号内的 rowkey 条件会被静默丢弃（BUG-H3）")
     @Test
     @DisplayName("带括号的 AND/OR 组合同样必须完整提取")
     void extractsConditionsInsideParenthesis() {

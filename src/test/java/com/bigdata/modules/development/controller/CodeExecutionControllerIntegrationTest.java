@@ -1,9 +1,13 @@
 package com.bigdata.modules.development.controller;
 
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
 import com.bigdata.modules.development.service.execution.CodeExecutionResult;
+import com.bigdata.modules.devops.entity.DatasourceConfig;
+import com.bigdata.modules.devops.enums.DatasourceType;
+import com.bigdata.modules.devops.mapper.DatasourceConfigMapper;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -31,6 +35,12 @@ class CodeExecutionControllerIntegrationTest {
 
     @Autowired
     private CodeExecutionController codeExecutionController;
+
+    @Autowired
+    private DatasourceConfigMapper datasourceConfigMapper;
+
+    @Autowired
+    private AesUtils aesUtils;
 
     @BeforeEach
     void setUp() {
@@ -70,6 +80,23 @@ class CodeExecutionControllerIntegrationTest {
         request.setEngineType("mysql");
         request.setCodeContent(sql);
         return request;
+    }
+
+    /**
+     * 注册一个指向测试库自身的 PostgreSQL 数据源：SQL 执行用例需要一个真实可达的连接，
+     * 环境里没有 MySQL；PostgreSQL 就是本套测试自己连的库，连接参数可直接复用。
+     */
+    private String registerPostgresDatasource(String name) {
+        DatasourceConfig config = new DatasourceConfig();
+        config.setDatasourceName(name);
+        config.setDatasourceType(DatasourceType.POSTGRESQL);
+        config.setUrl("jdbc:postgresql://127.0.0.1:5432/dataforge_test");
+        config.setUsername("postgres");
+        config.setPassword(aesUtils.encryptStored("123456"));
+        config.setConnectionStatus(1);
+        config.setCreateBy(1L);
+        datasourceConfigMapper.insert(config);
+        return name;
     }
 
     private CodeExecutionRequest buildValidPythonRequest(String code) {
@@ -406,59 +433,60 @@ class CodeExecutionControllerIntegrationTest {
     class SqlExecutionTests {
 
         @Test
-        @Disabled("需要真实MySQL数据库连接，集成环境可启用")
         @DisplayName("✅ SQL SELECT查询 - 返回结果集")
         void testSqlSelectExecution_ReturnsResultSet() {
             System.out.println("\n=== 场景4.1: SQL SELECT查询执行 ===");
             setUpAdminSecurityContext();
 
+            String datasource = registerPostgresDatasource("it_pg_select_" + System.nanoTime());
             CodeExecutionRequest request = buildValidSqlRequest("SELECT 1 AS test_column");
+            request.setEngineType("postgresql");
+            request.setDatasources(List.of(datasource));
 
             Result<CodeExecutionResult> result = codeExecutionController.executeCode(request, null);
 
             assertNotNull(result, "结果不应为null");
-            if (result.getCode() == 200) {
-                assertNotNull(result.getData(), "成功时data不应为null");
-                CodeExecutionResult executionResult = result.getData();
-                assertTrue(executionResult.isSuccess(), "执行应成功");
-                assertNotNull(executionResult.getExecutionId(), "executionId不应为null");
-                System.out.println("  executionId: " + executionResult.getExecutionId());
-                System.out.println("  status: " + executionResult.getStatus());
-                System.out.println("  success: " + executionResult.isSuccess());
+            assertEquals(200, result.getCode(), "接口应正常返回");
+            assertNotNull(result.getData(), "成功时data不应为null");
+            CodeExecutionResult executionResult = result.getData();
+            assertTrue(executionResult.isSuccess(),
+                    "执行应成功: " + executionResult.getErrorMessage());
+            assertNotNull(executionResult.getExecutionId(), "executionId不应为null");
+            assertEquals(List.of("test_column"), executionResult.getColumns(), "应返回查询列");
+            assertEquals(1, executionResult.getRows().size(), "应返回1行");
+            assertEquals("1", executionResult.getRows().get(0).get(0), "查询结果应为1");
 
-                if (executionResult.getColumns() != null) {
-                    System.out.println("  列数: " + executionResult.getColumns().size());
-                    System.out.println("  列名: " + executionResult.getColumns());
-                }
-                if (executionResult.getRows() != null) {
-                    System.out.println("  行数: " + executionResult.getRows().size());
-                }
-                if (executionResult.getAffectedRows() != null) {
-                    System.out.println("  影响行数: " + executionResult.getAffectedRows());
-                }
-            } else {
-                System.out.println("  执行失败, code=" + result.getCode() + ", message=" + result.getMessage());
-            }
+            System.out.println("  executionId: " + executionResult.getExecutionId());
+            System.out.println("  列名: " + executionResult.getColumns());
+            System.out.println("  行数: " + executionResult.getRows().size());
         }
 
         @Test
-        @Disabled("需要真实MySQL数据库连接，集成环境可启用")
         @DisplayName("✅ SQL SELECT带数据源 - 使用指定数据源执行")
         void testSqlSelectWithDatasource_UsesSpecifiedDatasource() {
             System.out.println("\n=== 场景4.2: 带数据源的SQL查询 ===");
             setUpAdminSecurityContext();
 
-            CodeExecutionRequest request = buildValidSqlRequest("SELECT COUNT(*) AS cnt FROM information_schema.tables");
-            request.setDatasources(Arrays.asList("test_datasource"));
+            String datasource = registerPostgresDatasource("it_pg_datasource_" + System.nanoTime());
+            CodeExecutionRequest request = buildValidSqlRequest("SELECT current_database() AS db");
+            request.setEngineType("postgresql");
+            request.setDatasources(List.of(datasource));
 
             Result<CodeExecutionResult> result = codeExecutionController.executeCode(request, null);
 
             assertNotNull(result, "结果不应为null");
+            assertEquals(200, result.getCode(), "接口应正常返回");
+            CodeExecutionResult executionResult = result.getData();
+            assertNotNull(executionResult, "成功时data不应为null");
+            assertTrue(executionResult.isSuccess(),
+                    "执行应成功: " + executionResult.getErrorMessage());
+            assertEquals(List.of("db"), executionResult.getColumns(), "应返回查询列");
+            assertEquals("dataforge_test", executionResult.getRows().get(0).get(0),
+                    "查询应落在指定数据源的库上");
+
             System.out.println("  返回码: " + result.getCode());
-            if (result.getData() != null) {
-                System.out.println("  executionId: " + result.getData().getExecutionId());
-                System.out.println("  success: " + result.getData().isSuccess());
-            }
+            System.out.println("  executionId: " + executionResult.getExecutionId());
+            System.out.println("  当前库: " + executionResult.getRows().get(0).get(0));
         }
     }
 

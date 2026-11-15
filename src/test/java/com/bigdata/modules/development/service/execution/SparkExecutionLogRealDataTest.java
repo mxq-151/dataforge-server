@@ -1,6 +1,7 @@
 package com.bigdata.modules.development.service.execution;
 
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.modules.development.config.EngineProperties;
 import com.bigdata.modules.development.dto.CodeExecutionRequest;
 import com.bigdata.modules.devops.enums.DatasourceType;
 import org.junit.jupiter.api.*;
@@ -10,6 +11,8 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -18,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @SpringBootTest
 @DisplayName("Spark执行策略 - 日志实时推送与客户端拉取集成测试")
@@ -32,12 +36,45 @@ class SparkExecutionLogRealDataTest {
     @Autowired
     private ProcessManager processManager;
 
+    @Autowired
+    private EngineProperties engineProperties;
+
     @BeforeEach
     void setUp() {
         SecurityContextHolder.clearContext();
         processManager.cleanup();
         executionLogListener.cleanupCompletedBuffers(processManager.getRunningProcesses(1L)
                 .stream().map(p -> (String) p.get("executionId")).toList());
+    }
+
+    /**
+     * SparkExecutionStrategy 通过本地 spark-sql / spark-submit 提交，
+     * 因此只认本机可执行文件，而不是某个可达的 Spark 集群地址。
+     */
+    private void requireLocalSparkCli() {
+        String sparkSql = engineProperties.getSpark().getSparkSqlCommand();
+        String sparkSubmit = engineProperties.getSpark().getSparkSubmitCommand();
+        assumeTrue(isExecutableCommand(sparkSql) || isExecutableCommand(sparkSubmit),
+                () -> "需要本机 Spark CLI：" + sparkSql + " 或 " + sparkSubmit
+                        + " 不存在或不可执行（engine.spark.home 指向本地安装目录，"
+                        + "Docker 内 Spark 无法被本地 CLI 提交复用）");
+    }
+
+    private static boolean isExecutableCommand(String command) {
+        if (command == null || command.isBlank()) {
+            return false;
+        }
+        Path path = Path.of(command);
+        if (command.contains("/")) {
+            return Files.isExecutable(path);
+        }
+        String pathEnv = System.getenv().getOrDefault("PATH", "");
+        for (String dir : pathEnv.split(java.io.File.pathSeparator)) {
+            if (!dir.isBlank() && Files.isExecutable(Path.of(dir, command))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @AfterEach
@@ -68,9 +105,9 @@ class SparkExecutionLogRealDataTest {
     class LogPushMechanismTests {
 
         @Test
-        @Disabled("需要真实Spark环境，集成测试时启用")
         @DisplayName("✅ Spark SQL执行 - 日志通过ExecutionLogListener推送到消费者")
         void testSparkSqlExecution_LogsPushedToConsumer() {
+            requireLocalSparkCli();
             System.out.println("\n=== 场景1.1: Spark SQL日志推送验证 ===");
             setUpAdminSecurityContext();
 
@@ -119,9 +156,9 @@ class SparkExecutionLogRealDataTest {
     class ClientPullSparkLogsTests {
 
         @Test
-        @Disabled("需要真实Spark环境，集成测试时启用")
         @DisplayName("✅ Spark执行过程中 - 客户端可增量拉取日志")
         void testSparkExecution_ClientCanPullIncrementalLogs() throws Exception {
+            requireLocalSparkCli();
             System.out.println("\n=== 场景2.1: 客户端增量拉取Spark日志 ===");
             setUpAdminSecurityContext();
 

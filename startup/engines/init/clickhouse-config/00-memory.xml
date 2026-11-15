@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<!--
+  ClickHouse 内存上限（容器 mem_limit = 1g）。
+
+  为什么要单独限：ClickHouse 默认 max_server_memory_usage_to_ram_ratio = 0.9，
+  按容器 1 GiB 算是 ~921 MiB，留给进程/线程栈/jemalloc 元数据的余量不足 100 MiB，
+  在 page cache 高位时容易被 cgroup OOMKill（进程直接被杀，而不是抛内存异常）。
+  0.8 => ~819 MiB 服务端配额，约 200 MiB 容器开销缓冲。
+-->
+<clickhouse>
+    <max_server_memory_usage_to_ram_ratio>0.8</max_server_memory_usage_to_ram_ratio>
+    <mark_cache_size>134217728</mark_cache_size>
+    <uncompressed_cache_size>67108864</uncompressed_cache_size>
+</clickhouse>
