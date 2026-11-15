@@ -303,13 +303,17 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
     public void batchDeleteTablesByEngineAndNames(Set<String> tableKeys) {
         if (tableKeys == null || tableKeys.isEmpty()) return;
 
-        List<String> storageEngines = new ArrayList<>();
+        List<DatasourceType> storageEngines = new ArrayList<>();
         List<String> dbNames = new ArrayList<>();
         List<String> tblNames = new ArrayList<>();
         for (String key : tableKeys) {
             String[] parts = key.split(DELIMITER);
             if (parts.length == 3) {
-                storageEngines.add(parts[0]);
+                DatasourceType engine = parseStorageEngine(parts[0]);
+                if (engine == null) {
+                    continue;
+                }
+                storageEngines.add(engine);
                 dbNames.add(parts[1]);
                 tblNames.add(parts[2]);
             }
@@ -336,6 +340,22 @@ public class TableMetadataService extends ServiceImpl<TableMetadataMapper, Table
 
         removeByIds(tableIds);
         pruneCatalogSnapshot(tableIds);
+    }
+
+    /**
+     * 表键里的存储引擎可能是枚举名（{@code HIVE}），也可能是落库码（{@code hive}）。
+     * 统一解析为枚举后再查询，交给 {@code @EnumValue} 处理器按库中口径比较。
+     */
+    private DatasourceType parseStorageEngine(String value) {
+        DatasourceType engine = DatasourceType.fromCode(value);
+        if (engine != null) {
+            return engine;
+        }
+        try {
+            return DatasourceType.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**

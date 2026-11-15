@@ -2,6 +2,7 @@ package com.bigdata.modules.system.controller;
 
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.common.utils.PasswordUtils;
 import com.bigdata.common.vo.Result;
 import com.bigdata.modules.system.dto.ChangePasswordDTO;
@@ -39,6 +40,9 @@ class UserControllerIntegrationTest {
 
     @Autowired
     private SysUserMapper sysUserMapper;
+
+    @Autowired
+    private AesUtils aesUtils;
 
     @BeforeEach
     void setUp() {
@@ -98,7 +102,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景1.1: 管理员创建用户成功 ===");
 
             SysUser adminUser = createTestUser("test_admin_create", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_create", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_create", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("new_user_001", "password123");
 
@@ -142,7 +146,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景1.3: 用户名为空 ===");
 
             SysUser adminUser = createTestUser("test_admin_empty", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_empty", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_empty", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("", "password123");
 
@@ -160,7 +164,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景1.4: 密码过短 ===");
 
             SysUser adminUser = createTestUser("test_admin_shortpwd", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_shortpwd", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_shortpwd", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("user_short_pwd", "12345");
 
@@ -178,7 +182,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景1.5: 邮箱格式错误 ===");
 
             SysUser adminUser = createTestUser("test_admin_email", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_email", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_email", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("user_bad_email", "password123");
             dto.setEmail("invalid-email");
@@ -202,7 +206,7 @@ class UserControllerIntegrationTest {
 
             SysUser adminUser = createTestUser("test_admin_update", "123456", 1);
             SysUser targetUser = createTestUser("target_user_update", "oldpass", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_update", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_update", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = new UserDTO();
             dto.setId(targetUser.getId());
@@ -262,7 +266,7 @@ class UserControllerIntegrationTest {
             createTestUser("list_user_001", "123456", 0);
             createTestUser("list_user_002", "123456", 0);
             createTestUser("list_user_003", "123456", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_list", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_list", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Page<SysUserVO>> result = userController.getList(1, 10, null, null);
 
@@ -288,7 +292,7 @@ class UserControllerIntegrationTest {
             SysUser adminUser = createTestUser("test_admin_search", "123456", 1);
             createTestUser("search_target_001", "123456", 0);
             createTestUser("search_other_001", "123456", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_search", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_search", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Page<SysUserVO>> result = userController.getList(1, 10, "search_target", null);
 
@@ -323,7 +327,7 @@ class UserControllerIntegrationTest {
             disabledUser.setIsAdmin(0);
             sysUserMapper.insert(disabledUser);
 
-            setUpSecurityContext(adminUser.getId(), "test_admin_status", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_status", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Page<SysUserVO>> resultEnabled = userController.getList(1, 10, null, 1);
             Result<Page<SysUserVO>> resultDisabled = userController.getList(1, 10, null, 0);
@@ -356,7 +360,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景3.5: 分页参数边界 ===");
 
             SysUser adminUser = createTestUser("test_admin_page", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_page", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_page", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Page<SysUserVO>> resultLargePage = userController.getList(999, 1, null, null);
             assertNotNull(resultLargePage.getData(), "大页码查询不应抛异常");
@@ -377,7 +381,7 @@ class UserControllerIntegrationTest {
 
             SysUser adminUser = createTestUser("test_admin_detail", "123456", 1);
             SysUser targetUser = createTestUser("detail_target", "123456", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_detail", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_detail", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<UserInfoVO> result = userController.getById(targetUser.getId());
 
@@ -435,7 +439,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景4.4: 查询不存在的用户 ===");
 
             SysUser adminUser = createTestUser("test_admin_notfound", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_notfound", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_notfound", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Long nonExistentId = 99999999L;
 
@@ -459,7 +463,7 @@ class UserControllerIntegrationTest {
             SysUser adminUser = createTestUser("test_admin_delete", "123456", 1);
             SysUser targetUser = createTestUser("delete_target", "123456", 0);
             Long targetId = targetUser.getId();
-            setUpSecurityContext(adminUser.getId(), "test_admin_delete", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_delete", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Void> result = userController.delete(targetId);
 
@@ -499,7 +503,7 @@ class UserControllerIntegrationTest {
 
             SysUser adminUser = createTestUser("test_admin_deladmin", "123456", 1);
             SysUser adminTarget = createTestUser("admin_target_del", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_deladmin", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_deladmin", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             try {
                 userController.delete(adminTarget.getId());
@@ -518,7 +522,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景5.4: 删除不存在的用户 ===");
 
             SysUser adminUser = createTestUser("test_admin_delnotfound", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_delnotfound", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_delnotfound", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Long nonExistentId = 99999998L;
 
@@ -541,7 +545,7 @@ class UserControllerIntegrationTest {
 
             SysUser adminUser = createTestUser("test_admin_dup", "123456", 1);
             createTestUser("duplicate_user", "123456", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_dup", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_dup", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("duplicate_user", "newpassword123");
 
@@ -559,7 +563,7 @@ class UserControllerIntegrationTest {
 
             SysUser adminUser = createTestUser("test_admin_diff", "123456", 1);
             createTestUser("existing_user", "123456", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_diff", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_diff", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("new_unique_user", "password123");
 
@@ -582,7 +586,7 @@ class UserControllerIntegrationTest {
 
             SysUser adminUser = createTestUser("test_admin_disable", "123456", 1);
             SysUser targetUser = createTestUser("status_disable_target", "123456", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_disable", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_disable", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Void> result = userController.changeStatus(targetUser.getId(), 0);
 
@@ -611,7 +615,7 @@ class UserControllerIntegrationTest {
             disabledUser.setIsAdmin(0);
             sysUserMapper.insert(disabledUser);
 
-            setUpSecurityContext(adminUser.getId(), "test_admin_enable", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_enable", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Void> result = userController.changeStatus(disabledUser.getId(), 1);
 
@@ -646,7 +650,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景7.4: 修改不存在的用户状态 ===");
 
             SysUser adminUser = createTestUser("test_admin_status_nf", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_status_nf", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_status_nf", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Long nonExistentId = 99999997L;
 
@@ -670,7 +674,7 @@ class UserControllerIntegrationTest {
             SysUser adminUser = createTestUser("test_admin_resetpwd", "123456", 1);
             SysUser targetUser = createTestUser("resetpwd_target", "original_password", 0);
             String originalPassword = targetUser.getPassword();
-            setUpSecurityContext(adminUser.getId(), "test_admin_resetpwd", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_resetpwd", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Void> result = userController.resetPassword(targetUser.getId());
 
@@ -711,9 +715,9 @@ class UserControllerIntegrationTest {
             setUpSecurityContext(normalUser.getId(), "test_changepwd_self", Arrays.asList("ROLE_USER"));
 
             ChangePasswordDTO dto = new ChangePasswordDTO();
-            dto.setOldPassword("old_password_123");
-            dto.setNewPassword("new_password_456");
-            dto.setConfirmPassword("new_password_456");
+            dto.setOldPassword(aesUtils.encrypt("old_password_123"));
+            dto.setNewPassword(aesUtils.encrypt("new_password_456"));
+            dto.setConfirmPassword(aesUtils.encrypt("new_password_456"));
 
             Result<Void> result = userController.changePassword(dto);
 
@@ -731,9 +735,9 @@ class UserControllerIntegrationTest {
             setUpSecurityContext(normalUser.getId(), "test_changepwd_wrong", Arrays.asList("ROLE_USER"));
 
             ChangePasswordDTO dto = new ChangePasswordDTO();
-            dto.setOldPassword("wrong_old_pass");
-            dto.setNewPassword("new_password_789");
-            dto.setConfirmPassword("new_password_789");
+            dto.setOldPassword(aesUtils.encrypt("wrong_old_pass"));
+            dto.setNewPassword(aesUtils.encrypt("new_password_789"));
+            dto.setConfirmPassword(aesUtils.encrypt("new_password_789"));
 
             assertThrows(Exception.class, () -> {
                 userController.changePassword(dto);
@@ -751,9 +755,9 @@ class UserControllerIntegrationTest {
             setUpSecurityContext(normalUser.getId(), "test_changepwd_mismatch", Arrays.asList("ROLE_USER"));
 
             ChangePasswordDTO dto = new ChangePasswordDTO();
-            dto.setOldPassword("old_pass_123");
-            dto.setNewPassword("new_pass_111");
-            dto.setConfirmPassword("new_pass_222");
+            dto.setOldPassword(aesUtils.encrypt("old_pass_123"));
+            dto.setNewPassword(aesUtils.encrypt("new_pass_111"));
+            dto.setConfirmPassword(aesUtils.encrypt("new_pass_222"));
 
             assertThrows(Exception.class, () -> {
                 userController.changePassword(dto);
@@ -770,9 +774,9 @@ class UserControllerIntegrationTest {
             SecurityContextHolder.clearContext();
 
             ChangePasswordDTO dto = new ChangePasswordDTO();
-            dto.setOldPassword("some_old_pass");
-            dto.setNewPassword("new_pass_000");
-            dto.setConfirmPassword("new_pass_000");
+            dto.setOldPassword(aesUtils.encrypt("some_old_pass"));
+            dto.setNewPassword(aesUtils.encrypt("new_pass_000"));
+            dto.setConfirmPassword(aesUtils.encrypt("new_pass_000"));
 
             assertThrows(BusinessException.class, () -> {
                 userController.changePassword(dto);
@@ -787,7 +791,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景8.7: 重置不存在的用户密码 ===");
 
             SysUser adminUser = createTestUser("test_admin_reset_nf", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_reset_nf", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_reset_nf", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Long nonExistentId = 99999996L;
 
@@ -809,7 +813,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.1: 用户名最小长度 ===");
 
             SysUser adminUser = createTestUser("test_admin_minlen", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_minlen", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_minlen", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("abc", "password123");
 
@@ -826,7 +830,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.2: 用户名低于最小长度 ===");
 
             SysUser adminUser = createTestUser("test_admin_belowmin", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_belowmin", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_belowmin", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("ab", "password123");
 
@@ -843,7 +847,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.3: 特殊字符用户名 ===");
 
             SysUser adminUser = createTestUser("test_admin_special", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_special", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_special", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = buildCreateUserDTO("user@#$%", "password123");
 
@@ -862,7 +866,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.4: 所有字段为空 ===");
 
             SysUser adminUser = createTestUser("test_admin_emptyall", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_emptyall", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_emptyall", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = new UserDTO();
 
@@ -880,7 +884,7 @@ class UserControllerIntegrationTest {
 
             SysUser adminUser = createTestUser("test_admin_partial", "123456", 1);
             SysUser targetUser = createTestUser("partial_update_target", "123456", 0);
-            setUpSecurityContext(adminUser.getId(), "test_admin_partial", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_partial", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             UserDTO dto = new UserDTO();
             dto.setId(targetUser.getId());
@@ -899,7 +903,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.6: 负数用户ID ===");
 
             SysUser adminUser = createTestUser("test_admin_negid", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_negid", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_negid", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             assertThrows(Exception.class, () -> {
                 userController.getById(-1L);
@@ -914,7 +918,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.7: Null参数处理 ===");
 
             SysUser adminUser = createTestUser("test_admin_nullparam", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_nullparam", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_nullparam", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             Result<Page<SysUserVO>> result = userController.getList(1, 10, null, null);
             assertNotNull(result, "null搜索参数不应导致异常");
@@ -929,7 +933,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.8: 大量数据分页 ===");
 
             SysUser adminUser = createTestUser("test_admin_bulk", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_bulk", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_bulk", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             for (int i = 1; i <= 15; i++) {
                 createTestUser("bulk_user_" + String.format("%03d", i), "123456", 0);
@@ -955,7 +959,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景9.9: 并发创建用户 ===");
 
             SysUser adminUser = createTestUser("test_admin_concurrent", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_concurrent", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_concurrent", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             int threadCount = 5;
             Thread[] threads = new Thread[threadCount];
@@ -1004,7 +1008,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景10.1: 完整用户生命周期 ===");
 
             SysUser adminUser = createTestUser("test_admin_lifecycle", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_lifecycle", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_lifecycle", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             String testUsername = "lifecycle_user_001";
 
@@ -1060,7 +1064,7 @@ class UserControllerIntegrationTest {
             System.out.println("\n=== 场景10.2: 批量用户操作 ===");
 
             SysUser adminUser = createTestUser("test_admin_batch", "123456", 1);
-            setUpSecurityContext(adminUser.getId(), "test_admin_batch", Arrays.asList("ROLE_ADMIN"));
+            setUpSecurityContext(adminUser.getId(), "test_admin_batch", Arrays.asList("ROLE_SUPER_ADMIN"));
 
             List<Long> userIds = new ArrayList<>();
             for (int i = 1; i <= 5; i++) {

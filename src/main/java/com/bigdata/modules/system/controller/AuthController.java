@@ -13,6 +13,7 @@ import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysRoleProjectPermission;
 import com.bigdata.modules.system.entity.SysTenant;
 import com.bigdata.modules.system.entity.SysUser;
+import com.bigdata.modules.system.enums.RoleType;
 import com.bigdata.modules.system.mapper.SysMenuPermissionMapper;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysRoleMenuPermissionMapper;
@@ -106,7 +107,7 @@ public class AuthController {
 
         Set<String> roleSet = new LinkedHashSet<>();
         if (Integer.valueOf(1).equals(user.getIsAdmin())) {
-            roleSet.add("ROLE_SUPER_ADMIN");
+            roleSet.add(RoleType.SUPER_ADMIN.getAuthority());
         }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);
@@ -156,8 +157,8 @@ public class AuthController {
         if (Integer.valueOf(1).equals(user.getIsAdmin())) {
             SysRoleVO adminRole = new SysRoleVO();
             adminRole.setRoleName("超级管理员");
-            adminRole.setRoleCode("SUPER_ADMIN");
-            adminRole.setRoleType("SUPER_ADMIN");
+            adminRole.setRoleCode(RoleType.SUPER_ADMIN.getCode());
+            adminRole.setRoleType(RoleType.SUPER_ADMIN.getCode());
             roleVOList.add(adminRole);
         }
         if (!CollectionUtils.isEmpty(roleIds)) {

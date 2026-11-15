@@ -12,6 +12,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * KyuubiExecutionStrategy 集成测试（直连真实Kyuubi服务）
@@ -30,6 +31,24 @@ class KyuubiExecutionStrategyTest {
     private static final String KYUUBI_URL = "http://kyuubi.com:10099";
     private static final String KYUUBI_USERNAME = "mxq";
     private static final String KYUUBI_PASSWORD = "";
+
+    /** 外部 Kyuubi 是否可达；不可达时集成测试按条件跳过，不伪造通过。 */
+    private static final boolean KYUUBI_REACHABLE = probeKyuubi();
+
+    private static boolean probeKyuubi() {
+        try (java.net.Socket socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress("kyuubi.com", 10099), 1500);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static void requireKyuubi() {
+        assumeTrue(KYUUBI_REACHABLE,
+                "Kyuubi 服务 kyuubi.com:10099 不可达，跳过集成测试；"
+                        + "需要运行这批用例时请先接入 Kyuubi 集群");
+    }
 
     private KyuubiExecutionStrategy strategy;
 
@@ -150,6 +169,7 @@ class KyuubiExecutionStrategyTest {
         @Test
         @DisplayName("成功创建并关闭Session")
         void testConnectionSuccess() {
+            requireKyuubi();
             DatasourceConfig config = createRealDatasourceConfig();
 
             boolean result = strategy.testConnection(config);
@@ -165,6 +185,7 @@ class KyuubiExecutionStrategyTest {
         @Test
         @DisplayName("获取数据库列表不为空")
         void testListDatabasesNotEmpty() {
+            requireKyuubi();
             DatasourceConfig config = createRealDatasourceConfig();
 
             List<String> databases = strategy.listDatabases(config);
@@ -182,6 +203,7 @@ class KyuubiExecutionStrategyTest {
         @Test
         @DisplayName("获取指定库下的表列表")
         void testListTablesInDatabase() {
+            requireKyuubi();
             DatasourceConfig config = createRealDatasourceConfig();
 
             // 先获取可用的数据库
@@ -213,6 +235,7 @@ class KyuubiExecutionStrategyTest {
         @Test
         @DisplayName("获取指定表的字段信息")
         void testListColumnsOfTable() {
+            requireKyuubi();
             DatasourceConfig config = createRealDatasourceConfig();
 
             // 获取数据库和表

@@ -24,7 +24,7 @@ class JwtTokenUtilsRealDataTest {
 
     private Long testUserId = 1001L;
     private String testUsername = "testuser";
-    private String testRole = "ROLE_USER,ROLE_ADMIN";
+    private String testRole = "ROLE_USER,ROLE_SUPER_ADMIN";
     private Long testTenantId = 2001L;
 
     @Nested
@@ -156,7 +156,7 @@ class JwtTokenUtilsRealDataTest {
             assertNotNull(extractedRole, "提取的role不应为null");
             assertEquals(testRole, extractedRole, "提取的role应与输入一致");
             assertTrue(extractedRole.contains("ROLE_USER"), "应包含ROLE_USER");
-            assertTrue(extractedRole.contains("ROLE_ADMIN"), "应包含ROLE_ADMIN");
+            assertTrue(extractedRole.contains("ROLE_SUPER_ADMIN"), "应包含ROLE_SUPER_ADMIN");
 
             System.out.println("  输入role: " + testRole);
             System.out.println("  提取role: " + extractedRole);
@@ -298,7 +298,7 @@ class JwtTokenUtilsRealDataTest {
             System.out.println("\n=== 场景4.1: 不同用户生成不同Token ===");
 
             String token1 = jwtTokenUtils.generateToken(1001L, "user1", "ROLE_USER", 2001L, false);
-            String token2 = jwtTokenUtils.generateToken(1002L, "user2", "ROLE_ADMIN", 2002L, false);
+            String token2 = jwtTokenUtils.generateToken(1002L, "user2", "ROLE_SUPER_ADMIN", 2002L, false);
 
             assertNotEquals(token1, token2, "不同用户应生成不同的Token");
 

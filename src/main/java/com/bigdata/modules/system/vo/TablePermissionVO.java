@@ -21,10 +21,6 @@ public class TablePermissionVO implements Serializable {
     private Integer canUpdate;
     private Integer canDelete;
     private Integer canExport;
-    /**
-     * 指定行（行级过滤）：表名 -> 行过滤SQL。未出现的表表示不按此权限做行过滤。
-     */
-    private Map<String, String> rowFilterSql;
     private String dataMaskingRule;
     private String description;
     private LocalDateTime createTime;
@@ -131,14 +127,6 @@ public class TablePermissionVO implements Serializable {
 
     public void setCanExport(Integer canExport) {
         this.canExport = canExport;
-    }
-
-    public Map<String, String> getRowFilterSql() {
-        return rowFilterSql;
-    }
-
-    public void setRowFilterSql(Map<String, String> rowFilterSql) {
-        this.rowFilterSql = rowFilterSql;
     }
 
     public String getDataMaskingRule() {

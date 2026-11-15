@@ -141,7 +141,7 @@
 **场景1: 表权限管理**
 - ✅ 创建表权限（datasource/database/table级别）
 - ✅ 更新表权限（增删改查导出权限位）
-- ✅ 设置行过滤规则（rowFilterSql）
+- ✅ 行级权限已于 2026-11 移除，原「设置行过滤规则（rowFilterSql）」用例已删除
 - ✅ 设置数据脱敏规则（dataMaskingRule JSON）
 - ✅ 删除表权限
 - ✅ 查询权限列表（按数据源/数据库筛选）
@@ -330,7 +330,7 @@
 - ❌ 引擎不可用时的降级处理
 
 **场景8: 安全控制**
-- ✅ 行级过滤应用（rowFilterSql）
+- ✅ 行级权限已于 2026-11 移除，原「行级过滤应用（rowFilterSql）」用例已删除
 - ✅ 数据脱敏应用（dataMaskingRule）
 - ✅ SQL注入防护（仅允许SELECT）
 - ✅ 数据源访问权限校验
@@ -823,7 +823,7 @@
 5. ✅ DatasourceConfigController 数据源管理测试
 6. ✅ CodeExecutionController 代码执行测试（SQL基本场景）
 7. ✅ DevProjectController 项目管理测试
-8. ✅ RowFilterAndDataMaskingRealDataTest（已有，继续补充）
+8. ✅ DataMaskingRealDataTest（原 RowFilterAndDataMaskingRealDataTest，行级权限用例已于 2026-11 移除）
 
 ### 第二阶段：业务逻辑测试（中优先级）
 **预计工作量**: 15个测试类，约100个用例

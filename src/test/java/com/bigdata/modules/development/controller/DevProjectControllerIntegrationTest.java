@@ -69,10 +69,10 @@ class DevProjectControllerIntegrationTest {
 
     private void setUpAdminSecurityContext() {
         List<SimpleGrantedAuthority> authorities = Arrays.asList(
-                new SimpleGrantedAuthority("ROLE_ADMIN")
+                new SimpleGrantedAuthority("ROLE_SUPER_ADMIN")
         );
         CustomUserDetails userDetails = new CustomUserDetails(
-                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), false, authorities, true);
+                1L, "admin", 1L, Arrays.asList("ROLE_SUPER_ADMIN"), false, authorities, true);
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
         SecurityContextHolder.getContext().setAuthentication(authentication);

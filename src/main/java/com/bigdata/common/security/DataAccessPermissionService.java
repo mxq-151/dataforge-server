@@ -5,6 +5,7 @@ import com.bigdata.common.utils.SecurityUtils;
 import com.bigdata.modules.development.entity.DevProject;
 import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.system.entity.*;
+import com.bigdata.modules.system.enums.RoleType;
 import com.bigdata.modules.system.mapper.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -32,8 +33,6 @@ public class DataAccessPermissionService {
     public static final int PROJECT_PERMISSION_READ = 1;
     public static final int PROJECT_PERMISSION_EDIT = 2;
     public static final int PROJECT_PERMISSION_DELETE = 3;
-
-    private static final String ADMIN_ROLE_CODE = "ROLE_SUPER_ADMIN";
 
     @Autowired
     private SysTenantUserMapper sysTenantUserMapper;
@@ -63,9 +62,6 @@ public class DataAccessPermissionService {
     private SysTablePermissionColumnMapper tablePermissionColumnMapper;
 
     @Autowired
-    private SysTablePermissionRowMapper tablePermissionRowMapper;
-
-    @Autowired
     private SysUserMapper sysUserMapper;
 
     @Autowired
@@ -73,7 +69,8 @@ public class DataAccessPermissionService {
 
     public boolean isAdmin() {
         List<String> roles = SecurityUtils.getCurrentUserRoles();
-        return roles != null && roles.stream().anyMatch(r -> ADMIN_ROLE_CODE.equalsIgnoreCase(r));
+        String adminAuthority = RoleType.SUPER_ADMIN.getAuthority();
+        return roles != null && roles.stream().anyMatch(r -> adminAuthority.equalsIgnoreCase(r));
     }
 
     /**
@@ -102,7 +99,7 @@ public class DataAccessPermissionService {
         return roles.stream()
                 .map(SysRole::getRoleCode)
                 .filter(Objects::nonNull)
-                .anyMatch(code -> ADMIN_ROLE_CODE.equalsIgnoreCase(code));
+                .anyMatch(code -> RoleType.fromCode(code) == RoleType.SUPER_ADMIN);
     }
 
     /**
@@ -584,70 +581,6 @@ public class DataAccessPermissionService {
             return type != null ? type.toString() : "partial";
         }
         return null;
-    }
-
-    /**
-     * 获取当前用户对指定数据表的行级过滤条件（指定行）。
-     * <p>
-     * 返回 {@code null} 表示不做行级过滤（所有行可见）。
-     * </p>
-     * <p>
-     * <b>合并规则（交集收紧）</b>：把所有命中该表的权限所配置的行过滤条件用 AND 连接；
-     * 某个命中权限未对该表配置行过滤时，只是「该条权限不额外限制」，不会放宽其他权限的限制。
-     * 只有当所有命中权限都没有配置行过滤时，才返回 {@code null}。
-     * </p>
-     * <p>
-     * 旧实现是「任一命中权限未配置行过滤即整体放宽为不过滤」，多角色并集时窄权限会被静默覆盖，
-     * 已按风险项 R4 改为取交集收紧。
-     * </p>
-     */
-    public String getMergedRowFilterSql(String datasourceName, String databaseName, String tableName) {
-        if (isAdmin()) {
-            return null;
-        }
-
-        Long userId = SecurityUtils.getCurrentUserId();
-        if (userId == null) {
-            return null;
-        }
-
-        List<Long> roleIds = getUserRoleIds(userId);
-        if (roleIds.isEmpty()) {
-            return null;
-        }
-
-        List<Long> tablePermissionIds = getTablePermissionIdsByRoleIds(roleIds);
-        if (tablePermissionIds.isEmpty()) {
-            return null;
-        }
-
-        List<SysTablePermission> permissions = sysTablePermissionMapper.selectBatchIds(tablePermissionIds);
-        List<String> filters = new ArrayList<>();
-        for (SysTablePermission perm : permissions) {
-            if (!matchesTablePermission(perm, datasourceName, databaseName, tableName)) {
-                continue;
-            }
-            List<SysTablePermissionRow> rowBindings =
-                    tablePermissionRowMapper.selectByPermissionIdAndTable(perm.getId(), tableName);
-            if (rowBindings == null || rowBindings.isEmpty()) {
-                // 该条权限未对该表做行过滤：本权限不额外限制，但不影响其他权限已配置的限制（交集收紧）
-                continue;
-            }
-            for (SysTablePermissionRow r : rowBindings) {
-                if (r.getRowFilterSql() != null && !r.getRowFilterSql().isBlank()) {
-                    filters.add(r.getRowFilterSql().trim());
-                }
-            }
-        }
-        if (filters.isEmpty()) {
-            return null;
-        }
-        if (filters.size() == 1) {
-            return filters.get(0);
-        }
-        return filters.stream()
-                .map(f -> "(" + f + ")")
-                .collect(java.util.stream.Collectors.joining(" AND "));
     }
 
     /**

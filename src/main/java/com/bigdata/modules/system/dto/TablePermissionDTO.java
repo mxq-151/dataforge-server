@@ -24,11 +24,6 @@ public class TablePermissionDTO {
     private Integer canUpdate;
     private Integer canDelete;
     private Integer canExport;
-    /**
-     * 指定行（行级过滤）：表名 -> 行过滤SQL（支持WHERE前缀或裸表达式）。
-     * 未在此出现的表表示不做行级过滤。
-     */
-    private Map<String, String> rowFilterSql;
     private String dataMaskingRule;
     private String description;
     private List<Long> roleIds;
@@ -124,14 +119,6 @@ public class TablePermissionDTO {
 
     public void setCanExport(Integer canExport) {
         this.canExport = canExport;
-    }
-
-    public Map<String, String> getRowFilterSql() {
-        return rowFilterSql;
-    }
-
-    public void setRowFilterSql(Map<String, String> rowFilterSql) {
-        this.rowFilterSql = rowFilterSql;
     }
 
     public String getDataMaskingRule() {

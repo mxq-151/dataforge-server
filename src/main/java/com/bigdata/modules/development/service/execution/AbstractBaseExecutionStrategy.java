@@ -8,6 +8,7 @@ import com.bigdata.modules.devops.enums.DatasourceType;
 import com.bigdata.modules.metadata.service.MetadataSyncService;
 import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysTablePermission;
+import com.bigdata.modules.system.enums.RoleType;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
@@ -20,20 +21,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.util.*;
 
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
-import net.sf.jsqlparser.expression.Expression;
-import net.sf.jsqlparser.expression.StringValue;
-import net.sf.jsqlparser.expression.Parenthesis;
-import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
-import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
-import net.sf.jsqlparser.expression.operators.relational.EqualsTo;
-import net.sf.jsqlparser.expression.operators.relational.NotEqualsTo;
-import net.sf.jsqlparser.expression.operators.relational.GreaterThan;
-import net.sf.jsqlparser.expression.operators.relational.GreaterThanEquals;
-import net.sf.jsqlparser.expression.operators.relational.MinorThan;
-import net.sf.jsqlparser.expression.operators.relational.MinorThanEquals;
-import net.sf.jsqlparser.expression.operators.relational.LikeExpression;
-import net.sf.jsqlparser.expression.operators.relational.InExpression;
-import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.statement.insert.Insert;
@@ -41,10 +28,10 @@ import net.sf.jsqlparser.statement.update.Update;
 import net.sf.jsqlparser.statement.delete.Delete;
 
 /**
- * 执行策略抽象基类，提供公共的权限校验、行级过滤、数据脱敏等安全能力。
+ * 执行策略抽象基类，提供公共的权限校验、列级裁剪、数据脱敏等安全能力。
  * <p>
  * 所有需要SQL权限控制的执行策略（JDBC、REST等）都应继承此类，
- * 以复用统一的DDL/DML权限检查、行过滤和数据脱敏逻辑。
+ * 以复用统一的DDL/DML权限检查、列裁剪和数据脱敏逻辑。
  * </p>
  */
 public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy {
@@ -149,34 +136,30 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
             checkDmlTablePermission(context, statement, null);
         }
 
-        // 行级过滤 / 列白名单：下发前改写 SQL，让约束在引擎侧生效
-        applyRowColumnRewrite(context);
+        // 列白名单：下发前改写 SQL，让约束在引擎侧生效
+        applyColumnRewrite(context);
     }
 
     /**
-     * 把行级过滤条件与列白名单改写到下发内容里（风险项 R4）。
+     * 把列白名单改写到下发内容里（风险项 R4）。
      * <p>
-     * 为什么所有引擎统一在下发前改写，而不是只依赖「结果集返回后过滤」：
-     * <ul>
-     *   <li>Spark / Flink / HBase 由外部进程执行，服务端根本拿不到结果集；</li>
-     *   <li>即便拿到结果集，聚合类查询（count / sum）的数值也不受后过滤影响，
-     *       会泄露被行级权限挡住的行的口径。</li>
-     * </ul>
-     * 后过滤仍然保留为第二道防线（见 {@link #applyRowFilterAndMasking}），用于
-     * 无法改写时兜底；改写生效时刻意跳过行过滤的二次应用，避免对已过滤结果重复过滤。
+     * 为什么所有引擎统一在下发前改写，而不是只依赖「结果集返回后裁剪」：
+     * Spark / Flink / HBase 由外部进程执行，服务端根本拿不到结果集。
+     * 后裁剪仍然保留为第二道防线（见 {@link #applyMaskingAndColumnPermission}），
+     * 用于无法改写时兜底。
      * </p>
      */
-    protected void applyRowColumnRewrite(CodeExecutionContext context) {
+    protected void applyColumnRewrite(CodeExecutionContext context) {
         if (sqlPermissionRewriter == null) {
             return;
         }
         String rewritten = sqlPermissionRewriter.rewrite(context);
         if (rewritten != null && !rewritten.equals(context.getCodeContent())) {
             context.setEffectiveCodeContent(rewritten);
-            getLog().info("已按行/列级权限改写下发SQL: executionId={}", context.getExecutionId());
+            getLog().info("已按列级权限改写下发SQL: executionId={}", context.getExecutionId());
             if (executionLogListener != null) {
                 executionLogListener.publishLog(context.getExecutionId(),
-                        "[权限] 已按行级过滤/列级权限改写下发的SQL");
+                        "[权限] 已按列级权限改写下发的SQL");
             }
         }
     }
@@ -301,7 +284,9 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     // ==================== DDL权限判断 ====================
 
     /**
-     * 判断用户是否拥有DDL执行权限（超级管理员 / admin角色 / ops角色）
+     * 判断用户是否拥有DDL执行权限（超级管理员 / 运维工程师）
+     * <p>角色码口径以数据库与初始化脚本为准：{@code SUPER_ADMIN} / {@code OPS_ENGINEER}，
+     * 统一由 {@link RoleType} 解析，避免再出现 "admin"/"ops"/带 ROLE_ 前缀等写法。</p>
      */
     protected boolean hasDdlPermission(Long userId) {
         if (userId == null) {
@@ -323,8 +308,8 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
                 return false;
             }
             for (SysRole role : roles) {
-                String roleCode = role.getRoleCode();
-                if ("admin".equalsIgnoreCase(roleCode) || "ops".equalsIgnoreCase(roleCode)) {
+                RoleType roleType = RoleType.fromCode(role.getRoleCode());
+                if (roleType == RoleType.SUPER_ADMIN || roleType == RoleType.OPS_ENGINEER) {
                     getLog().debug("用户[{}]拥有DDL权限, 角色: {}", userId, role.getRoleName());
                     return true;
                 }
@@ -506,7 +491,7 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     }
 
     /**
-     * 提取SELECT语句的权限信息（用于后续行级过滤和脱敏）
+     * 提取SELECT语句的权限信息（用于后续脱敏和列级裁剪）
      */
     protected SelectPermissionInfo extractSelectPermissionInfo(String sql, String datasourceName, String defaultDatabase) {
         try {
@@ -524,205 +509,6 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
         } catch (Exception e) {
             getLog().debug("解析SELECT权限信息失败: {}", e.getMessage());
             return null;
-        }
-    }
-
-    // ==================== 行级过滤 ====================
-
-    /**
-     * 根据行级过滤SQL对查询结果进行行过滤（原地修改 rows 列表，删除不满足条件的行）。
-     *
-     * @param rows         查询结果行数据（原地修改）
-     * @param columns      列名列表
-     * @param rowFilterSql 过滤条件SQL（支持WHERE前缀或裸表达式）
-     * @return 过滤后的行数据（与入参为同一引用）
-     */
-    protected List<List<String>> applyRowFilter(List<List<String>> rows, List<String> columns, String rowFilterSql) {
-        if (rows == null || rows.isEmpty() || rowFilterSql == null || rowFilterSql.isBlank()) {
-            return rows;
-        }
-        try {
-            String filterExpr = rowFilterSql.trim();
-            String filterLower = filterExpr.toLowerCase();
-            if (!filterLower.startsWith("where")) {
-                filterExpr = "WHERE " + filterExpr;
-            }
-            Map<String, Integer> colIndexMap = new LinkedHashMap<>();
-            for (int i = 0; i < columns.size(); i++) {
-                colIndexMap.put(columns.get(i).toLowerCase(), i);
-            }
-            String finalFilterExpr = filterExpr;
-            Iterator<List<String>> it = rows.iterator();
-            while (it.hasNext()) {
-                List<String> row = it.next();
-                boolean keep;
-                try {
-                    keep = evaluateRowFilterExpression(row, columns, colIndexMap, finalFilterExpr);
-                } catch (Exception e) {
-                    getLog().debug("行过滤表达式求值失败，保留行: {}", e.getMessage());
-                    keep = true;
-                }
-                if (!keep) {
-                    it.remove();
-                }
-            }
-            return rows;
-        } catch (Exception e) {
-            getLog().warn("行级过滤失败，返回原始结果: {}", e.getMessage());
-            return rows;
-        }
-    }
-
-    protected boolean evaluateRowFilterExpression(List<String> row, List<String> columns,
-                                                   Map<String, Integer> colIndexMap, String filterSql) {
-        String expr = filterSql;
-        if (expr.toLowerCase().startsWith("where")) {
-            expr = expr.substring(5).trim();
-        }
-        try {
-            Expression whereExpr = CCJSqlParserUtil.parseCondExpression(expr);
-            return evaluateExpression(whereExpr, row, colIndexMap);
-        } catch (Exception e) {
-            getLog().debug("行过滤SQL解析失败，保留行: {}", e.getMessage());
-            return true;
-        }
-    }
-
-    protected boolean evaluateExpression(Expression expr, List<String> row, Map<String, Integer> colIndexMap) {
-        if (expr == null) return true;
-        if (expr instanceof AndExpression) {
-            AndExpression andExpr = (AndExpression) expr;
-            return evaluateExpression(andExpr.getLeftExpression(), row, colIndexMap)
-                    && evaluateExpression(andExpr.getRightExpression(), row, colIndexMap);
-        }
-        if (expr instanceof OrExpression) {
-            OrExpression orExpr = (OrExpression) expr;
-            return evaluateExpression(orExpr.getLeftExpression(), row, colIndexMap)
-                    || evaluateExpression(orExpr.getRightExpression(), row, colIndexMap);
-        }
-        if (expr instanceof Parenthesis) {
-            Parenthesis paren = (Parenthesis) expr;
-            return evaluateExpression(paren.getExpression(), row, colIndexMap);
-        }
-        if (expr instanceof EqualsTo) {
-            EqualsTo eq = (EqualsTo) expr;
-            return compareColumnValue(eq.getLeftExpression(), eq.getRightExpression(), "=", row, colIndexMap);
-        }
-        if (expr instanceof NotEqualsTo) {
-            NotEqualsTo neq = (NotEqualsTo) expr;
-            return compareColumnValue(neq.getLeftExpression(), neq.getRightExpression(), "!=", row, colIndexMap);
-        }
-        if (expr instanceof GreaterThan) {
-            GreaterThan gt = (GreaterThan) expr;
-            return compareColumnValue(gt.getLeftExpression(), gt.getRightExpression(), ">", row, colIndexMap);
-        }
-        if (expr instanceof MinorThan) {
-            MinorThan lt = (MinorThan) expr;
-            return compareColumnValue(lt.getLeftExpression(), lt.getRightExpression(), "<", row, colIndexMap);
-        }
-        if (expr instanceof GreaterThanEquals) {
-            GreaterThanEquals gte = (GreaterThanEquals) expr;
-            return compareColumnValue(gte.getLeftExpression(), gte.getRightExpression(), ">=", row, colIndexMap);
-        }
-        if (expr instanceof MinorThanEquals) {
-            MinorThanEquals lte = (MinorThanEquals) expr;
-            return compareColumnValue(lte.getLeftExpression(), lte.getRightExpression(), "<=", row, colIndexMap);
-        }
-        if (expr instanceof LikeExpression) {
-            LikeExpression like = (LikeExpression) expr;
-            return compareColumnValue(like.getLeftExpression(), like.getRightExpression(), "LIKE", row, colIndexMap);
-        }
-        if (expr instanceof InExpression) {
-            InExpression inExpr = (InExpression) expr;
-            Expression left = inExpr.getLeftExpression();
-            Expression rightItems = inExpr.getRightExpression();
-            if (left instanceof Column && rightItems instanceof net.sf.jsqlparser.expression.operators.relational.ExpressionList) {
-                String colName = ((Column) left).getColumnName();
-                Integer colIdx = colIndexMap.get(colName.toLowerCase());
-                if (colIdx == null || colIdx >= row.size()) return true;
-                String cellValue = row.get(colIdx);
-                if ("NULL".equals(cellValue)) cellValue = null;
-                List<Expression> items = ((net.sf.jsqlparser.expression.operators.relational.ExpressionList) rightItems).getExpressions();
-                for (Expression item : items) {
-                    String valStr = extractStringValue(item);
-                    if (valStr != null && valStr.equals(cellValue)) return true;
-                }
-                return false;
-            }
-            return true;
-        }
-        getLog().debug("未支持的表达式类型: {}, 保留行", expr.getClass().getSimpleName());
-        return true;
-    }
-
-    private boolean compareColumnValue(Expression leftExpr, Expression rightExpr, String operator,
-                                       List<String> row, Map<String, Integer> colIndexMap) {
-        String colName = null;
-        String valueStr = null;
-        if (leftExpr instanceof Column && !(rightExpr instanceof Column)) {
-            colName = ((Column) leftExpr).getColumnName();
-            valueStr = extractStringValue(rightExpr);
-        } else if (rightExpr instanceof Column && !(leftExpr instanceof Column)) {
-            colName = ((Column) rightExpr).getColumnName();
-            valueStr = extractStringValue(leftExpr);
-            operator = reverseOperator(operator);
-        } else {
-            getLog().debug("比较表达式中缺少列引用或两侧都是列: {} {} {}", leftExpr, operator, rightExpr);
-            return true;
-        }
-        if (colName == null || valueStr == null) return true;
-        Integer colIdx = colIndexMap.get(colName.toLowerCase());
-        if (colIdx == null || colIdx >= row.size()) return true;
-        String cellValue = row.get(colIdx);
-        if ("NULL".equals(cellValue)) cellValue = null;
-        return doCompare(cellValue, operator, valueStr);
-    }
-
-    private String extractStringValue(Expression expr) {
-        if (expr instanceof StringValue) return ((StringValue) expr).getValue();
-        if (expr instanceof net.sf.jsqlparser.expression.LongValue) return String.valueOf(((net.sf.jsqlparser.expression.LongValue) expr).getValue());
-        if (expr instanceof net.sf.jsqlparser.expression.DoubleValue) return String.valueOf(((net.sf.jsqlparser.expression.DoubleValue) expr).getValue());
-        if (expr instanceof StringValue) return ((StringValue) expr).getValue();
-        if (expr instanceof net.sf.jsqlparser.expression.NullValue) return null;
-        String strVal = expr.toString();
-        if (strVal.startsWith("'") && strVal.endsWith("'")) return strVal.substring(1, strVal.length() - 1);
-        return strVal;
-    }
-
-    private boolean doCompare(String cellValue, String operator, String value) {
-        switch (operator.toUpperCase()) {
-            case "=": return cellValue != null && cellValue.equals(value);
-            case "!=": case "<>": return cellValue == null || !cellValue.equals(value);
-            case ">": return cellValue != null && compareNumeric(cellValue, value) > 0;
-            case "<": return cellValue != null && compareNumeric(cellValue, value) < 0;
-            case ">=": return cellValue != null && compareNumeric(cellValue, value) >= 0;
-            case "<=": return cellValue != null && compareNumeric(cellValue, value) <= 0;
-            case "LIKE": {
-                if (cellValue == null) return false;
-                String pattern = value.toLowerCase().replace("%", "");
-                return cellValue.toLowerCase().contains(pattern);
-            }
-            default: return true;
-        }
-    }
-
-    private String reverseOperator(String op) {
-        switch (op.toUpperCase()) {
-            case ">": return "<";
-            case "<": return ">";
-            case ">=": return "<=";
-            case "<=": return ">=";
-            default: return op;
-        }
-    }
-
-    private int compareNumeric(String a, String b) {
-        try {
-            double da = Double.parseDouble(a);
-            double db = Double.parseDouble(b);
-            return Double.compare(da, db);
-        } catch (NumberFormatException e) {
-            return a.compareTo(b);
         }
     }
 
@@ -924,17 +710,15 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
     }
 
     /**
-     * 对查询结果应用行级过滤（第二道防线）、数据脱敏与列级裁剪。
+     * 对查询结果应用数据脱敏与列级裁剪。
      * 所有能拿到结果集的执行策略（JDBC、Kyuubi）在返回SELECT结果前调用。
      * <p>
-     * 行级过滤是「兜底」：如果 {@link #applyRowColumnRewrite} 已经把行过滤条件注入到
-     * 下发 SQL 并由引擎执行，这里不再重复过滤——重复过滤不仅无意义，多表场景下还会因为
-     * 后过滤只能取「第一张表」的条件而对已过滤的结果产生错误裁剪。
-     * 脱敏与列裁剪不受影响，始终执行。
+     * 列级裁剪是第二道防线：如果 {@link #applyColumnRewrite} 已经在下发前完成投影裁剪，
+     * 这里再按同一白名单做一次结果集裁剪，防止链路差异导致越权列泄漏。
      * </p>
      */
-    protected void applyRowFilterAndMasking(List<List<String>> rows, List<String> columns,
-                                           String sql, CodeExecutionContext context) {
+    protected void applyMaskingAndColumnPermission(List<List<String>> rows, List<String> columns,
+                                                   String sql, CodeExecutionContext context) {
         String datasourceName = context.getPrimaryDatasourceConfig().getDatasourceName();
         String defaultDatabase = context.getPrimaryDatasourceDatabaseName();
 
@@ -943,19 +727,6 @@ public abstract class AbstractBaseExecutionStrategy implements ExecutionStrategy
             String dbName = permInfo.tableRef.databaseName != null ?
                     permInfo.tableRef.databaseName : defaultDatabase;
             String tableName = permInfo.tableRef.tableName;
-            // 行级权限（指定行）：已在下发前注入到 SQL 时不再重复过滤
-            boolean rowFilterAlreadyInjected = context.isCodeRewritten();
-            String mergedRowFilterSql = rowFilterAlreadyInjected ? null
-                    : dataAccessPermissionService.getMergedRowFilterSql(
-                            datasourceName, dbName, tableName);
-            if (rowFilterAlreadyInjected) {
-                getLog().debug("行级过滤已在下发前注入SQL，跳过结果集二次过滤: {}.{}", dbName, tableName);
-            }
-            if (mergedRowFilterSql != null && !mergedRowFilterSql.isBlank()) {
-                int beforeSize = rows.size();
-                rows = applyRowFilter(rows, columns, mergedRowFilterSql);
-                getLog().info("行级过滤: {} -> {} 行, 过滤条件: {}", beforeSize, rows.size(), mergedRowFilterSql);
-            }
             // 数据脱敏（列级掩码）
             SysTablePermission mergedPerm = dataAccessPermissionService.getMergedTablePermission(
                     datasourceName, dbName, tableName);

@@ -620,7 +620,7 @@ CREATE TABLE IF NOT EXISTS sys_file_permission (
   permission_name VARCHAR(100) NOT NULL,
   file_path VARCHAR(1000) NOT NULL,
   permission_type TINYINT NOT NULL DEFAULT 1,
-  recursive TINYINT NOT NULL DEFAULT 0,
+  is_recursive TINYINT NOT NULL DEFAULT 0,
   description VARCHAR(500),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -727,7 +727,6 @@ CREATE TABLE IF NOT EXISTS sys_table_permission (
   can_update TINYINT NOT NULL DEFAULT 0,
   can_delete TINYINT NOT NULL DEFAULT 0,
   can_export TINYINT NOT NULL DEFAULT 0,
-  row_filter_sql CLOB,
   data_masking_rule VARCHAR(500),
   description VARCHAR(500),
   create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -748,18 +747,6 @@ CREATE TABLE IF NOT EXISTS sys_table_permission_column (
 );
 CREATE INDEX IF NOT EXISTS idx_sys_table_permission_column_perm ON sys_table_permission_column (table_permission_id);
 COMMENT ON TABLE sys_table_permission_column IS '库表权限-指定列白名单';
-
--- 库表权限-行级过滤（指定行）
-CREATE TABLE IF NOT EXISTS sys_table_permission_row (
-  id BIGINT AUTO_INCREMENT,
-  table_permission_id BIGINT NOT NULL,
-  table_name VARCHAR(255) NOT NULL,
-  row_filter_sql CLOB,
-  create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (id)
-);
-CREATE INDEX IF NOT EXISTS idx_sys_table_permission_row_perm ON sys_table_permission_row (table_permission_id);
-COMMENT ON TABLE sys_table_permission_row IS '库表权限-行级过滤SQL';
 
 -- 租户表
 CREATE TABLE IF NOT EXISTS sys_tenant (

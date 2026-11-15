@@ -133,7 +133,7 @@ class DataAccessPermissionRealDataTest {
                                                      String databaseName, String tableNames,
                                                      Integer canSelect, Integer canInsert,
                                                      Integer canUpdate, Integer canDelete,
-                                                     Integer canExport, String rowFilterSql,
+                                                     Integer canExport,
                                                      String dataMaskingRule) {
         SysTablePermission permission = new SysTablePermission();
         permission.setPermissionName(permissionName);
@@ -145,7 +145,6 @@ class DataAccessPermissionRealDataTest {
         permission.setCanUpdate(canUpdate);
         permission.setCanDelete(canDelete);
         permission.setCanExport(canExport);
-        permission.setRowFilterSql(rowFilterSql);
         permission.setDataMaskingRule(dataMaskingRule);
         sysTablePermissionMapper.insert(permission);
         System.out.println("Created table permission: id=" + permission.getId() +
@@ -234,10 +233,10 @@ class DataAccessPermissionRealDataTest {
 
         SysTablePermission perm1 = createTablePermission(
                 "DB Test Permission", "test_ds", "db_test",
-                "[\"orders\",\"products\"]", 1, 0, 0, 0, 0, null, null);
+                "[\"orders\",\"products\"]", 1, 0, 0, 0, 0, null);
         SysTablePermission perm2 = createTablePermission(
                 "DB Analytics Permission", "test_ds", "db_analytics",
-                "[\"metrics\",\"reports\"]", 1, 0, 0, 0, 0, null, null);
+                "[\"metrics\",\"reports\"]", 1, 0, 0, 0, 0, null);
 
         bindTablePermissionToRole(role.getId(), perm1.getId());
         bindTablePermissionToRole(role.getId(), perm2.getId());
@@ -255,7 +254,7 @@ class DataAccessPermissionRealDataTest {
 
         System.out.println("\n--- 以ADMIN身份调用 getAccessibleDatabaseNames ---");
         setUpSecurityContext(user.getId(), user.getUsername(), tenant.getId(),
-                Arrays.asList("ROLE_ADMIN"));
+                Arrays.asList("ROLE_SUPER_ADMIN"));
         Set<String> adminDbNames = dataAccessPermissionService.getAccessibleDatabaseNames("test_ds");
         System.out.println("getAccessibleDatabaseNames('test_ds') [ADMIN]: " + adminDbNames);
         assertNull(adminDbNames, "ADMIN应返回null（表示不限制）");
@@ -276,7 +275,7 @@ class DataAccessPermissionRealDataTest {
 
         SysTablePermission perm = createTablePermission(
                 "Table Access Permission", "test_ds", "db_test",
-                "[\"orders\",\"products\"]", 1, 1, 0, 0, 0, null, null);
+                "[\"orders\",\"products\"]", 1, 1, 0, 0, 0, null);
         bindTablePermissionToRole(role.getId(), perm.getId());
 
         setUpSecurityContext(user.getId(), user.getUsername(), tenant.getId(),
@@ -293,7 +292,7 @@ class DataAccessPermissionRealDataTest {
         System.out.println("\n--- 插入通配符*权限，验证返回null ---");
         SysTablePermission wildcardPerm = createTablePermission(
                 "Wildcard Permission", "test_ds", "db_test",
-                "[\"*\"]", 1, 1, 1, 1, 1, null, null);
+                "[\"*\"]", 1, 1, 1, 1, 1, null);
         bindTablePermissionToRole(role.getId(), wildcardPerm.getId());
 
         Set<String> wildcardTableNames = dataAccessPermissionService.getAccessibleTableNames("test_ds", "db_test");
@@ -316,7 +315,7 @@ class DataAccessPermissionRealDataTest {
 
         SysTablePermission perm = createTablePermission(
                 "Full Orders Permission", "test_ds", "db_test",
-                "[\"orders\"]", 1, 1, 1, 0, 0, "status = 1",
+                "[\"orders\"]", 1, 1, 1, 0, 0,
                 "{\"phone\":\"phone_masked\"}");
         bindTablePermissionToRole(role.getId(), perm.getId());
 
@@ -382,11 +381,10 @@ class DataAccessPermissionRealDataTest {
 
         SysTablePermission permA = createTablePermission(
                 "Role A Permission", "test_ds", "db_test",
-                "[\"orders\"]", 1, 0, 0, 0, 0, null, null);
+                "[\"orders\"]", 1, 0, 0, 0, 0, null);
         SysTablePermission permB = createTablePermission(
                 "Role B Permission", "test_ds", "db_test",
                 "[\"orders\"]", 0, 0, 0, 0, 1,
-                "status = 1",
                 "{\"email\":\"email_masked\"}");
 
         bindTablePermissionToRole(roleA.getId(), permA.getId());
@@ -407,7 +405,6 @@ class DataAccessPermissionRealDataTest {
         System.out.println("canUpdate: " + merged.getCanUpdate());
         System.out.println("canDelete: " + merged.getCanDelete());
         System.out.println("canExport: " + merged.getCanExport());
-        System.out.println("rowFilterSql: " + merged.getRowFilterSql());
         System.out.println("dataMaskingRule: " + merged.getDataMaskingRule());
 
         assertEquals(Integer.valueOf(1), merged.getCanSelect(), "合并后canSelect应为1（来自roleA）");
@@ -415,8 +412,6 @@ class DataAccessPermissionRealDataTest {
         assertEquals(Integer.valueOf(0), merged.getCanInsert(), "合并后canInsert应为0");
         assertEquals(Integer.valueOf(0), merged.getCanUpdate(), "合并后canUpdate应为0");
         assertEquals(Integer.valueOf(0), merged.getCanDelete(), "合并后canDelete应为0");
-        assertNotNull(merged.getRowFilterSql(), "合并后应包含rowFilterSql（来自roleB）");
-        assertEquals("status = 1", merged.getRowFilterSql(), "rowFilterSql应为'status = 1'");
         assertNotNull(merged.getDataMaskingRule(), "合并后应包含dataMaskingRule（来自roleB）");
         assertEquals("{\"email\":\"email_masked\"}", merged.getDataMaskingRule(),
                 "dataMaskingRule应正确合并");
@@ -538,7 +533,7 @@ class DataAccessPermissionRealDataTest {
         bindUserToTenant(user.getId(), tenant.getId());
 
         setUpSecurityContext(user.getId(), user.getUsername(), tenant.getId(),
-                Arrays.asList("ROLE_ADMIN"));
+                Arrays.asList("ROLE_SUPER_ADMIN"));
 
         System.out.println("\n--- 验证 isAdmin() = true ---");
         boolean isAdmin = dataAccessPermissionService.isAdmin();

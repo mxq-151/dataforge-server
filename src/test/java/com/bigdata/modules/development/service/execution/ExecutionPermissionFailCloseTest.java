@@ -12,8 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -206,29 +206,26 @@ class ExecutionPermissionFailCloseTest {
         assertEquals(true, permissionService.hasTablePermission("pg-test", "testdb", "other_t", "SELECT"));
     }
 
-    // ==================== 行/列权限的下发前改写（风险项 R4） ====================
+    // ==================== 列级权限的下发前改写（风险项 R4） ====================
 
     @Test
     void setsEffectiveCodeContentWhenRewriteApplies() {
         strategy.sqlPermissionRewriter = new SqlPermissionRewriter(permissionService);
-        when(permissionService.getMergedRowFilterSql(any(), any(), anyString()))
-                .thenReturn("region = 'cn'");
-        when(permissionService.getAllowedColumns(any(), any(), anyString())).thenReturn(null);
+        when(permissionService.getAllowedColumns(any(), any(), anyString())).thenReturn(Set.of("id"));
 
-        CodeExecutionContext context = contextWith("SELECT id FROM allowed_t");
+        CodeExecutionContext context = contextWith("SELECT id, status FROM allowed_t");
         strategy.checkPermission(context);
 
-        assertTrue(context.isCodeRewritten(), "命中行级权限时应把改写结果写入 effectiveCodeContent");
-        assertTrue(context.getExecutionCodeContent().contains("region = 'cn'"),
+        assertTrue(context.isCodeRewritten(), "命中列级权限时应把改写结果写入 effectiveCodeContent");
+        assertTrue(context.getExecutionCodeContent().contains("SELECT id FROM allowed_t"),
                 context.getExecutionCodeContent());
-        assertEquals("SELECT id FROM allowed_t", context.getCodeContent(),
+        assertEquals("SELECT id, status FROM allowed_t", context.getCodeContent(),
                 "用户原始代码不应被覆盖（日志/审计/回显仍展示原文）");
     }
 
     @Test
     void leavesEffectiveCodeContentUnsetWhenNoConstraint() {
         strategy.sqlPermissionRewriter = new SqlPermissionRewriter(permissionService);
-        when(permissionService.getMergedRowFilterSql(any(), any(), anyString())).thenReturn(null);
         when(permissionService.getAllowedColumns(any(), any(), anyString())).thenReturn(null);
 
         CodeExecutionContext context = contextWith("SELECT id FROM allowed_t");
@@ -236,53 +233,5 @@ class ExecutionPermissionFailCloseTest {
 
         assertFalse(context.isCodeRewritten());
         assertEquals("SELECT id FROM allowed_t", context.getExecutionCodeContent());
-    }
-
-    /**
-     * 行过滤已注入到下发 SQL 后，结果集后过滤不应再执行一遍：
-     * 多表场景下后过滤只能取「第一张表」的条件，重复过滤会把正确结果裁错。
-     */
-    @Test
-    void skipsRowPostFilterWhenAlreadyInjected() {
-        strategy.sqlPermissionRewriter = new SqlPermissionRewriter(permissionService);
-        when(permissionService.getMergedRowFilterSql(any(), any(), anyString()))
-                .thenReturn("status = 'ok'");
-        when(permissionService.getAllowedColumns(any(), any(), anyString())).thenReturn(null);
-        when(permissionService.getMergedTablePermission(any(), any(), anyString())).thenReturn(null);
-
-        CodeExecutionContext context = contextWith("SELECT id, status FROM allowed_t");
-        strategy.checkPermission(context);
-        assertTrue(context.isCodeRewritten());
-
-        List<List<String>> rows = new ArrayList<>(List.of(
-                new ArrayList<>(List.of("1", "ok")),
-                new ArrayList<>(List.of("2", "bad"))));
-        List<String> columns = new ArrayList<>(List.of("id", "status"));
-
-        strategy.applyRowFilterAndMasking(rows, columns, context.getCodeContent(), context);
-
-        assertEquals(2, rows.size(),
-                "过滤已由引擎执行，后过滤不应二次裁剪结果集");
-    }
-
-    /** 未发生改写时，结果集后过滤仍需生效（第二道防线）。 */
-    @Test
-    void keepsRowPostFilterWhenNotInjected() {
-        when(permissionService.getMergedRowFilterSql(any(), any(), anyString()))
-                .thenReturn("status = 'ok'");
-        when(permissionService.getMergedTablePermission(any(), any(), anyString())).thenReturn(null);
-        when(permissionService.getAllowedColumns(any(), any(), anyString())).thenReturn(null);
-
-        CodeExecutionContext context = contextWith("SELECT id, status FROM allowed_t");
-        assertFalse(context.isCodeRewritten());
-
-        List<List<String>> rows = new ArrayList<>(List.of(
-                new ArrayList<>(List.of("1", "ok")),
-                new ArrayList<>(List.of("2", "bad"))));
-        List<String> columns = new ArrayList<>(List.of("id", "status"));
-
-        strategy.applyRowFilterAndMasking(rows, columns, "SELECT id, status FROM allowed_t", context);
-
-        assertEquals(1, rows.size(), "改写未生效时后过滤必须兜底");
     }
 }

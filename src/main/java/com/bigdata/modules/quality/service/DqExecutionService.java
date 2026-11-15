@@ -46,9 +46,8 @@ import java.util.Map;
  * <p>自己连库绕不过平台的安全层。走 CodeExecutionService 才能拿到两件事：
  * <ul>
  *   <li><b>语句级表权限校验</b>：校验 SQL 里引用的每一张表都会被检查 SELECT 权限；</li>
- *   <li><b>行级过滤 / 列白名单改写</b>：{@code SqlPermissionRewriter} 在下发前把行过滤
- *       注入 WHERE、把投影裁剪到列白名单 —— 于是「用质检规则读取他人无权查看的行」
- *       这条路在引擎侧就被堵住了，而不是靠事后过滤。</li>
+ *   <li><b>列白名单改写</b>：{@code SqlPermissionRewriter} 在下发前把投影裁剪到列白名单 ——
+ *       于是「用质检规则读取他人无权查看的列」这条路在引擎侧就被堵住了，而不是靠事后裁剪。</li>
  * </ul>
  * 代价是需要 SecurityContext，因此所有调用都必须发生在已认证的请求线程
  * （异步执行时由调用方负责把 context 传进工作线程）。</p>

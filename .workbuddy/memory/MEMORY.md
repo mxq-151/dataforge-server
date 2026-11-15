@@ -43,11 +43,11 @@
 
 ## 数据访问权限
 
-- 语义是 **fail-close**：`DataAccessPermissionService` 的 `getMergedRowFilterSql` 返回 null 才表示不过滤；
-  `getAllowedColumns` 返回 null 表示不限制、空集合表示无可见列。
+- 语义是 **fail-close**：`DataAccessPermissionService` 的 `getAllowedColumns` 返回 null 表示不限制、空集合表示无可见列。
+- **行级权限已于 2026-11 移除**：`getMergedRowFilterSql`、`sys_table_permission_row` 与 `rowFilterSql` 字段均已删除。
 - 库存批量方法：`filterAccessibleTables(...)` / `hasDatabaseAccess(...)`，新模块不要自己造过滤逻辑。
 - **租户不是数据隔离边界**（租户与用户 1:1，资源表无租户字段），只有库/表/列权限是。
-- 数据预览类功能必须走 `CodeExecutionService`，以复用行/列权限改写与脱敏，不要另起查询通道。
+- 数据预览类功能必须走 `CodeExecutionService`，以复用列白名单改写与脱敏，不要另起查询通道。
 
 ## 模块边界（避免重复建设）
 

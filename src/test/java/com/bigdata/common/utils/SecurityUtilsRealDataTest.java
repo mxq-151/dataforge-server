@@ -31,7 +31,7 @@ class SecurityUtilsRealDataTest {
     private static final String TEST_USERNAME = "testuser";
     private static final String TEST_PASSWORD = "password123";
     private static final Long TEST_TENANT_ID = 2001L;
-    private static final List<String> TEST_ROLES = Arrays.asList("ROLE_USER", "ROLE_ADMIN");
+    private static final List<String> TEST_ROLES = Arrays.asList("ROLE_USER", "ROLE_SUPER_ADMIN");
 
     @BeforeEach
     void setUp() {
@@ -52,7 +52,7 @@ class SecurityUtilsRealDataTest {
                 false,
                 Arrays.asList(
                         new SimpleGrantedAuthority("ROLE_USER"),
-                        new SimpleGrantedAuthority("ROLE_ADMIN")
+                        new SimpleGrantedAuthority("ROLE_SUPER_ADMIN")
                 ),
                 true
         );
@@ -431,7 +431,7 @@ class SecurityUtilsRealDataTest {
         void testRoleListParsing_MultipleRoles() {
             System.out.println("\n=== 场景5.2: 多角色列表解析 ===");
 
-            List<String> roles = Arrays.asList("ROLE_USER", "ROLE_ADMIN", "ROLE_MANAGER");
+            List<String> roles = Arrays.asList("ROLE_USER", "ROLE_SUPER_ADMIN", "ROLE_MANAGER");
             CustomUserDetails userDetails = new CustomUserDetails(
                     1L,
                     "multi_role_user",
@@ -440,7 +440,7 @@ class SecurityUtilsRealDataTest {
                     false,
                     Arrays.asList(
                             new SimpleGrantedAuthority("ROLE_USER"),
-                            new SimpleGrantedAuthority("ROLE_ADMIN"),
+                            new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"),
                             new SimpleGrantedAuthority("ROLE_MANAGER")
                     ),
                     true
@@ -496,17 +496,17 @@ class SecurityUtilsRealDataTest {
                     1L,
                     "admin",
                     100L,
-                    Arrays.asList("ROLE_USER", "ROLE_ADMIN"),
+                    Arrays.asList("ROLE_USER", "ROLE_SUPER_ADMIN"),
                     false,
                     Arrays.asList(
                             new SimpleGrantedAuthority("ROLE_USER"),
-                            new SimpleGrantedAuthority("ROLE_ADMIN")
+                            new SimpleGrantedAuthority("ROLE_SUPER_ADMIN")
                     ),
                     true
             );
             setAuthentication(adminUser);
-            assertTrue(SecurityUtils.isAdmin(), "包含ROLE_ADMIN的用户应是管理员");
-            System.out.println("  用户[admin] (含ROLE_ADMIN): isAdmin()=true ✓");
+            assertTrue(SecurityUtils.isAdmin(), "包含ROLE_SUPER_ADMIN的用户应是管理员");
+            System.out.println("  用户[admin] (含ROLE_SUPER_ADMIN): isAdmin()=true ✓");
 
             CustomUserDetails normalUser = new CustomUserDetails(
                     2L,
@@ -518,21 +518,21 @@ class SecurityUtilsRealDataTest {
                     true
             );
             setAuthentication(normalUser);
-            assertFalse(SecurityUtils.isAdmin(), "不含ROLE_ADMIN的用户不是管理员");
+            assertFalse(SecurityUtils.isAdmin(), "不含ROLE_SUPER_ADMIN的用户不是管理员");
             System.out.println("  用户[normal_user] (仅ROLE_USER): isAdmin()=false ✓");
 
             CustomUserDetails caseInsensitiveAdmin = new CustomUserDetails(
                     3L,
                     "case_admin",
                     100L,
-                    Collections.singletonList("role_admin"),
+                    Collections.singletonList("role_super_admin"),
                     false,
-                    Collections.singletonList(new SimpleGrantedAuthority("role_admin")),
+                    Collections.singletonList(new SimpleGrantedAuthority("role_super_admin")),
                     true
             );
             setAuthentication(caseInsensitiveAdmin);
-            assertTrue(SecurityUtils.isAdmin(), "大小写不敏感：role_admin也应识别为管理员");
-            System.out.println("  用户[case_admin] (role_admin小写): isAdmin()=true ✓");
+            assertTrue(SecurityUtils.isAdmin(), "大小写不敏感：role_super_admin也应识别为管理员");
+            System.out.println("  用户[case_admin] (role_super_admin小写): isAdmin()=true ✓");
         }
 
         @Test

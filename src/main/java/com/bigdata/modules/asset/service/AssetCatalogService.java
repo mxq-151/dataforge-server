@@ -76,7 +76,7 @@ import java.util.Set;
  *   <li><b>权限在服务端过滤，且 fail-close</b>：树、检索、详情、预览四个入口
  *       全部走 {@link AssetPermissionSupport}。取不到权限就是不可见。</li>
  *   <li><b>预览必须经执行服务下发</b>：不复用「自己开连接查一下」的捷径，
- *       因为那样会绕开行级过滤与列白名单改写。</li>
+ *       因为那样会绕开列白名单改写。</li>
  * </ol>
  *
  * @author dataforge
@@ -936,14 +936,14 @@ public class AssetCatalogService {
      *
      * <h3>为什么必须走执行服务</h3>
      * <p>预览是唯一一个会把<b>真实数据行</b>送到浏览器的入口。如果自己开连接查，
-     * 行级过滤与列白名单就全绕过去了。走 {@link CodeExecutionService} 之后，
-     * {@code SqlPermissionRewriter} 会在下发前把行过滤条件注入 WHERE、
-     * 把投影裁剪到列白名单，权限约束落在引擎侧而不是事后过滤。</p>
+     * 列白名单就绕过去了。走 {@link CodeExecutionService} 之后，
+     * {@code SqlPermissionRewriter} 会在下发前把投影裁剪到列白名单，
+     * 权限约束落在引擎侧而不是事后裁剪。</p>
      *
      * <h3>三层防护</h3>
      * <ol>
      *   <li>表级 SELECT 权限：无权限直接 403；</li>
-     *   <li>行/列改写：由执行链路完成（引擎侧生效）；</li>
+     *   <li>列改写：由执行链路完成（引擎侧生效）；</li>
      *   <li>列交集 + 数值脱敏：本方法在返回前再做一次列名交集（防链路差异），
      *       并按 data_masking_rule 对取值做脱敏 —— 平台此前只标注了脱敏类型，
      *       没有对值做替换，这一环在这里补上。</li>

@@ -10,6 +10,7 @@ import com.bigdata.modules.system.dto.UserDTO;
 import com.bigdata.modules.system.entity.SysRole;
 import com.bigdata.modules.system.entity.SysTenantRole;
 import com.bigdata.modules.system.entity.SysUser;
+import com.bigdata.modules.system.enums.RoleType;
 import com.bigdata.modules.system.mapper.SysRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
@@ -74,7 +75,7 @@ public class SysUserService implements UserDetailsService {
 
         Set<String> roleSet = new LinkedHashSet<>();
         if (isSuperAdmin) {
-            roleSet.add("ROLE_SUPER_ADMIN");
+            roleSet.add(RoleType.SUPER_ADMIN.getAuthority());
         }
         if (!CollectionUtils.isEmpty(roleIds)) {
             List<SysRole> roles = sysRoleMapper.selectBatchIds(roleIds);

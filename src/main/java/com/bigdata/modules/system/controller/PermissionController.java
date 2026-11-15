@@ -151,7 +151,7 @@ public class PermissionController {
         permission.setDescription(dto.getDescription());
 
         TablePermissionVO vo = permissionService.saveTablePermission(permission, dto.getRoleIds(),
-                dto.getColumnPermissions(), dto.getRowFilterSql());
+                dto.getColumnPermissions());
         return Result.success(vo);
     }
 
@@ -175,7 +175,7 @@ public class PermissionController {
         permission.setDescription(dto.getDescription());
 
         TablePermissionVO vo = permissionService.updateTablePermission(permission, dto.getRoleIds(),
-                dto.getColumnPermissions(), dto.getRowFilterSql());
+                dto.getColumnPermissions());
         return Result.success(vo);
     }
 

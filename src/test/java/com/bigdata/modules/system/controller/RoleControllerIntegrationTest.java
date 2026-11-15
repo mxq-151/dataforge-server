@@ -89,10 +89,10 @@ class RoleControllerIntegrationTest {
 
     private void setUpAdminSecurityContext() {
         List<SimpleGrantedAuthority> authorities = new ArrayList<>();
-        authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
+        authorities.add(new SimpleGrantedAuthority("ROLE_SUPER_ADMIN"));
 
         CustomUserDetails userDetails = new CustomUserDetails(
-                1L, "admin", 1L, Arrays.asList("ROLE_ADMIN"), false, authorities, true);
+                1L, "admin", 1L, Arrays.asList("ROLE_SUPER_ADMIN"), false, authorities, true);
 
         Authentication authentication = new UsernamePasswordAuthenticationToken(
                 userDetails, null, authorities);
@@ -100,7 +100,7 @@ class RoleControllerIntegrationTest {
     }
 
     private SysRole createTestRole(String roleName, String roleCode) {
-        return createTestRole(roleName, roleCode, "business", null, 1);
+        return createTestRole(roleName, roleCode, "BUSINESS_REQUESTER", null, 1);
     }
 
     private SysRole createTestRole(String roleName, String roleCode, String roleType,
@@ -108,7 +108,7 @@ class RoleControllerIntegrationTest {
         SysRole role = new SysRole();
         role.setRoleName(roleName);
         role.setRoleCode(roleCode);
-        role.setRoleType(roleType != null ? roleType : "business");
+        role.setRoleType(roleType != null ? roleType : "BUSINESS_REQUESTER");
         role.setDescription(description);
         role.setStatus(status != null ? status : 1);
         sysRoleMapper.insert(role);
@@ -193,7 +193,7 @@ class RoleControllerIntegrationTest {
         RoleDTO dto = new RoleDTO();
         dto.setRoleName(roleName);
         dto.setRoleCode(roleCode);
-        dto.setRoleType("business");
+        dto.setRoleType("BUSINESS_REQUESTER");
         dto.setDescription("测试角色描述");
         dto.setStatus(1);
         return dto;
@@ -285,9 +285,9 @@ class RoleControllerIntegrationTest {
         void testGetRoleList_WithSearch() {
             System.out.println("\n=== 场景1.4: 按角色名搜索 ===");
 
-            createTestRole("数据分析员", "DATA_ANALYST");
-            createTestRole("数据开发员", "DATA_DEVELOPER");
-            createTestRole("系统管理员", "SYS_ADMIN");
+            createTestRole("数据分析员", "SEARCH_DATA_ANALYST");
+            createTestRole("数据开发员", "SEARCH_DATA_DEVELOPER");
+            createTestRole("系统管理员", "SEARCH_SYS_ADMIN");
 
             Result<Page<SysRoleVO>> result = roleController.getList(1, 10, "数据");
 
@@ -370,9 +370,9 @@ class RoleControllerIntegrationTest {
         void testGetAllRoles_Success() {
             System.out.println("\n=== 场景1.7: 获取所有启用角色 ===");
 
-            createTestRole("启用角色1", "ENABLED_ROLE1", "business", null, 1);
-            createTestRole("禁用角色", "DISABLED_ROLE", "business", null, 0);
-            createTestRole("启用角色2", "ENABLED_ROLE2", "business", null, 1);
+            createTestRole("启用角色1", "ENABLED_ROLE1", "BUSINESS_REQUESTER", null, 1);
+            createTestRole("禁用角色", "DISABLED_ROLE", "BUSINESS_REQUESTER", null, 0);
+            createTestRole("启用角色2", "ENABLED_ROLE2", "BUSINESS_REQUESTER", null, 1);
 
             Result<List<SysRoleVO>> result = roleController.getAllRoles();
 
@@ -466,7 +466,7 @@ class RoleControllerIntegrationTest {
             RoleDTO dto1 = new RoleDTO();
             dto1.setRoleName("");
             dto1.setRoleCode("TEST_CODE");
-            dto1.setRoleType("business");
+            dto1.setRoleType("BUSINESS_REQUESTER");
 
             assertThrows(Exception.class, () -> {
                 roleController.save(dto1);
@@ -475,7 +475,7 @@ class RoleControllerIntegrationTest {
             RoleDTO dto2 = new RoleDTO();
             dto2.setRoleName("Test Role");
             dto2.setRoleCode("");
-            dto2.setRoleType("business");
+            dto2.setRoleType("BUSINESS_REQUESTER");
 
             assertThrows(Exception.class, () -> {
                 roleController.save(dto2);
@@ -494,7 +494,7 @@ class RoleControllerIntegrationTest {
         void testEnableRole_Success() {
             System.out.println("\n=== 场景3.1: 启用角色 ===");
 
-            SysRole role = createTestRole("待启用角色", "TO_ENABLE_ROLE", "business", null, 0);
+            SysRole role = createTestRole("待启用角色", "TO_ENABLE_ROLE", "BUSINESS_REQUESTER", null, 0);
 
             Result<Void> result = roleController.changeStatus(role.getId(), 1);
 
@@ -513,7 +513,7 @@ class RoleControllerIntegrationTest {
         void testDisableRole_Success() {
             System.out.println("\n=== 场景3.2: 禁用角色 ===");
 
-            SysRole role = createTestRole("待禁用角色", "TO_DISABLE_ROLE", "business", null, 1);
+            SysRole role = createTestRole("待禁用角色", "TO_DISABLE_ROLE", "BUSINESS_REQUESTER", null, 1);
 
             Result<Void> result = roleController.changeStatus(role.getId(), 0);
 
@@ -564,7 +564,7 @@ class RoleControllerIntegrationTest {
         void testMultipleStatusChanges() {
             System.out.println("\n=== 场景3.5: 多次状态切换 ===");
 
-            SysRole role = createTestRole("多状态角色", "MULTI_STATUS_ROLE", "business", null, 1);
+            SysRole role = createTestRole("多状态角色", "MULTI_STATUS_ROLE", "BUSINESS_REQUESTER", null, 1);
 
             roleController.changeStatus(role.getId(), 0);
             assertEquals(0, sysRoleMapper.selectById(role.getId()).getStatus(),
@@ -917,7 +917,7 @@ class RoleControllerIntegrationTest {
             RoleDTO dto = new RoleDTO();
             dto.setRoleName(maxName50);
             dto.setRoleCode("MAX_LENGTH_ROLE");
-            dto.setRoleType("business");
+            dto.setRoleType("BUSINESS_REQUESTER");
             dto.setDescription(maxDesc255);
             dto.setStatus(1);
 

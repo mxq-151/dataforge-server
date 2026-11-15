@@ -2,6 +2,7 @@ package com.bigdata.modules.system.controller;
 
 import com.bigdata.common.exception.BusinessException;
 import com.bigdata.common.security.CustomUserDetails;
+import com.bigdata.common.utils.AesUtils;
 import com.bigdata.common.utils.JwtTokenUtils;
 import com.bigdata.common.utils.PasswordUtils;
 import com.bigdata.common.utils.SecurityUtils;
@@ -72,6 +73,9 @@ class AuthControllerIntegrationTest {
 
     @Autowired
     private JwtTokenUtils jwtTokenUtils;
+
+    @Autowired
+    private AesUtils aesUtils;
 
     @BeforeEach
     void setUp() {
@@ -195,7 +199,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_login_normal");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
 
@@ -226,7 +230,7 @@ class AuthControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("✅ 管理员用户登录成功 - 包含ROLE_ADMIN角色")
+        @DisplayName("✅ 管理员用户登录成功 - 包含ROLE_SUPER_ADMIN角色")
         void testAdminUserLoginSuccess() {
             System.out.println("\n=== 场景1.2: 管理员用户登录成功 ===");
 
@@ -234,7 +238,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_login_admin");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
 
@@ -261,7 +265,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_login_tenant");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
 
@@ -295,7 +299,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_login_roles");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
 
@@ -323,7 +327,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             assertThrows(Exception.class, () -> {
                 authController.login(loginDTO);
@@ -351,7 +355,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("non_existent_user_12345");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             BusinessException exception = assertThrows(BusinessException.class, () -> {
                 authController.login(loginDTO);
@@ -370,7 +374,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_login_wrongpwd");
-            loginDTO.setPassword("wrong_password");
+            loginDTO.setPassword(aesUtils.encrypt("wrong_password"));
 
             BusinessException exception = assertThrows(BusinessException.class, () -> {
                 authController.login(loginDTO);
@@ -395,7 +399,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_disabled_user");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             BusinessException exception = assertThrows(BusinessException.class, () -> {
                 authController.login(loginDTO);
@@ -548,7 +552,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_single_tenant");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
 
@@ -569,7 +573,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_no_tenant");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
 
@@ -595,7 +599,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_role_tenant_assoc");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
 
@@ -626,7 +630,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_token_claims");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
             String token = result.getData().getToken();
@@ -659,7 +663,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_token_expiry");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result = authController.login(loginDTO);
             String token = result.getData().getToken();
@@ -696,7 +700,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_lastlogin");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> resultBefore = authController.login(loginDTO);
             assertTrue(resultBefore.getCode() == 200, "第一次登录应成功");
@@ -715,7 +719,7 @@ class AuthControllerIntegrationTest {
 
             LoginDTO loginDTO = new LoginDTO();
             loginDTO.setUsername("test_multi_login");
-            loginDTO.setPassword("123456");
+            loginDTO.setPassword(aesUtils.encrypt("123456"));
 
             Result<LoginVO> result1 = authController.login(loginDTO);
             assertTrue(result1.getCode() == 200, "第一次登录应成功");

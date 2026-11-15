@@ -53,8 +53,9 @@ public class SecurityUtils {
             return true;
         }
         List<String> roles = getCurrentUserRoles();
+        String adminAuthority = com.bigdata.modules.system.enums.RoleType.SUPER_ADMIN.getAuthority();
         return roles != null && roles.stream()
-                .anyMatch("ROLE_SUPER_ADMIN"::equalsIgnoreCase);
+                .anyMatch(adminAuthority::equalsIgnoreCase);
     }
 
     public static boolean isAiRequest() {

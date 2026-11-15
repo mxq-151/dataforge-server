@@ -178,17 +178,58 @@ public class LocalFileSystem implements FileSystem {
         logger.info("Local file system closed");
     }
 
-    private String normalizePath(String path) {
-        if (path == null || path.isEmpty() || "/".equals(path)) {
-            return basePath;
+    /**
+     * 把接口传入的「根内相对路径」解析为绝对路径，并阻断越界。
+     *
+     * <p>{@code ..}、盘符、UNC、软链接都可能把最终路径带出 basePath。这里统一做四件事：
+     * 归一化分隔符 → 拒绝绝对路径形态 → {@code normalize()} 后确认仍在根内 →
+     * 对已存在的最近祖先做真实路径校验（防软链接逃逸）。</p>
+     */
+    private String normalizePath(String path) throws IOException {
+        return resolveInsideBase(path).toString();
+    }
+
+    private Path resolveInsideBase(String path) throws IOException {
+        Path base = Paths.get(basePath).toAbsolutePath().normalize();
+        String relative = path == null ? "" : path.trim();
+        // Windows 分隔符在 POSIX 上只是普通字符，先统一，避免 "..\\x" 绕过校验
+        relative = relative.replace('\\', '/');
+        // 盘符 / UNC 属于绝对路径，resolve 会直接顶掉根目录
+        if (relative.matches("^[A-Za-z]:.*") || relative.startsWith("//")) {
+            throw new IOException("非法路径（越界访问）: " + path);
+        }
+        while (relative.startsWith("/")) {
+            relative = relative.substring(1);
         }
 
-        String normalizedPath = path.replaceAll("/+", "/");
-        if (!normalizedPath.startsWith("/")) {
-            normalizedPath = "/" + normalizedPath;
+        Path target = base.resolve(relative).normalize();
+        if (!target.startsWith(base)) {
+            throw new IOException("非法路径（越界访问）: " + path);
         }
+        assertNoSymlinkEscape(base, target, path);
+        return target;
+    }
 
-        return basePath + normalizedPath;
+    /**
+     * 软链接可把目录指向根外，因此对目标本身或最近的已存在祖先取真实路径再校验一次。
+     * 目标尚不存在（新建/上传）时校验最近的祖先，避免通过软链接创建根外文件。
+     */
+    private void assertNoSymlinkEscape(Path base, Path target, String rawPath) throws IOException {
+        if (!Files.exists(base, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        Path existing = target;
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
+        }
+        if (existing == null) {
+            return;
+        }
+        Path realBase = base.toRealPath();
+        Path realExisting = existing.toRealPath();
+        if (!realExisting.startsWith(realBase)) {
+            throw new IOException("非法路径（越界访问）: " + rawPath);
+        }
     }
 
     private String getRelativePath(Path absolutePath) {

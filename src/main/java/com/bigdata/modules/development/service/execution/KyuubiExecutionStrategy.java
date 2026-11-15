@@ -21,7 +21,7 @@ import java.util.concurrent.*;
 /**
  * Kyuubi执行策略，通过REST API与Kyuubi Server交互。
  * <p>
- * 继承 {@link AbstractBaseExecutionStrategy}，复用统一的权限校验、行级过滤和数据脱敏能力。
+ * 继承 {@link AbstractBaseExecutionStrategy}，复用统一的权限校验、列级裁剪和数据脱敏能力。
  * 支持同步和异步两种执行模式。
  * </p>
  */
@@ -297,9 +297,9 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
             int affectedRows = opResult.rowCount > 0 ? (int) opResult.rowCount :
                     (opResult.modifiedRowCount > 0 ? (int) opResult.modifiedRowCount : 0);
 
-            // 如果有结果集，应用行级过滤和脱敏（调用基类方法）
+            // 如果有结果集，应用脱敏和列级裁剪（调用基类方法）
             if (columns != null && !columns.isEmpty() && rows != null && !rows.isEmpty()) {
-                applyRowFilterAndMasking(rows, columns, sql, context);
+                applyMaskingAndColumnPermission(rows, columns, sql, context);
             }
 
             long duration = System.currentTimeMillis() - startTime;
@@ -358,7 +358,7 @@ public class KyuubiExecutionStrategy extends AbstractBaseExecutionStrategy {
                             (opResult.modifiedRowCount > 0 ? (int) opResult.modifiedRowCount : 0);
 
                     if (columns != null && !columns.isEmpty() && rows != null && !rows.isEmpty()) {
-                        applyRowFilterAndMasking(rows, columns, sql, context);
+                        applyMaskingAndColumnPermission(rows, columns, sql, context);
                     }
 
                     long duration = System.currentTimeMillis() - startTime;

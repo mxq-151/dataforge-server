@@ -12,7 +12,7 @@ public class CodeExecutionContext {
     private String executionId;
     private String codeContent;
     /**
-     * 权限改写后的实际下发内容（行级过滤注入 / 列白名单裁剪，见 SqlPermissionRewriter）。
+     * 权限改写后的实际下发内容（列白名单裁剪，见 SqlPermissionRewriter）。
      * 为 null 表示无需改写，此时以 {@link #codeContent} 为准。
      * <p>
      * 与 {@link #codeContent} 分离的目的是：日志、审计与回显仍然展示用户提交的原始代码，

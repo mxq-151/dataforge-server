@@ -24,7 +24,7 @@ import java.util.Set;
 /**
  * JDBC类型执行策略的抽象基类。
  * <p>
- * 继承 {@link AbstractBaseExecutionStrategy}，复用统一的权限校验、行级过滤和数据脱敏能力，
+ * 继承 {@link AbstractBaseExecutionStrategy}，复用统一的权限校验、列级裁剪和数据脱敏能力，
  * 同时封装了通用的JDBC执行流程（连接管理、SQL执行、结果集处理等）。
  * </p>
  */
@@ -111,8 +111,8 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
                     }
                     affectedRows += rowCount;
 
-                    // 行级过滤 + 数据脱敏（使用基类提供的方法）
-                    applyRowFilterAndMasking(rows, columns, sql, context);
+                    // 数据脱敏 + 列级裁剪（使用基类提供的方法）
+                    applyMaskingAndColumnPermission(rows, columns, sql, context);
 
                     getLog().info("📊 查询结果详情: executionId={}, 列数={}, 行数={}(过滤后), 原始SQL读取={}",
                             executionId, columns == null ? 0 : columns.size(), rows == null ? 0 : rows.size(), rowCount);
@@ -180,7 +180,7 @@ public abstract class AbstractJdbcExecutionStrategy extends AbstractBaseExecutio
     }
 
     /**
-     * 对查询结果统一应用行级过滤和数据脱敏（调用基类方法）
+     * 执行会话级 SET 语句。
      */
     protected void executeSetting(Statement stmt, String settingSql) throws Exception {
         try {

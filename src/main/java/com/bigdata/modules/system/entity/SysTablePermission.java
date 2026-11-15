@@ -16,7 +16,6 @@ public class SysTablePermission extends BaseEntity {
     private Integer canUpdate;
     private Integer canDelete;
     private Integer canExport;
-    private String rowFilterSql;
     private String dataMaskingRule;
     private String description;
 
@@ -98,14 +97,6 @@ public class SysTablePermission extends BaseEntity {
 
     public void setCanExport(Integer canExport) {
         this.canExport = canExport;
-    }
-
-    public String getRowFilterSql() {
-        return rowFilterSql;
-    }
-
-    public void setRowFilterSql(String rowFilterSql) {
-        this.rowFilterSql = rowFilterSql;
     }
 
     public String getDataMaskingRule() {

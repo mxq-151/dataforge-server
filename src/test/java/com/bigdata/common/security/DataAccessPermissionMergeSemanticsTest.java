@@ -3,7 +3,6 @@ package com.bigdata.common.security;
 import com.bigdata.modules.development.mapper.DevProjectMapper;
 import com.bigdata.modules.system.entity.SysTablePermission;
 import com.bigdata.modules.system.entity.SysTablePermissionColumn;
-import com.bigdata.modules.system.entity.SysTablePermissionRow;
 import com.bigdata.modules.system.entity.SysRoleTablePermission;
 import com.bigdata.modules.system.mapper.SysFilePermissionMapper;
 import com.bigdata.modules.system.mapper.SysRoleFilePermissionMapper;
@@ -11,7 +10,6 @@ import com.bigdata.modules.system.mapper.SysRoleProjectPermissionMapper;
 import com.bigdata.modules.system.mapper.SysRoleTablePermissionMapper;
 import com.bigdata.modules.system.mapper.SysTablePermissionColumnMapper;
 import com.bigdata.modules.system.mapper.SysTablePermissionMapper;
-import com.bigdata.modules.system.mapper.SysTablePermissionRowMapper;
 import com.bigdata.modules.system.mapper.SysTenantRoleMapper;
 import com.bigdata.modules.system.mapper.SysTenantUserMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -41,9 +39,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 /**
- * 行 / 列级权限的合并语义验证（风险项 R4）。
+ * 列级权限的合并语义验证（风险项 R4）。
  * <p>
- * 旧实现是「任一命中权限未对该表做限制，即整体放宽」（行过滤直接返回 null、列白名单取并集），
+ * 旧实现是「任一命中权限未对该表做限制，即整体放宽」（列白名单取并集），
  * 多角色并集时宽权限会静默覆盖窄权限。现要求取交集收紧：某条权限不额外限制，
  * 只是它自己不加约束，不能把别的权限已经收窄的约束放开。
  * </p>
@@ -74,8 +72,6 @@ class DataAccessPermissionMergeSemanticsTest {
     private SysTablePermissionMapper sysTablePermissionMapper;
     @Mock
     private SysTablePermissionColumnMapper tablePermissionColumnMapper;
-    @Mock
-    private SysTablePermissionRowMapper tablePermissionRowMapper;
     @Mock
     private DevProjectMapper devProjectMapper;
 
@@ -123,59 +119,12 @@ class DataAccessPermissionMergeSemanticsTest {
         return permission;
     }
 
-    private SysTablePermissionRow row(Long permissionId, String filter) {
-        SysTablePermissionRow row = new SysTablePermissionRow();
-        row.setTablePermissionId(permissionId);
-        row.setTableName(TABLE);
-        row.setRowFilterSql(filter);
-        return row;
-    }
-
     private SysTablePermissionColumn column(Long permissionId, String name) {
         SysTablePermissionColumn column = new SysTablePermissionColumn();
         column.setTablePermissionId(permissionId);
         column.setTableName(TABLE);
         column.setColumnName(name);
         return column;
-    }
-
-    // ==================== 行级 ====================
-
-    @Test
-    void rowFilterSurvivesPermissionWithoutRowBinding() {
-        // 权限100 配了行过滤，权限101 没配：不能因为「有一条没配」就整体放宽
-        when(tablePermissionRowMapper.selectByPermissionIdAndTable(100L, TABLE))
-                .thenReturn(List.of(row(100L, "region = 'cn'")));
-        when(tablePermissionRowMapper.selectByPermissionIdAndTable(101L, TABLE))
-                .thenReturn(List.of());
-
-        String merged = service.getMergedRowFilterSql(DS, DB, TABLE);
-
-        assertNotNull(merged, "有一条权限配置了行过滤，就不应整体放宽为不过滤");
-        assertTrue(merged.contains("region = 'cn'"), merged);
-    }
-
-    @Test
-    void rowFiltersFromMultiplePermissionsAreAnded() {
-        when(tablePermissionRowMapper.selectByPermissionIdAndTable(100L, TABLE))
-                .thenReturn(List.of(row(100L, "region = 'cn'")));
-        when(tablePermissionRowMapper.selectByPermissionIdAndTable(101L, TABLE))
-                .thenReturn(List.of(row(101L, "status = 'ok'")));
-
-        String merged = service.getMergedRowFilterSql(DS, DB, TABLE);
-
-        assertNotNull(merged);
-        assertTrue(merged.contains("region = 'cn'") && merged.contains("status = 'ok'"), merged);
-        assertTrue(merged.contains(" AND "), merged);
-    }
-
-    @Test
-    void noRowFilterWhenNoPermissionConfiguresIt() {
-        when(tablePermissionRowMapper.selectByPermissionIdAndTable(any(), eq(TABLE)))
-                .thenReturn(List.of());
-
-        assertNull(service.getMergedRowFilterSql(DS, DB, TABLE),
-                "所有命中权限都没配行过滤时才应返回 null（不限制）");
     }
 
     // ==================== 列级 ====================
@@ -231,7 +180,6 @@ class DataAccessPermissionMergeSemanticsTest {
 
     @Test
     void maskingRulesAreMergedPerColumnTakingStricter() {
-        when(tablePermissionRowMapper.selectByPermissionIdAndTable(any(), eq(TABLE))).thenReturn(List.of());
         when(tablePermissionColumnMapper.selectByPermissionIdAndTable(any(), eq(TABLE))).thenReturn(List.of());
         when(sysTablePermissionMapper.selectBatchIds(any())).thenReturn(List.of(
                 permission(100L, "{\"phone\":\"partial\",\"email\":\"partial\"}"),

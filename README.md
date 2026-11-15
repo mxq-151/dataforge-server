@@ -40,13 +40,13 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 
 | 分组        | 表                                                                                                                                                                                                                                                                 |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 身份与权限（12） | `sys_user`、`sys_role`、`sys_tenant`、`sys_tenant_user`、`sys_tenant_role`、`sys_role_project_permission`、`sys_role_menu_permission`、`sys_menu_permission`、`sys_role_table_permission`、`sys_table_permission`、`sys_table_permission_column`、`sys_table_permission_row` |
+| 身份与权限（11） | `sys_user`、`sys_role`、`sys_tenant`、`sys_tenant_user`、`sys_tenant_role`、`sys_role_project_permission`、`sys_role_menu_permission`、`sys_menu_permission`、`sys_role_table_permission`、`sys_table_permission`、`sys_table_permission_column` |
 | 文件权限（2）   | `sys_file_permission`、`sys_role_file_permission`                                                                                                                                                                                                                  |
 | 数据源与存储（2） | `datasource_config`、`storage_config`                                                                                                                                                                                                                              |
 | 开发与执行（5）  | `dev_project`、`dev_program_params`、`dev_script_execution`、`ddl_execution_log`、`dev_jar_dependency`                                                                                                                                                                |
 | 元数据与治理（6） | `table_metadata`、`column_metadata`、`indicators`、`indicators_fields`、`knowledge_document`、`operation_audit_log`                                                                                                                        |
 
-权限模型支持到**行级与列级**（`sys_table_permission_row` / `sys_table_permission_column`）；文件权限按路径 + 存储配置维度控制。
+权限模型支持到**表级与列级**（`sys_table_permission_column`）；文件权限按路径 + 存储配置维度控制。**行级权限已于 2026-11 移除**，不再支持按用户 / 角色 / 租户过滤数据行。
 
 ## 数据源类型
 
@@ -83,7 +83,7 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 数据源、存储配置、开发项目、库表与文件权限表都**没有**租户字段；租户只影响角色绑定与审计日志。  
 跨租户的资源可见性完全依赖授权时的人为约束，**不要**把租户当作隔离边界来做安全设计。
 
-### 表级 / 行级 / 列级权限的执行语义
+### 表级 / 列级权限的执行语义
 
 | 环节             | 行为                                                                                                                                                                          |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -92,10 +92,9 @@ DataForge 平台的业务后端服务，为 **dataforge 桌面端**提供 REST �
 | 表引用覆盖          | FROM 与各 JOIN 右侧、FROM 子句里的派生表、WHERE / HAVING / ON / 投影列中的子查询、UNION 各分支与 CTE（`common/sql/SqlTableCollector`）                                                                  |
 | DDL            | 仅超级管理员 / `admin` / `ops` 角色可执行；Calcite 无法识别但以 DDL 关键字（CREATE/ALTER/DROP/TRUNCATE/RENAME/COMMENT/GRANT/REVOKE/ANALYZE）开头的语句**默认拒绝**                                          |
 | **fail-close** | 以 DML 关键字开头但无法解析的语句**默认拒绝**并抛 `SecurityException`，不再「打一条 debug 日志后放行」；权限判定过程异常同样按默认拒绝                                                                                       |
-| 行 / 列权限合并      | **取交集收紧**：同一张表命中多条权限时，某个权限未配置约束只是「它自己不额外限制」，不会放宽其他权限已配置的行过滤条件与列白名单；脱敏规则按列合并并取更严格的规则                                                                                         |
-| 执行路径           | **全部 SQL 路径统一在下发前改写**（`SqlPermissionRewriter`）：把行过滤条件 AND 进 WHERE、把投影列裁剪为列白名单。JDBC / Kyuubi 另保留「结果集后过滤 + 脱敏 + 列裁剪」作为第二道防线；行过滤在改写已生效时不再二次应用（多表场景下后过滤只能取第一张表的条件，重复过滤会把正确结果裁错） |
-| 聚合查询           | 行级权限不再是「结果集后过滤」，因此 `count / sum` 等聚合口径也被正确限定，不再泄露被挡住的行的数值                                                                                                                   |
-| 改写边界           | 列裁剪只允许单表顶层查询（集合运算分支 / 子查询里裁剪会改变外层列集合 → 拒绝）；多表注入行过滤要求该层 JOIN 全为内连接（外连接下注入会改变连接语义 → 拒绝）；投影表达式引用了白名单外的列 → 拒绝                                                                   |
+| 列权限合并          | **取交集收紧**：同一张表命中多条权限时，某个权限未配置列白名单只是「它自己不额外限制」，不会放宽其他权限已配置的列白名单；脱敏规则按列合并并取更严格的规则                                                                                     |
+| 执行路径           | **全部 SQL 路径统一在下发前改写**（`SqlPermissionRewriter`）：把投影列裁剪为列白名单。JDBC / Kyuubi 另保留「脱敏 + 列裁剪」作为第二道防线                                                                                       |
+| 改写边界           | 列裁剪只允许单表顶层查询（集合运算分支 / 子查询里裁剪会改变外层列集合 → 拒绝）；投影表达式引用了白名单外的列 → 拒绝                                                                                                          |
 | 改写内容去向         | 改写结果放在 `CodeExecutionContext.effectiveCodeContent`，只有真正提交给引擎的内容被替换；日志、审计与回显仍展示用户原始代码                                                                                        |
 | 不在本层范围         | Scala / Python / Jar 等以任意代码访问数据源的作业，不做 SQL 语句级校验（非 SQL 代码类型直接跳过）                                                                                                            |
 

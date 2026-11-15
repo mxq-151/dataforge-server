@@ -205,10 +205,6 @@ public class MetadataController {
                 tableMetadata.getDatabaseName(),
                 tableMetadata.getTableName()
         );
-        if (permission != null) {
-            permission.setRowFilterSql(dataAccessPermissionService.getMergedRowFilterSql(
-                    datasourceName, tableMetadata.getDatabaseName(), tableMetadata.getTableName()));
-        }
         return Result.success(permission);
     }
 

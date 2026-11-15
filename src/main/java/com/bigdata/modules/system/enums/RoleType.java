@@ -34,6 +34,17 @@ public enum RoleType {
         return description;
     }
 
+    /**
+     * Spring Security 权限串：{@code ROLE_ + 角色码}。
+     *
+     * <p>数据库/初始化脚本里的 role_code 不带前缀（{@code SUPER_ADMIN}），
+     * JWT 与 {@code hasRole}/{@code @PreAuthorize} 用的是带前缀的形式。两者不能混用，
+     * 统一从这里生成，避免再出现 "admin"/"ops"/"ROLE_SUPER_ADMIN" 这类同义写法。</p>
+     */
+    public String getAuthority() {
+        return "ROLE_" + code;
+    }
+
     public static RoleType fromCode(String code) {
         return Arrays.stream(values())
                 .filter(t -> t.code.equalsIgnoreCase(code))

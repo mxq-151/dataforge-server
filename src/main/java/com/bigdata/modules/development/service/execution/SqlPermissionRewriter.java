@@ -6,8 +6,6 @@ import com.bigdata.common.sql.SqlTableCollector;
 import com.bigdata.modules.devops.entity.DatasourceConfig;
 import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.expression.ExpressionVisitorAdapter;
-import net.sf.jsqlparser.expression.Parenthesis;
-import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Column;
 import net.sf.jsqlparser.schema.Table;
@@ -36,16 +34,12 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * SQL 下发前权限改写器（风险项 R4 的闭合手段之一）。
+ * SQL 下发前列级权限改写器（风险项 R4 的闭合手段之一）。
  * <p>
- * 背景：行级过滤与列级权限在 JDBC / Kyuubi 路径上是「结果集返回后再过滤」，
+ * 背景：列级权限在 JDBC / Kyuubi 路径上是「结果集返回后再裁剪」，
  * 而 Spark / Flink / HBase 三条路径把作业交给外部进程执行，服务端拿不到结果集，
- * 无法做后过滤。本类在<b>提交之前</b>改写 SQL，把权限约束下沉到引擎侧执行：
- * <ul>
- *   <li><b>行级过滤</b>：把该表的行过滤条件 AND 进查询的 WHERE 子句；
- *       多表查询时先用该表的别名/表名限定过滤条件里的列。</li>
- *   <li><b>列级权限</b>：把投影列裁剪为列白名单；{@code SELECT *} 展开成白名单列。</li>
- * </ul>
+ * 无法做后处理。本类在<b>提交之前</b>改写 SQL，把列白名单下沉到引擎侧执行：
+ * 把投影列裁剪为列白名单；{@code SELECT *} 展开成白名单列。
  * </p>
  * <p>
  * <b>可安全改写的边界</b>（超出边界一律 fail-close，抛出 {@link SecurityException}，
@@ -53,8 +47,6 @@ import java.util.TreeSet;
  * <ul>
  *   <li>列裁剪只允许发生在单表、且处于可裁剪位置（顶层查询）的 SELECT 上；
  *       集合运算分支、子查询里的列裁剪会改变外层可见的列集合，直接拒绝。</li>
- *   <li>行过滤在多表查询上注入时，要求该层 JOIN 全部为内连接，
- *       避免把 LEFT JOIN 的语义改成 INNER JOIN。</li>
  *   <li>投影列里出现函数/表达式且引用了白名单之外的列时拒绝执行。</li>
  * </ul>
  * </p>
@@ -233,32 +225,16 @@ public class SqlPermissionRewriter {
         boolean changed = false;
         List<Table> levelTables = SqlTableCollector.levelTables(plainSelect);
 
-        // 1) 收集本层各表的行过滤条件，并处理列级权限
-        List<String> rowFilters = new ArrayList<>();
+        // 1) 处理列级权限
         for (Table table : levelTables) {
             String database = SqlTableCollector.databaseName(table) != null
                     ? SqlTableCollector.databaseName(table) : ctx.defaultDatabase;
-            String rowFilter = permissionService.getMergedRowFilterSql(
-                    ctx.datasourceName, database, table.getName());
             Set<String> allowedColumns = permissionService.getAllowedColumns(
                     ctx.datasourceName, database, table.getName());
 
-            if (rowFilter == null && allowedColumns == null) {
-                continue;
-            }
-            log.info("命中权限约束: table={}.{}, rowFilter={}, allowedColumns={}",
-                    database, table.getName(), rowFilter, allowedColumns);
-
-            if (rowFilter != null && !rowFilter.isBlank()) {
-                if (levelTables.size() == 1) {
-                    rowFilters.add(rowFilter);
-                } else {
-                    requireInnerJoinsOnly(plainSelect, table);
-                    rowFilters.add(qualifyRowFilter(rowFilter, table));
-                }
-            }
-
             if (allowedColumns != null) {
+                log.info("命中列级权限约束: table={}.{}, allowedColumns={}",
+                        database, table.getName(), allowedColumns);
                 if (allowedColumns.isEmpty()) {
                     throw new SecurityException("权限不足：表 " + table.getName()
                             + " 的列级权限为空，无法执行该查询");
@@ -310,114 +286,7 @@ public class SqlPermissionRewriter {
             }
         }
 
-        // 3) 注入行级过滤条件
-        if (!rowFilters.isEmpty()) {
-            injectRowFilters(plainSelect, rowFilters);
-            changed = true;
-        }
         return changed;
-    }
-
-    private void injectRowFilters(PlainSelect plainSelect, List<String> rowFilters) {
-        Expression combined = null;
-        for (String filter : rowFilters) {
-            Expression parsed = parseFilter(filter);
-            combined = combined == null ? parsed : new AndExpression(combined, parsed);
-        }
-        if (combined == null) {
-            return;
-        }
-        Expression existing = plainSelect.getWhere();
-        Expression injected = new Parenthesis(combined);
-        plainSelect.setWhere(existing == null
-                ? injected
-                : new AndExpression(new Parenthesis(existing), injected));
-    }
-
-    /**
-     * 解析行级过滤条件。
-     * <p>
-     * 关键点：JSqlParser 对残缺条件非常宽松——{@code parseCondExpression("region =")} 会
-     * 静默返回裸列 {@code region}，注入后等价于「只要 region 非空就放行」，把限制变成了放宽。
-     * 因此这里在解析成功后追加一次「往返一致性」校验：把解析结果重新序列化并与原表达式做
-     * 去空白 / 去大小写差异后的比较，不一致即说明条件被丢弃或改写，按默认拒绝处理。
-     * </p>
-     */
-    private Expression parseFilter(String filter) {
-        String expression = stripWherePrefix(filter);
-        Expression parsed;
-        try {
-            parsed = CCJSqlParserUtil.parseCondExpression(expression);
-        } catch (Exception e) {
-            log.error("行级过滤条件无法解析, 按默认拒绝处理: [{}], 原因={}", filter, e.getMessage());
-            throw new SecurityException(
-                    "权限校验未通过：配置的行级过滤条件无法解析，出于安全考虑已拒绝执行。请管理员检查该表的行权限配置。");
-        }
-        if (!normalizeSql(expression).equals(normalizeSql(parsed.toString()))) {
-            log.error("行级过滤条件被解析器静默简化, 按默认拒绝处理: 输入=[{}], 解析后=[{}]",
-                    expression, parsed);
-            throw new SecurityException(
-                    "权限校验未通过：配置的行级过滤条件无法解析（解析后条件被丢弃或简化），出于安全考虑已拒绝执行。"
-                            + "请管理员检查该表的行权限配置。");
-        }
-        return parsed;
-    }
-
-    /** 归一化 SQL 文本用于往返一致性比较：忽略大小写与空白差异。 */
-    private String normalizeSql(String sql) {
-        return sql == null ? "" : sql.toLowerCase().replaceAll("\\s+", "");
-    }
-
-    private String stripWherePrefix(String filter) {
-        String trimmed = filter.trim();
-        if (trimmed.length() >= 5 && trimmed.regionMatches(true, 0, "where", 0, 5)
-                && (trimmed.length() == 5 || Character.isWhitespace(trimmed.charAt(5)))) {
-            return trimmed.substring(5).trim();
-        }
-        return trimmed;
-    }
-
-    /**
-     * 多表查询下把行过滤条件里的裸列名限定到目标表，避免列名歧义。
-     */
-    private String qualifyRowFilter(String rowFilter, Table table) {
-        String qualifier = SqlTableCollector.aliasName(table) != null
-                ? SqlTableCollector.aliasName(table) : table.getName();
-        Expression expression = parseFilter(rowFilter);
-        expression.accept(new ExpressionVisitorAdapter() {
-            @Override
-            public void visit(Column column) {
-                if (column.getTable() == null || column.getTable().getName() == null
-                        || column.getTable().getName().isEmpty()) {
-                    column.setTable(new Table(qualifier));
-                }
-            }
-        });
-        return expression.toString();
-    }
-
-    /**
-     * 行过滤条件注入 WHERE 时要求该层 JOIN 全部是内连接：
-     * 对 LEFT / RIGHT / FULL JOIN 的空值侧，把过滤条件放进 WHERE 会改变连接语义
-     * （等价于把外连接降级为内连接），因此按默认拒绝处理。
-     */
-    private void requireInnerJoinsOnly(PlainSelect plainSelect, Table table) {
-        List<Join> joins = plainSelect.getJoins();
-        if (joins == null) {
-            return;
-        }
-        for (Join join : joins) {
-            if (join == null) {
-                continue;
-            }
-            if (join.isLeft() || join.isRight() || join.isFull() || join.isOuter()
-                    || join.isSemi() || join.isApply()) {
-                throw new SecurityException("权限不足：表 " + table.getName()
-                        + " 配置了行级权限，但该查询使用了外连接 / 半连接，"
-                        + "在 WHERE 中注入行过滤会改变连接语义，已拒绝执行。"
-                        + "请改写为内连接，或改用 JDBC / Kyuubi 路径执行。");
-            }
-        }
     }
 
     // ==================== 列级裁剪 ====================

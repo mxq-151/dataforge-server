@@ -568,7 +568,7 @@ CREATE TABLE IF NOT EXISTS `sys_file_permission` (
   `permission_name` varchar(100) NOT NULL COMMENT '权限名称',
   `file_path` varchar(1000) NOT NULL COMMENT '文件/目录路径',
   `permission_type` tinyint NOT NULL DEFAULT '1' COMMENT '权限类型(1-读 2-读写 3-完全控制)',
-  `recursive` tinyint NOT NULL DEFAULT '0' COMMENT '是否递归子目录',
+  `is_recursive` tinyint NOT NULL DEFAULT '0' COMMENT '是否递归子目录',
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -669,7 +669,6 @@ CREATE TABLE IF NOT EXISTS `sys_table_permission` (
   `can_update` tinyint NOT NULL DEFAULT '0' COMMENT '更新权限',
   `can_delete` tinyint NOT NULL DEFAULT '0' COMMENT '删除权限',
   `can_export` tinyint NOT NULL DEFAULT '0' COMMENT '导出权限',
-  `row_filter_sql` text COMMENT '行级过滤SQL(WHERE)',
   `data_masking_rule` varchar(500) DEFAULT NULL COMMENT '数据脱敏规则(JSON)',
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -688,17 +687,6 @@ CREATE TABLE IF NOT EXISTS `sys_table_permission_column` (
   PRIMARY KEY (`id`),
   KEY `idx_tpc_perm` (`table_permission_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='库表权限-指定列白名单';
-
--- 库表权限-行级过滤（指定行）
-CREATE TABLE IF NOT EXISTS `sys_table_permission_row` (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `table_permission_id` bigint NOT NULL COMMENT '表权限ID',
-  `table_name` varchar(255) NOT NULL COMMENT '表名',
-  `row_filter_sql` text COMMENT '行过滤SQL',
-  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  PRIMARY KEY (`id`),
-  KEY `idx_tpr_perm` (`table_permission_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=1 COMMENT='库表权限-行级过滤SQL';
 
 -- 租户表
 CREATE TABLE IF NOT EXISTS `sys_tenant` (
