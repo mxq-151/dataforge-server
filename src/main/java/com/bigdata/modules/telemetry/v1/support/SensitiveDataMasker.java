@@ -1,4 +1,4 @@
-package com.bigdata.modules.telemetry.v1.runtime.support;
+package com.bigdata.modules.telemetry.v1.support;
 
 import org.springframework.stereotype.Component;
 
@@ -15,6 +15,8 @@ import java.util.regex.Pattern;
  * <p>两层处理：键名命中敏感词的值整体替换为 {@code ***}；非敏感键的字符串值再做一次
  * 内嵌凭据清洗（如 {@code sasl.jaas.config} 里的 {@code password="..."}）。
  * 与日志模块的 {@code logs.*} 配置解耦，不依赖 runtime 的脱敏模型。</p>
+ *
+ * <p>运行时 config 与 metadata（服务版本与配置）共用这一份实现，避免两套规则漂移。</p>
  */
 @Component
 public class SensitiveDataMasker {

@@ -6,6 +6,7 @@ import com.bigdata.modules.telemetry.model.CapabilityCode;
 import com.bigdata.modules.telemetry.v1.catalog.CatalogContributor;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.dto.LogQueryV1Request;
+import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.model.BackendBinding;
 import com.bigdata.modules.telemetry.v1.model.BackendStatus;
 import com.bigdata.modules.telemetry.v1.model.BackendType;
@@ -18,6 +19,7 @@ import com.bigdata.modules.telemetry.v1.model.Target;
 import com.bigdata.modules.telemetry.v1.routing.BackendRouter;
 import com.bigdata.modules.telemetry.v1.routing.RoutingProperties;
 import com.bigdata.modules.telemetry.v1.spi.BackendCapability;
+import com.bigdata.modules.telemetry.v1.spi.BackendException;
 import com.bigdata.modules.telemetry.v1.spi.LogBackend;
 import com.bigdata.modules.telemetry.v1.spi.LogQueryResult;
 import com.bigdata.modules.telemetry.v1.spi.LogQuerySpec;
@@ -109,6 +111,40 @@ class LogTelemetryQueryServiceTest {
     }
 
     @Test
+    @DisplayName("空日志：映射为 unavailable + NO_LOG_CONTENT，不返回 ok 空数组")
+    void emptyLogMapsToUnavailable() {
+        FakeLogBackend yarn = new FakeLogBackend("yarn", BackendType.YARN)
+                .failing(new BackendException(CapabilityCode.NO_LOG_CONTENT,
+                        "任务实例 1 存在但日志为空"));
+
+        TelemetryQueryV1Response response = service(yarn, List.of(serviceStream(), taskStream()))
+                .query(request("log.task", "stdout", Map.of("taskId", "application_1")));
+
+        assertThat(response.outcome()).isEqualTo("unavailable");
+        assertThat(response.retryable()).isFalse();
+        assertThat(response.data()).isNull();
+        assertThat(response.error().code()).isEqualTo(CapabilityCode.NO_LOG_CONTENT);
+        assertThat(response.error().message()).contains("日志为空");
+    }
+
+    @Test
+    @DisplayName("log.task 两条路径都取不到：unavailable + LOG_SOURCE_UNAVAILABLE，reason 带平台限制")
+    void logSourceUnavailableMapsToUnavailable() {
+        FakeLogBackend yarn = new FakeLogBackend("yarn", BackendType.YARN)
+                .failing(new BackendException(CapabilityCode.LOG_SOURCE_UNAVAILABLE,
+                        "聚合未完成；NM 日志目录未挂载，聚合完成前只能走 node-local"));
+
+        TelemetryQueryV1Response response = service(yarn, List.of(serviceStream(), taskStream()))
+                .query(request("log.task", "stdout", Map.of("taskId", "application_1")));
+
+        assertThat(response.outcome()).isEqualTo("unavailable");
+        assertThat(response.retryable()).isFalse();
+        assertThat(response.data()).isNull();
+        assertThat(response.error().code()).isEqualTo(CapabilityCode.LOG_SOURCE_UNAVAILABLE);
+        assertThat(response.error().message()).contains("聚合完成前只能走 node-local");
+    }
+
+    @Test
     @DisplayName("stream 只在另一个 dataType 下声明：STREAM_NOT_SUPPORTED")
     void streamDeclaredUnderOtherDataType() {
         TelemetryQueryV1Response response = service(List.of(serviceStream())).query(
@@ -161,7 +197,8 @@ class LogTelemetryQueryServiceTest {
                 List.of((CatalogContributor) () -> List.of(new ComponentCatalogEntry(
                         TARGET.serviceType(), TARGET.componentId(), List.of(), streams, List.of(),
                         CatalogStatus.IMPLEMENTED, List.of()))));
-        return new LogTelemetryQueryService(catalog, router, registry, new LogCircuitBreaker());
+        return new LogTelemetryQueryService(catalog, new MetadataCatalogRegistry(List.of()),
+                router, registry, new LogCircuitBreaker());
     }
 
     private LogStreamDefinition serviceStream() {
@@ -199,10 +236,16 @@ class LogTelemetryQueryServiceTest {
         private final String id;
         private final BackendType type;
         private int fetches;
+        private BackendException failure;
 
         private FakeLogBackend(String id, BackendType type) {
             this.id = id;
             this.type = type;
+        }
+
+        private FakeLogBackend failing(BackendException failure) {
+            this.failure = failure;
+            return this;
         }
 
         @Override
@@ -223,6 +266,9 @@ class LogTelemetryQueryServiceTest {
         @Override
         public LogQueryResult fetch(LogQuerySpec spec) {
             fetches++;
+            if (failure != null) {
+                throw failure;
+            }
             return new LogQueryResult(List.of(new LogEntry(null, spec.stream(),
                     spec.target().hostId(), "line", Map.of())), null, false, null, List.of());
         }

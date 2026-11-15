@@ -44,6 +44,10 @@ services:
       # 主容器只读挂载，供 logs.sources[file].root-dirs 与 Flink jobmanager/taskmanager-log-dirs 读取。
       - ${DATAFORGE_LOG_ROOT:-/Users/mxq/dataforge-logs}:/var/log/engines:ro
       - ${DATAFORGE_LOG_ROOT:-/Users/mxq/dataforge-logs}/config:/opt/dataforge-config:ro
+      # YARN NodeManager 容器日志目录（宿主机 <-> 容器）。NM 必须能写这里，所以不能加 :ro；
+      # 诊断后端只读取宿主机同一路径（telemetry.backends.yarn[].node-log-root），不写。
+      # 聚合完成前 node-local 回退依赖此挂载，未挂载时该容器不可获取。
+      - ${DATAFORGE_LOG_ROOT:-/Users/mxq/dataforge-logs}/yarn-nm-logs:/var/lib/dataforge-yarn/nm-logs
     mem_limit: 7g
     # 为什么是 7g：实测空闲占用约 4.0 GiB，7g 留出 3g 余量，同时给引擎验证环境腾内存。
     # 跑 Spark 任务压测（多 executor / 大 shuffle）时如需调回 8g，按以下现象判断：

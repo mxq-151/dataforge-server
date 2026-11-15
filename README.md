@@ -178,6 +178,91 @@ curl -X POST http://localhost:8083/api/system/auth/login \
 - **日志**：命令、退出码、耗时与 stdout / stderr 全部写入提交日志；失败时抛出的错误信息包含命令、退出码与关键输出，成功时从输出解析 jobId 并落库（解析不到会明确提示，不伪造）。
 - **能力边界（命令行做不到的）**：SeaTunnel 2.3.x 客户端没有稳定的状态查询子命令，`status-args` 默认留空，此时状态查询返回明确的「不支持」提示；替代方案是升级客户端后配置 `status-args`，或在集群侧使用 Zeta REST 的 `job-info` / `stop-job`。Flink 的 `flink list` 只能看到会话 / 远端集群上的作业，application 模式需在 `status-args`、`cancel-args` 中补充 `-t yarn-application` 等参数。
 
+## 统一取数接口（`/api/telemetry/v1`）
+
+五类取数能力共用四态外壳（`outcome` / `retryable` / `CapabilityCode` / `requirements[]` / `meta`）：
+
+| 能力 | 端点 | 说明 |
+| --- | --- | --- |
+| 指标 | `POST /api/telemetry/v1/metrics/query` | `mode=range/instant`，`mode=catalog` 返回目录 |
+| 日志 | `POST /api/telemetry/v1/logs/query` | `dataType=log.service/log.task`，`mode=catalog` 返回目录 |
+| 异常摘要 | `POST /api/telemetry/v1/exceptions/query` | Flink 列表接口，保留 taskName / exceptionName / rootCause / timestamp / truncated |
+| 运行时发现 | `POST /api/telemetry/v1/runtime/discovery` | Flink / Spark 作业与组件 |
+| 运行时快照 | `POST /api/telemetry/v1/runtime/snapshot` | 指标快照（进程内环形缓冲，重启即丢） |
+| 运行时配置 | `POST /api/telemetry/v1/runtime/config` | 作业 / 引擎实例配置（脱敏输出 `***`） |
+| 运行时对比 | `POST /api/telemetry/v1/runtime/compare` | 两个快照对比，多实例部署各自独立不可比 |
+| 服务版本与配置 | `POST /api/telemetry/v1/metadata/query` | 服务自身版本与部署配置，provider 可插拔 |
+
+`metadata/query` 的取数方式由 `ServiceMetadataProvider` SPI 决定，内置 Ambari、ClickHouse HTTP、
+Doris FE / StarRocks FE（MySQL 协议）、manual 五个 provider，默认全部关闭；
+配置示例见 `application.yml` 的 `telemetry.metadata` 注释块，开发指南见
+[服务元数据 Provider 开发指南](docs/服务元数据Provider开发指南.md)。
+
+> **验证边界**：ClickHouse 与 Doris 已对真实实例联调（版本、配置项、脱敏效果均有实测）；
+> **StarRocks 与 Ambari 当前没有真实实例，只做了录制响应的 fixture 单测，未对真实实例验证**。
+> 首次接入时需重新核对列名 / 字段与语句兼容性，不要据文档臆断。
+
+任务日志（`log.task`）支持 YARN 容器日志与 DolphinScheduler（`ds-api`）。DS 侧 `ref.jobId`
+即 taskInstanceId；`ref.jobName` 不全局唯一，命中多条且未给 `workflowInstanceId` 时返回
+`AMBIGUOUS_REFERENCE`，不会静默取第一条。`/log/detail` 分页受总行数 / 总字节上限约束并标记
+`truncated`；空日志返回 `UNAVAILABLE`（`NO_LOG_CONTENT`），不返回空数组。配置示例见
+`application.yml` 的 `telemetry.backends.ds-api` 注释块。
+
+YARN 侧有两条取数路径并按可用性降级：已聚合走 `yarn logs -applicationId`；聚合未完成
+（例如应用仍在运行、`logAggregationStatus=NOT_START`）时，通过 RM `/ws/v1/cluster/nodes` →
+NM `/ws/v1/node/containers` 定位应用容器，再读 `node-log-root/application_x/container_y/stream`。
+每条样本都带 `containerId` / `nmHost` / `source=aggregated|node-local`，不做空串或 0 行填充。
+平台限制：**聚合完成前只能走 node-local，NM 日志目录未挂载到本进程可见路径时该容器不可获取**；
+该语义会写入 `LOG_AGGREGATION_NOT_COMPLETE` 告警或 `LOG_SOURCE_UNAVAILABLE` 的 reason，
+不是只写在文档里。部署时 `docker-compose.yml` 把 `${DATAFORGE_LOG_ROOT}/yarn-nm-logs` 挂到
+容器 `/var/lib/dataforge-yarn/nm-logs`（NM 需要写该目录，因此不是只读挂载；诊断后端只读），
+后端 `node-log-root` 配成宿主机路径 `/Users/mxq/dataforge-logs/yarn-nm-logs`。配置见
+`application.yml` 的 `telemetry.backends.yarn` 注释块。
+
+Spark 的任务 stdout/stderr 唯一通道是 YARN（`log.task`，`ref.taskId=application_*`）；SHS 只
+承担指标与状态。SHS `/api/v1/applications/{appId}/logs` 实测是 **122,323 字节的 deflate zip
+（事件日志）**，不是文本日志，不要解析它；standalone / local 模式没有 applicationId 与聚合日志，
+查询返回 `UNAVAILABLE` + `LOG_SOURCE_UNAVAILABLE` + `requirements[]`（说明无可用通道），
+不会静默当作缺失。目录里也没有 SHS 文本日志通道，`local-disk` 仍严格只承载 `log.service`。
+
+Doris 慢查询（`slowquery`）在 `doris.fe` / `doris.be` 下已实现两条通道：优先 `doris-audit`
+查询 `__internal_schema.audit_log`（固定只读 SQL，时间窗 / `query_time` 阈值 / 行数都是参数，
+没有任意 SQL 入口），退路是 `local-disk` 解析 FE 的 `fe.audit.log`；两者只有配置显式把
+`doris-slowquery` 等价组包含 `doris-audit` 与 `local-disk` 时才允许回退，否则不互相顶替。
+审计表为空时返回 `resultState=empty` + `EMPTY_AUDIT_RESULT` 告警，不伪造数据；条数 / 字节
+触顶返回 `truncated=true` + `RESULT_TRUNCATED`；未给时间范围时按 `default-lookback-hours`
+回看并给出 `DEFAULT_TIME_WINDOW` 告警。
+
+> **Doris 4.1.5 实测结论**：`enable_audit_plugin=true`，`__internal_schema.audit_log` 存在
+> （`count(*)=18580`），**没有 `is_slow_query` 列**，慢查询用 `query_time >= 阈值` 判断；
+> 实测慢样本 `2026-11-15 09:48:18.789 | 9345ms | admin | state=ERR | error_code=1815`。
+> `audit_log.time` 是 FE 进程时区（本环境为 UTC），`zone` 配错会让时间窗整体偏移。
+> 退路 `fe.audit.log` 的行首是 `AuditLogger <写入时间>`，`Timestamp=` / `Time(ms)=` 在行内；
+> `local-disk` 的时间戳取行首写入时间（与查询开始时间可能差数秒），阈值需调用方按
+> `Time(ms)=` 自行过滤。配置见 `application.yml` 的 `telemetry.backends.doris-audit` 注释块。
+>
+> **验证边界**：审计表通道已对真实 Doris 4.1.5 联调（含截断、空结果、默认时间窗）；
+> `local-disk` 退路也用真实 `fe.audit.log` 跑通（未配置 `doris-audit` 时选中 `local-disk`，
+> 返回 3 条审计行）。「审计表不存在 → 回退」只做了单测（错误映射），没有在真实环境关闭
+> 审计插件复验。
+
+引擎异常摘要（`exceptions/query`）当前支持 Flink，`ref.jobId` 必填。返回结构化
+`exceptions[]`（taskName / exceptionName / rootCause / timestamp / failureLabels /
+concurrentExceptions / stackTrace），不拍平成一行日志。成功但无异常返回
+`outcome=ok` + `data.resultState=empty` + `NO_EXCEPTION_HISTORY` 告警；404 / 5xx / 超时
+分别映射 `NOT_FOUND` / `UPSTREAM_ERROR` / `UPSTREAM_TIMEOUT`，取不到不会返回空数组。
+条数、并发异常数与 stacktrace 长度都有上限，触顶返回 `truncated=true` +
+`RESULT_TRUNCATED`。
+
+> **Flink 2.2 平台限制**：只有 `GET /jobs/{jobId}/exceptions` 列表接口，没有
+> `/jobs/{jobId}/exceptions/{exception}` 单条子资源（实测任意路径参数均 404，源码
+> `JobExceptionsHandler` 也只有一个 `@Get`）。因此本接口只实现列表查询；服务端唯一的截断
+> 标记是 `exceptionHistory.truncated`，单条 stacktrace 没有服务端截断字段。不要按 Flink 1.x
+> 文档补回单条子资源调用。
+>
+> **验证边界**：已对 Flink 2.2.0 standalone 真实联调——运行中作业返回真实空历史；另起失败作业
+> 取得真实 `JobException` + `ConnectException` 样本。无异常的 fixture 只用于单测。
+
 ## 容器化部署（All-in-One）
 
 `build/` 与 `startup/` 提供单容器一体镜像：镜像内以 supervisord 托管 **PostgreSQL 14 + dataforge-server + DolphinScheduler + Marquez（API 与 Web）**，另预置 Spark 3.5.9 与 OpenLineage Spark 插件。

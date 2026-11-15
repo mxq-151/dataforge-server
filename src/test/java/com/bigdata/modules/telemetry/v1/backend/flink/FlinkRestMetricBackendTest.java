@@ -91,13 +91,13 @@ class FlinkRestMetricBackendTest {
     }
 
     @Test
-    @DisplayName("异常摘要：返回结构化证据，不混入日志接口")
+    @DisplayName("异常摘要：返回 Flink 2.2 结构化证据，不混入日志接口")
     void exceptionSummary() throws IOException {
         try (FakeFlink flink = new FakeFlink()) {
             JsonNode evidence = backend(flink).exceptionSummary("j1");
 
-            assertThat(evidence.path("root-exception").asText()).contains("boom");
-            assertThat(evidence.path("all-exceptions")).hasSize(1);
+            assertThat(evidence.path("exceptionHistory").path("entries")).hasSize(1);
+            assertThat(evidence.path("exceptionHistory").path("truncated").asBoolean()).isFalse();
         }
     }
 
@@ -162,9 +162,10 @@ class FlinkRestMetricBackendTest {
                       {"subtask":1,"busyRatio":0.6,"ratio":0.4,"backpressureLevel":"low"}]}
                     """));
             server.createContext("/jobs/j1/exceptions", exchange -> respond(exchange, """
-                    {"root-exception":"java.lang.RuntimeException: boom",
-                     "timestamp":1794704400000,"truncated":false,
-                     "all-exceptions":[{"exceptionName":"java.lang.RuntimeException","stacktrace":"..."}]}
+                    {"exceptionHistory":{"entries":[{"exceptionName":"java.lang.RuntimeException",
+                      "stacktrace":"java.lang.RuntimeException: boom\\nCaused by: java.io.IOException: disk",
+                      "timestamp":1794704400000,"failureLabels":{},
+                      "concurrentExceptions":[]}],"truncated":false}}
                     """));
             server.start();
         }

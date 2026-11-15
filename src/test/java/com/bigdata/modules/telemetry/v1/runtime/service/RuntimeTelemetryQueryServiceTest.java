@@ -18,7 +18,7 @@ import com.bigdata.modules.telemetry.v1.runtime.model.RuntimeMetric;
 import com.bigdata.modules.telemetry.v1.runtime.model.SnapshotData;
 import com.bigdata.modules.telemetry.v1.runtime.spi.RuntimeEngine;
 import com.bigdata.modules.telemetry.v1.runtime.spi.RuntimeQuerySpec;
-import com.bigdata.modules.telemetry.v1.runtime.support.SensitiveDataMasker;
+import com.bigdata.modules.telemetry.v1.support.SensitiveDataMasker;
 import com.bigdata.modules.telemetry.v1.runtime.support.SnapshotHistory;
 import com.bigdata.modules.telemetry.v1.vo.TelemetryQueryV1Response;
 import org.junit.jupiter.api.BeforeEach;

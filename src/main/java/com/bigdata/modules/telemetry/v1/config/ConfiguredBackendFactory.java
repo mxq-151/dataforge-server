@@ -1,5 +1,7 @@
 package com.bigdata.modules.telemetry.v1.config;
 
+import com.bigdata.modules.telemetry.v1.backend.doris.DorisAuditLogBackend;
+import com.bigdata.modules.telemetry.v1.backend.ds.DsApiLogBackend;
 import com.bigdata.modules.telemetry.v1.backend.es.ElasticsearchLogBackend;
 import com.bigdata.modules.telemetry.v1.backend.flink.FlinkRestMetricBackend;
 import com.bigdata.modules.telemetry.v1.backend.localdisk.LocalDiskLogBackend;
@@ -8,6 +10,8 @@ import com.bigdata.modules.telemetry.v1.backend.promql.PromqlMetricBackend;
 import com.bigdata.modules.telemetry.v1.backend.spark.SparkRestMetricBackend;
 import com.bigdata.modules.telemetry.v1.backend.yarn.YarnLogBackend;
 import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.Auth;
+import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.DsConfig;
+import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.DorisAuditConfig;
 import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.EsConfig;
 import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.FlinkRestConfig;
 import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.LocalDiskConfig;
@@ -16,6 +20,9 @@ import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.SparkR
 import com.bigdata.modules.telemetry.v1.config.TelemetryBackendProperties.YarnConfig;
 import com.bigdata.modules.telemetry.v1.model.BackendType;
 import com.bigdata.modules.telemetry.v1.spi.BackendCapability;
+import com.bigdata.modules.telemetry.v1.spi.ExceptionQueryResult;
+import com.bigdata.modules.telemetry.v1.spi.ExceptionQuerySpec;
+import com.bigdata.modules.telemetry.v1.spi.ExceptionSummaryBackend;
 import com.bigdata.modules.telemetry.v1.spi.LogBackend;
 import com.bigdata.modules.telemetry.v1.spi.MetricBackend;
 import com.bigdata.modules.telemetry.v1.spi.MetricQueryResult;
@@ -111,6 +118,38 @@ public class ConfiguredBackendFactory {
             LogBackend backend = new YarnLogBackend(id, config, header, objectMapper);
             logBackends.add(error == null ? backend : new AuthAwareLogBackend(backend, error));
         }
+        for (DsConfig config : properties.getDsApi()) {
+            String id = isBlank(config.getId()) ? "ds-api" : config.getId();
+            String username = null;
+            String password = null;
+            String error = null;
+            try {
+                username = secretResolver.resolve(config.getAuth().getUsername(),
+                        config.getAuth().getUsernameRef(), "ds-api." + id + ".username");
+                password = secretResolver.resolve(config.getAuth().getPassword(),
+                        config.getAuth().getPasswordRef(), "ds-api." + id + ".password");
+            } catch (IllegalStateException e) {
+                error = e.getMessage();
+                log.warn("DS 日志后端 {} 凭据配置不可用: {}", id, error);
+            }
+            LogBackend backend = new DsApiLogBackend(id, config, username, password, objectMapper);
+            logBackends.add(error == null ? backend : new AuthAwareLogBackend(backend, error));
+        }
+        for (DorisAuditConfig config : properties.getDorisAudit()) {
+            String id = isBlank(config.getId()) ? "doris-audit" : config.getId();
+            String error = null;
+            try {
+                config.setUsername(secretResolver.resolve(config.getUsername(),
+                        config.getUsernameRef(), "doris-audit." + id + ".username"));
+                config.setPassword(secretResolver.resolve(config.getPassword(),
+                        config.getPasswordRef(), "doris-audit." + id + ".password"));
+            } catch (IllegalStateException e) {
+                error = e.getMessage();
+                log.warn("Doris 审计后端 {} 凭据配置不可用: {}", id, error);
+            }
+            LogBackend backend = new DorisAuditLogBackend(id, config);
+            logBackends.add(error == null ? backend : new AuthAwareLogBackend(backend, error));
+        }
     }
 
     public List<MetricBackend> metricBackends() {
@@ -186,7 +225,7 @@ public class ConfiguredBackendFactory {
 
     /** 认证配置失败时，让能力判定直接返回 NOT_CONFIGURED，而不是带着空凭据去撞 401。 */
     private record AuthAwareMetricBackend(MetricBackend delegate, String configurationError)
-            implements MetricBackend {
+            implements MetricBackend, ExceptionSummaryBackend {
 
         @Override
         public String backendId() {
@@ -211,6 +250,34 @@ public class ConfiguredBackendFactory {
         @Override
         public MetricQueryResult fetch(MetricQuerySpec spec) {
             return delegate.fetch(spec);
+        }
+
+        @Override
+        public BackendCapability evaluate(ExceptionQuerySpec spec) {
+            if (configurationError != null) {
+                return BackendCapability.unavailable(
+                        com.bigdata.modules.telemetry.model.CapabilityCode.NOT_CONFIGURED,
+                        configurationError, List.of());
+            }
+            if (!(delegate instanceof ExceptionSummaryBackend backend)) {
+                return BackendCapability.notImplemented(
+                        "后端 " + delegate.backendId() + " 不提供异常摘要", List.of());
+            }
+            return backend.evaluate(spec);
+        }
+
+        @Override
+        public ExceptionQueryResult fetch(ExceptionQuerySpec spec) {
+            return summary().fetch(spec);
+        }
+
+        private ExceptionSummaryBackend summary() {
+            if (delegate instanceof ExceptionSummaryBackend backend) {
+                return backend;
+            }
+            throw new com.bigdata.modules.telemetry.v1.spi.BackendException(
+                    com.bigdata.modules.telemetry.model.CapabilityCode.DATA_TYPE_NOT_IMPLEMENTED,
+                    "后端 " + delegate.backendId() + " 不提供异常摘要");
         }
     }
 

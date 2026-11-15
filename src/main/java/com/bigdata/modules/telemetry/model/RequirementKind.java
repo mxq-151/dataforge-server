@@ -6,5 +6,13 @@ public enum RequirementKind {
     API,
     PLUGIN,
     DEPLOYMENT,
-    PERMISSION
+    PERMISSION,
+
+    // ---- 服务版本 / 配置查询新增 ----
+    /** 需要实现并注册 SPI（如 ServiceMetadataProvider）。 */
+    IMPLEMENTATION,
+    /** 需要凭据（账号 / token / keytab）。 */
+    CREDENTIAL,
+    /** 需要修正查询目标（集群 / 服务 / 主机不存在）。 */
+    TARGET
 }

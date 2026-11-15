@@ -20,7 +20,14 @@ public enum BackendType {
     LOCAL_DISK("local-disk", Category.LOG),
     ELASTICSEARCH("elasticsearch", Category.LOG),
     /** YARN 聚合日志：只承载任务日志（log.task），不用于服务自身日志。 */
-    YARN("yarn", Category.LOG);
+    YARN("yarn", Category.LOG),
+    /** DolphinScheduler 任务日志：只承载 log.task，按 taskInstanceId 读取任务实例日志。 */
+    DS_API("ds-api", Category.LOG),
+    /**
+     * Doris 审计日志：只承载 log.service 的 slowquery，按固定只读 SQL 查询
+     * {@code __internal_schema.audit_log}；没有任意 SQL 入口。
+     */
+    DORIS_AUDIT("doris-audit", Category.LOG);
 
     /** 数据类别：状态数据 / 日志数据。 */
     public enum Category {

@@ -1,4 +1,4 @@
-package com.bigdata.modules.telemetry.v1.runtime.support;
+package com.bigdata.modules.telemetry.v1.support;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

@@ -4,6 +4,7 @@ import com.bigdata.modules.telemetry.shared.LogCircuitBreaker;
 import com.bigdata.modules.telemetry.model.CapabilityCode;
 import com.bigdata.modules.telemetry.v1.catalog.CatalogContributor;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
+import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.dto.MetricQueryV1Request;
 import com.bigdata.modules.telemetry.v1.model.BackendBinding;
 import com.bigdata.modules.telemetry.v1.model.BackendStatus;
@@ -171,7 +172,9 @@ class MetricTelemetryQueryServiceTest {
                 List.of((CatalogContributor) () -> List.of(new ComponentCatalogEntry(
                         "flink", "flink.jobmanager", List.of(definition), List.of(), List.of(),
                         CatalogStatus.IMPLEMENTED, List.of()))));
-        return new MetricTelemetryQueryService(catalog, router, registry, new LogCircuitBreaker());
+        return new MetricTelemetryQueryService(catalog,
+                new MetadataCatalogRegistry(List.of()), router, registry,
+                new LogCircuitBreaker());
     }
 
     private MetricDefinition definition(List<BackendBinding> bindings,

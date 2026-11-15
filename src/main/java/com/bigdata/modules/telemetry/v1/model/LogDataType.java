@@ -11,16 +11,17 @@ import java.util.Set;
  * 日志数据分类：服务自身日志与在服务上运行的任务日志。
  *
  * <p>两类日志的证据来源不同，后端集合严格隔离：服务日志只能走本地磁盘 / Elasticsearch，
- * 任务日志只能走 YARN 聚合日志。两者之间不允许回退，否则会拿服务日志冒充任务日志。</p>
+ * 任务日志走 YARN 聚合日志或 DolphinScheduler 任务日志。两者之间不允许回退，否则会拿服务日志
+ * 冒充任务日志。</p>
  */
 public enum LogDataType {
 
     SERVICE("log.service",
-            Set.of(BackendType.LOCAL_DISK, BackendType.ELASTICSEARCH),
+            Set.of(BackendType.LOCAL_DISK, BackendType.ELASTICSEARCH, BackendType.DORIS_AUDIT),
             Set.of("stdout", "stderr", "slowquery")),
 
     TASK("log.task",
-            Set.of(BackendType.YARN),
+            Set.of(BackendType.YARN, BackendType.DS_API),
             Set.of("stdout", "stderr"));
 
     private final String wire;

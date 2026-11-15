@@ -42,7 +42,15 @@ public enum CapabilityCode {
     /** 后端不属于当前 dataType 允许的集合（如用 yarn 查服务日志）。 */
     LOG_DATA_TYPE_MISMATCH(false),
     /** 该 stream 在当前 dataType 下不受支持（如 log.task 查 slowquery）。 */
-    STREAM_NOT_SUPPORTED(false);
+    STREAM_NOT_SUPPORTED(false),
+    /** jobName 命中多条任务实例且未给消歧条件：禁止静默取第一条。 */
+    AMBIGUOUS_REFERENCE(false),
+    /** 任务实例存在但日志为空：按不可用返回，不伪造空数组成功。 */
+    NO_LOG_CONTENT(false),
+    /** 日志源全部不可取（如 YARN 聚合未完成且 NM 本地目录未挂载）：带 reason 返回，不用空串兜底。 */
+    LOG_SOURCE_UNAVAILABLE(false),
+    /** 结果触达条数/字节上限被截断：数据可用但不完整，必须显式标记。 */
+    RESULT_TRUNCATED(false);
 
     private final boolean retryable;
 

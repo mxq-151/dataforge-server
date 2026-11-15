@@ -139,8 +139,9 @@ integration:
 # ============================================================================
 # 统一取数（/api/telemetry/v1/**）
 #
-# 服务类型只收敛到 agentkit 的九个引擎；file 是 transport、ds/yarn 是接入方式，
-# 都不作为服务节点。os.cpu/os.memory/os.disk/log.slow_query 为声明未实现，
+# 服务类型只收敛到 agentkit 的九个引擎；file 是 transport，ds/yarn 是接入方式，
+# 都不作为可诊断引擎。ds 只提供 ds.worker 任务日志（log.task），
+# os.cpu/os.memory/os.disk/log.slow_query 为声明未实现，
 # 查询会返回 NOT_IMPLEMENTED 且 data 恒为 null。
 # ============================================================================
 telemetry:
@@ -182,17 +183,60 @@ telemetry:
   #     - id: flink-rest
   #       base-url: http://flink-jobmanager:8081
   #       limits: { timeout-ms: 10000, max-response-bytes: 8388608, max-series: 2000 }
+  #       # 异常摘要只走 GET /jobs/{jobId}/exceptions；2.2 无单条异常子资源。
+  #       max-exceptions: 20            # 异常条数上限（Flink 服务端默认也是 20）
+  #       max-concurrent-exceptions: 20 # 每条根异常保留的并发异常数
+  #       max-stack-trace-chars: 20000  # 单条 stacktrace 输出字符上限，超出客户端截断并标记
   #   spark-rest:
   #     - id: spark-rest
   #       base-url: http://spark-history:18080
   #       mode: history   # history | live
   #       limits: { timeout-ms: 10000, max-response-bytes: 8388608, max-series: 2000 }
-  #   # YARN 聚合日志：只承载 log.task；服务日志（log.service）不会路由到这里。
+  #   # YARN 容器日志：只承载 log.task；服务日志（log.service）不会路由到这里。
+  #   # 已聚合走 yarn logs；聚合未完成（如应用仍在跑）回退 NM 本地目录，需要把 NM 日志目录挂载到
+  #   # node-log-root 才能读到；未挂盘的容器在聚合完成前不可获取（响应里会给原因）。
   #   yarn:
   #     - id: yarn
-  #       rm-base-url: http://yarn-rm:8088   # 只给 ref.jobName 时必填；给了 taskId 可留空
+  #       rm-base-url: http://yarn-rm:8088   # 只给 ref.jobName 或需要 node-local 回退时必填
   #       command: yarn                       # yarn 可执行文件或绝对路径
-  #       limits: { timeout-ms: 30000, max-bytes: 1048576, max-concurrent: 2, acquire-timeout-ms: 2000 }
+  #       # 本进程可见的 NM 容器日志根目录；与 compose 中
+  #       # ${DATAFORGE_LOG_ROOT}/yarn-nm-logs:/var/lib/dataforge-yarn/nm-logs 的宿主机一侧对应
+  #       node-log-root: /Users/mxq/dataforge-logs/yarn-nm-logs
+  #       nm-base-url: http://127.0.0.1:8042  # 单节点/端口映射时可覆盖 NM REST 地址；留空按 RM nodeHTTPAddress
+  #       limits: { timeout-ms: 30000, max-bytes: 1048576, max-concurrent: 2, acquire-timeout-ms: 2000, max-nodes: 50 }
+  #   # DolphinScheduler 任务日志：只承载 log.task；ref 用 jobId（即 taskInstanceId）或
+  #   # jobName（不全局唯一，命中多条时必须给 workflowInstanceId 消歧，否则返回 AMBIGUOUS_REFERENCE）。
+  #   ds-api:
+  #     - id: ds-api
+  #       base-url: http://dolphinscheduler:12345/dolphinscheduler
+  #       auth:
+  #         username: admin
+  #         password-ref: 'env:DS_PASSWORD'
+  #       project-codes: []   # 留空时遍历当前账号的授权项目
+  #       limits: { timeout-ms: 10000, max-bytes: 1048576, max-lines: 5000, page-size: 1000, max-pages: 20 }
+  #   # Doris 慢查询：只承载 log.service 的 slowquery。走固定只读 SQL 查询
+  #   # __internal_schema.audit_log（需 FE enable_audit_plugin=true），没有任意 SQL 入口。
+  #   # 表不存在时按目录声明回退到 local-disk 解析 FE 的 fe.audit.log。
+  #   doris-audit:
+  #     - id: doris-audit
+  #       jdbc-url: jdbc:mysql://doris-fe:9030/__internal_schema
+  #       username: root
+  #       password-ref: 'env:DORIS_PASSWORD'
+  #       slow-query-ms: 5000          # audit_log.query_time 阈值；Doris qe_slow_log_ms 默认 5000
+  #       zone: UTC                    # audit_log.time 所在时区，必须与 FE 进程时区一致
+  #       default-lookback-hours: 24   # 请求未带时间范围时的回看窗口，避免全表扫描
+  #       limits: { timeout-ms: 10000, max-rows: 500, max-bytes: 524288 }
+  #   # 退路：FE 的 fe.audit.log 由 local-disk 解析。把下面这条加到上面的 local-disk.sources，
+  #   # 并把 fe.audit.log 所在目录加入 allow-root-dirs。local-disk 的时间戳取行首 'AuditLogger '
+  #   # 后的写入时间（与行内 Timestamp= 查询开始时间可能差数秒）；阈值需按 Time(ms)= 自行过滤。
+  #   # sources:
+  #   #   - service-type: doris
+  #   #     component-id: doris.fe
+  #   #     host-id: cluster
+  #   #     stream: slowquery
+  #   #     path: /Users/mxq/dataforge-logs/doris-fe/fe.audit.log
+  #   #     timestamp-pattern: "'AuditLogger 'yyyy-MM-dd HH:mm:ss,SSS"
+  #   #     zone: UTC   # 与 FE 进程时区一致
   #
   # routing:
   #   metric:
@@ -209,4 +253,57 @@ telemetry:
   #     flink-logs:
   #       backends: [local-disk, es-logs]
   #       service-type: flink
+  #     doris-slowquery:
+  #       backends: [doris-audit, local-disk]
+  #       service-type: doris
+  # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # 服务版本与配置查询（POST /telemetry/v1/metadata/query）。
+  # 默认全部关闭；未启用的 provider 不参与路由，查询返回 UNAVAILABLE + NOT_CONFIGURED。
+  # 密码统一走 password-ref（env: / file: / config: / plain:），不要明文写在 yml 里。
+  # Doris / StarRocks 走独立 JDBC 连接池（上限 2、connectTimeout/socketTimeout），
+  # 不复用应用 DataSource，且只允许 SHOW FRONTENDS / SHOW BACKENDS /
+  # ADMIN SHOW FRONTEND CONFIG 等只读语句。
+  # 示例（按需取消注释）：
+  #
+  # metadata:
+  #   query: { max-targets: 20, max-config-items: 500, timeout-ms: 10000 }
+  #   providers:
+  #     ambari:
+  #       enabled: false
+  #       order: 10
+  #       base-url: http://ambari:8080
+  #       cluster: c1
+  #       auth: { type: basic, username: admin, password-ref: 'env:AMBARI_PASSWORD' }
+  #     clickhouse-http:
+  #       enabled: false
+  #       order: 20
+  #       base-url: http://127.0.0.1:8123
+  #       auth: { type: basic, username: default, password-ref: 'env:CLICKHOUSE_PASSWORD' }
+  #       sections: [server_settings, settings, merge_tree_settings]
+  #     doris-fe:
+  #       enabled: false
+  #       order: 30
+  #       jdbc-url: jdbc:mysql://127.0.0.1:9030
+  #       username: root
+  #       password-ref: 'env:DORIS_PASSWORD'
+  #     starrocks-fe:            # 未对真实实例验证
+  #       enabled: false
+  #       order: 40
+  #       jdbc-url: jdbc:mysql://127.0.0.1:9030
+  #       username: root
+  #       password-ref: 'env:STARROCKS_PASSWORD'
+  #     manual:
+  #       enabled: false
+  #       order: 90
+  #       entries:
+  #         - service-type: clickhouse
+  #           component-id: clickhouse.server
+  #           host-id: ch-1
+  #           raw-version: 24.8.14.39
+  #           vendor: ClickHouse
+  #           distribution: clickhouse-server
+  #           configs:
+  #             - { section: server_settings, key: max_connections, value: '4096' }
   # ---------------------------------------------------------------------------

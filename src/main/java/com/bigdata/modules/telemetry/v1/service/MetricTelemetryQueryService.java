@@ -8,6 +8,8 @@ import com.bigdata.modules.telemetry.model.Requirement;
 import com.bigdata.modules.telemetry.model.RequirementKind;
 import com.bigdata.modules.telemetry.v1.catalog.TelemetryCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.dto.MetricQueryV1Request;
+import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogEntry;
+import com.bigdata.modules.telemetry.v1.metadata.catalog.MetadataCatalogRegistry;
 import com.bigdata.modules.telemetry.v1.model.BackendWarning;
 import com.bigdata.modules.telemetry.v1.model.CatalogStatus;
 import com.bigdata.modules.telemetry.v1.model.ComponentCatalogEntry;
@@ -48,15 +50,18 @@ public class MetricTelemetryQueryService {
     private static final String CIRCUIT_PREFIX = "telemetry:v1:";
 
     private final TelemetryCatalogRegistry catalogRegistry;
+    private final MetadataCatalogRegistry metadataCatalogRegistry;
     private final BackendRouter router;
     private final TelemetryBackendRegistry backendRegistry;
     private final LogCircuitBreaker circuitBreaker;
 
     public MetricTelemetryQueryService(TelemetryCatalogRegistry catalogRegistry,
+                                       MetadataCatalogRegistry metadataCatalogRegistry,
                                        BackendRouter router,
                                        TelemetryBackendRegistry backendRegistry,
                                        LogCircuitBreaker circuitBreaker) {
         this.catalogRegistry = catalogRegistry;
+        this.metadataCatalogRegistry = metadataCatalogRegistry;
         this.router = router;
         this.backendRegistry = backendRegistry;
         this.circuitBreaker = circuitBreaker;
@@ -238,12 +243,29 @@ public class MetricTelemetryQueryService {
                         || entry.componentId().equals(filter.componentId()))
                 .toList();
         TelemetryQueryV1Response.CatalogData data = new TelemetryQueryV1Response.CatalogData(
-                catalogRegistry.catalog().version(), components);
+                catalogRegistry.catalog().version(), components, metadataOf(filter));
         return new TelemetryQueryV1Response("ok", false, filter, "catalog",
                 emptyBackend(), data, null,
                 new TelemetryQueryV1Response.MetaView(System.currentTimeMillis() - start,
                         false, false, List.of(), null, Instant.now().toString(),
                         null, false, null));
+    }
+
+    /** metadata 目录与指标目录共用同一套 target 过滤规则。 */
+    private List<MetadataCatalogEntry> metadataOf(Target filter) {
+        List<MetadataCatalogEntry> matched = new ArrayList<>();
+        for (MetadataCatalogEntry entry : metadataCatalogRegistry.entries()) {
+            if (filter != null && !isBlank(filter.serviceType())
+                    && !entry.serviceType().equals(filter.serviceType())) {
+                continue;
+            }
+            if (filter != null && !isBlank(filter.componentId())
+                    && !entry.componentId().equals(filter.componentId())) {
+                continue;
+            }
+            matched.add(entry);
+        }
+        return matched;
     }
 
     private TelemetryQueryV1Response notImplemented(Target target, QueryMode mode,

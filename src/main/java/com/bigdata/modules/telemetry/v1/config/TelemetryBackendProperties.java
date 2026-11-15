@@ -23,6 +23,8 @@ public class TelemetryBackendProperties {
     private List<FlinkRestConfig> flinkRest = new ArrayList<>();
     private List<SparkRestConfig> sparkRest = new ArrayList<>();
     private List<YarnConfig> yarn = new ArrayList<>();
+    private List<DsConfig> dsApi = new ArrayList<>();
+    private List<DorisAuditConfig> dorisAudit = new ArrayList<>();
 
     public List<PromqlConfig> getPrometheus() {
         return prometheus;
@@ -80,18 +82,152 @@ public class TelemetryBackendProperties {
         this.yarn = yarn;
     }
 
+    public List<DsConfig> getDsApi() {
+        return dsApi;
+    }
+
+    public void setDsApi(List<DsConfig> dsApi) {
+        this.dsApi = dsApi;
+    }
+
+    public List<DorisAuditConfig> getDorisAudit() {
+        return dorisAudit;
+    }
+
+    public void setDorisAudit(List<DorisAuditConfig> dorisAudit) {
+        this.dorisAudit = dorisAudit;
+    }
+
     /**
-     * YARN 聚合日志配置：走 {@code yarn logs} CLI 读取已聚合日志，
-     * RM REST 仅用于把 {@code ref.jobName} 解析成 applicationId。
+     * DolphinScheduler 任务日志配置：登录后按 taskInstanceId 读取 {@code /log/detail}，
+     * 只承载 {@code log.task}，不用于服务自身日志。
+     */
+    public static class DsConfig {
+        private String id = "ds-api";
+        /** DS API 根地址，需包含上下文，如 http://ds:12345/dolphinscheduler。 */
+        private String baseUrl = "";
+        /** 登录凭据：username / password 或对应的 secret ref。 */
+        private Auth auth = new Auth();
+        /** 可选的项目范围；留空时遍历当前账号的授权项目。 */
+        private List<Long> projectCodes = new ArrayList<>();
+        private DsLimits limits = new DsLimits();
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public Auth getAuth() {
+            return auth;
+        }
+
+        public void setAuth(Auth auth) {
+            this.auth = auth;
+        }
+
+        public List<Long> getProjectCodes() {
+            return projectCodes;
+        }
+
+        public void setProjectCodes(List<Long> projectCodes) {
+            this.projectCodes = projectCodes;
+        }
+
+        public DsLimits getLimits() {
+            return limits;
+        }
+
+        public void setLimits(DsLimits limits) {
+            this.limits = limits;
+        }
+    }
+
+    public static class DsLimits {
+        private int timeoutMs = 10000;
+        private long maxBytes = 1048576L;
+        private int maxLines = 5000;
+        /** 单页请求的行数上限。 */
+        private int pageSize = 1000;
+        /** 最多翻页次数，防止异常场景无限分页。 */
+        private int maxPages = 20;
+
+        public int getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(int timeoutMs) {
+            this.timeoutMs = timeoutMs;
+        }
+
+        public long getMaxBytes() {
+            return maxBytes;
+        }
+
+        public void setMaxBytes(long maxBytes) {
+            this.maxBytes = maxBytes;
+        }
+
+        public int getMaxLines() {
+            return maxLines;
+        }
+
+        public void setMaxLines(int maxLines) {
+            this.maxLines = maxLines;
+        }
+
+        public int getPageSize() {
+            return pageSize;
+        }
+
+        public void setPageSize(int pageSize) {
+            this.pageSize = pageSize;
+        }
+
+        public int getMaxPages() {
+            return maxPages;
+        }
+
+        public void setMaxPages(int maxPages) {
+            this.maxPages = maxPages;
+        }
+    }
+
+    /**
+     * YARN 容器日志配置：已聚合时走 {@code yarn logs} CLI；聚合未完成时回退到
+     * NM 容器本地日志目录（RM {@code /ws/v1/cluster/nodes} → NM {@code /ws/v1/node/containers}
+     * 定位 containerId，再按 {@code node-log-root/appId/containerId/stream} 直读）。
+     *
+     * <p>RM REST 同时用于把 {@code ref.jobName} 解析成 applicationId。</p>
      */
     public static class YarnConfig {
         private String id = "yarn";
-        /** ResourceManager REST 根地址；只提供 jobName 时必填。 */
+        /** ResourceManager REST 根地址；只提供 jobName 或需要 node-local 回退时必填。 */
         private String rmBaseUrl = "";
         /** yarn 可执行文件（绝对路径或 PATH 中的命令名）。 */
         private String command = "yarn";
         /** 追加在 command 之后的固定参数（如 -D 配置）。 */
         private List<String> extraArgs = new ArrayList<>();
+        /**
+         * 本进程可见的 NM 容器日志根目录（如挂载到宿主后的 {@code /var/lib/dataforge-yarn/nm-logs}）。
+         * 留空则 node-local 路径不可用；未挂载时即使配置了也读不到文件。
+         */
+        private String nodeLogRoot = "";
+        /**
+         * NM REST 根地址覆盖，单节点/端口映射场景使用（如 {@code http://127.0.0.1:8042}）。
+         * 留空时按 RM 返回的 {@code nodeHTTPAddress} 逐个拼接。
+         */
+        private String nmBaseUrl = "";
         private Auth auth = new Auth();
         private YarnLimits limits = new YarnLimits();
 
@@ -127,6 +263,22 @@ public class TelemetryBackendProperties {
             this.extraArgs = extraArgs;
         }
 
+        public String getNodeLogRoot() {
+            return nodeLogRoot;
+        }
+
+        public void setNodeLogRoot(String nodeLogRoot) {
+            this.nodeLogRoot = nodeLogRoot;
+        }
+
+        public String getNmBaseUrl() {
+            return nmBaseUrl;
+        }
+
+        public void setNmBaseUrl(String nmBaseUrl) {
+            this.nmBaseUrl = nmBaseUrl;
+        }
+
         public Auth getAuth() {
             return auth;
         }
@@ -153,6 +305,8 @@ public class TelemetryBackendProperties {
         private int maxConcurrent = 2;
         /** 等待并发槽位的最长时间，超时返回 RATE_LIMITED。 */
         private long acquireTimeoutMs = 2000L;
+        /** node-local 回退时最多扫描的 NM 节点数，避免大集群逐个探测。 */
+        private int maxNodes = 50;
 
         public int getTimeoutMs() {
             return timeoutMs;
@@ -185,6 +339,14 @@ public class TelemetryBackendProperties {
         public void setAcquireTimeoutMs(long acquireTimeoutMs) {
             this.acquireTimeoutMs = acquireTimeoutMs;
         }
+
+        public int getMaxNodes() {
+            return maxNodes;
+        }
+
+        public void setMaxNodes(int maxNodes) {
+            this.maxNodes = maxNodes;
+        }
     }
 
     /** Flink JobManager / REST 网关配置。 */
@@ -193,6 +355,12 @@ public class TelemetryBackendProperties {
         private String baseUrl = "";
         private Auth auth = new Auth();
         private EngineLimits limits = new EngineLimits();
+        /** 异常摘要最多返回条数；Flink 2.2 自身默认上限也是 20。 */
+        private int maxExceptions = 20;
+        /** 每条根异常最多保留的并发异常条数，超出只计数并标记 truncated。 */
+        private int maxConcurrentExceptions = 20;
+        /** 单条 stacktrace 输出的字符上限，超出客户端截断并标记。 */
+        private int maxStackTraceChars = 20000;
 
         public String getId() {
             return id;
@@ -224,6 +392,30 @@ public class TelemetryBackendProperties {
 
         public void setLimits(EngineLimits limits) {
             this.limits = limits;
+        }
+
+        public int getMaxExceptions() {
+            return maxExceptions;
+        }
+
+        public void setMaxExceptions(int maxExceptions) {
+            this.maxExceptions = maxExceptions;
+        }
+
+        public int getMaxConcurrentExceptions() {
+            return maxConcurrentExceptions;
+        }
+
+        public void setMaxConcurrentExceptions(int maxConcurrentExceptions) {
+            this.maxConcurrentExceptions = maxConcurrentExceptions;
+        }
+
+        public int getMaxStackTraceChars() {
+            return maxStackTraceChars;
+        }
+
+        public void setMaxStackTraceChars(int maxStackTraceChars) {
+            this.maxStackTraceChars = maxStackTraceChars;
         }
     }
 
@@ -725,6 +917,144 @@ public class TelemetryBackendProperties {
 
         public void setPitKeepAliveSeconds(int pitKeepAliveSeconds) {
             this.pitKeepAliveSeconds = pitKeepAliveSeconds;
+        }
+    }
+
+    /**
+     * Doris 审计日志配置：只承载 {@code log.service} 的 {@code slowquery}。
+     *
+     * <p>走固定只读 SQL 查询 {@code __internal_schema.audit_log}（需 FE
+     * {@code enable_audit_plugin=true}），没有任意 SQL 入口；条件、排序列与 LIMIT 都是模板的一部分。
+     * 表不存在或审计未开启时本后端不可用，由目录声明的 {@code local-disk} 退路去解析
+     * FE 的 {@code fe.audit.log}。</p>
+     */
+    public static class DorisAuditConfig {
+        private String id = "doris-audit";
+        /** FE MySQL 协议地址，需指向能访问 __internal_schema 的 FE。 */
+        private String jdbcUrl = "jdbc:mysql://127.0.0.1:9030/__internal_schema";
+        private String username = "root";
+        private String password = "";
+        private String usernameRef = "";
+        private String passwordRef = "";
+        /** 慢查询阈值（毫秒），对应 audit_log.query_time。Doris 自身 qe_slow_log_ms 默认 5000。 */
+        private long slowQueryMs = 5000L;
+        /**
+         * audit_log.time 所在时区（FE 进程时区）。留空用 JVM 默认时区；
+         * 两者不一致时时间窗会整体偏移，必须按实际 FE 时区配置。
+         */
+        private String zone = "";
+        /** 请求未带时间范围时的默认回看窗口（小时），避免全表扫描。 */
+        private int defaultLookbackHours = 24;
+        private DorisAuditLimits limits = new DorisAuditLimits();
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getJdbcUrl() {
+            return jdbcUrl;
+        }
+
+        public void setJdbcUrl(String jdbcUrl) {
+            this.jdbcUrl = jdbcUrl;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
+
+        public String getUsernameRef() {
+            return usernameRef;
+        }
+
+        public void setUsernameRef(String usernameRef) {
+            this.usernameRef = usernameRef;
+        }
+
+        public String getPasswordRef() {
+            return passwordRef;
+        }
+
+        public void setPasswordRef(String passwordRef) {
+            this.passwordRef = passwordRef;
+        }
+
+        public long getSlowQueryMs() {
+            return slowQueryMs;
+        }
+
+        public void setSlowQueryMs(long slowQueryMs) {
+            this.slowQueryMs = slowQueryMs;
+        }
+
+        public String getZone() {
+            return zone;
+        }
+
+        public void setZone(String zone) {
+            this.zone = zone;
+        }
+
+        public int getDefaultLookbackHours() {
+            return defaultLookbackHours;
+        }
+
+        public void setDefaultLookbackHours(int defaultLookbackHours) {
+            this.defaultLookbackHours = defaultLookbackHours;
+        }
+
+        public DorisAuditLimits getLimits() {
+            return limits;
+        }
+
+        public void setLimits(DorisAuditLimits limits) {
+            this.limits = limits;
+        }
+    }
+
+    public static class DorisAuditLimits {
+        private int timeoutMs = 10000;
+        private int maxRows = 500;
+        private long maxBytes = 524288L;
+
+        public int getTimeoutMs() {
+            return timeoutMs;
+        }
+
+        public void setTimeoutMs(int timeoutMs) {
+            this.timeoutMs = timeoutMs;
+        }
+
+        public int getMaxRows() {
+            return maxRows;
+        }
+
+        public void setMaxRows(int maxRows) {
+            this.maxRows = maxRows;
+        }
+
+        public long getMaxBytes() {
+            return maxBytes;
+        }
+
+        public void setMaxBytes(long maxBytes) {
+            this.maxBytes = maxBytes;
         }
     }
 }

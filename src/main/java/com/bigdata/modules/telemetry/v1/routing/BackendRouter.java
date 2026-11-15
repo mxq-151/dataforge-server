@@ -70,6 +70,25 @@ public class BackendRouter {
     }
 
     /**
+     * 引擎结构化证据（如 Flink 异常摘要）的后端选择。
+     *
+     * <p>复用指标后端的实例展开与排序规则，不新建注册表；证据目录只声明 binding，
+     * 实际实例仍来自 {@code MetricBackend} 注册表。</p>
+     */
+    public BackendSelection selectEvidence(Target target, String evidenceName,
+                                           List<BackendBinding> bindings) {
+        List<BackendCandidate> candidates = new ArrayList<>();
+        List<BackendSkip> skipped = new ArrayList<>();
+        for (BackendBinding binding : bindings) {
+            collect(binding, null, candidates, skipped);
+        }
+        RoutingProperties.Rule rule = matchingRule(routing.getRouting().getMetric().getRules(),
+                target, evidenceName, null);
+        sort(candidates, rule, List.of(), routing.getRouting().getMetric().getDefaultOrder());
+        return new BackendSelection(candidates, skipped, preferred(candidates));
+    }
+
+    /**
      * 两个候选是否允许互相回退：目录声明同一等价组，且配置显式批准该组包含两者。
      *
      * <p>Prometheus 与 VictoriaMetrics 的目录声明没有等价组，因此永远不互相回退。</p>
@@ -263,6 +282,8 @@ public class BackendRouter {
             case FLINK_REST -> "telemetry.backends.flink-rest[]";
             case SPARK_REST -> "telemetry.backends.spark-rest[]";
             case YARN -> "telemetry.backends.yarn[]";
+            case DS_API -> "telemetry.backends.ds-api[]";
+            case DORIS_AUDIT -> "telemetry.backends.doris-audit[]";
         };
     }
 

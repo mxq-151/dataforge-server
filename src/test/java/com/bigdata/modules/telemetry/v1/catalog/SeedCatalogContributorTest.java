@@ -30,8 +30,15 @@ class SeedCatalogContributorTest {
                     String as = String.format("%s/%s/%s/%s", entry.serviceType(),
                             entry.componentId(), stream.dataType().wire(), stream.stream());
                     if (stream.dataType() == LogDataType.SERVICE) {
-                        assertThat(binding.backendType()).as(as)
-                                .isIn(BackendType.LOCAL_DISK, BackendType.ELASTICSEARCH);
+                        if (binding.backendType() == BackendType.DORIS_AUDIT) {
+                            assertThat(entry.serviceType()).as(as).isEqualTo("doris");
+                            assertThat(stream.stream()).as(as).isEqualTo("slowquery");
+                        } else {
+                            assertThat(binding.backendType()).as(as)
+                                    .isIn(BackendType.LOCAL_DISK, BackendType.ELASTICSEARCH);
+                        }
+                    } else if ("ds".equals(entry.serviceType())) {
+                        assertThat(binding.backendType()).as(as).isEqualTo(BackendType.DS_API);
                     } else {
                         assertThat(binding.backendType()).as(as).isEqualTo(BackendType.YARN);
                     }
@@ -81,13 +88,33 @@ class SeedCatalogContributorTest {
         for (ComponentCatalogEntry entry : entries) {
             for (LogStreamDefinition stream : entry.logStreams()) {
                 if (stream.dataType() == LogDataType.TASK) {
+                    List<String> expected = "ds".equals(entry.serviceType())
+                            ? List.of("jobId", "jobName")
+                            : List.of("taskId", "jobName");
                     assertThat(stream.requiredAnyRefs())
                             .as("%s/%s", entry.componentId(), stream.stream())
-                            .containsExactlyInAnyOrder("taskId", "jobName");
+                            .containsExactlyInAnyOrderElementsOf(expected);
                     assertThat(stream.requirements()).isNotEmpty();
                 }
             }
         }
+    }
+
+    @Test
+    @DisplayName("ds.worker 只声明 log.task，绑定 ds-api，不声明指标 / 引擎证据")
+    void dsTaskLogsUseDsApi() {
+        ComponentCatalogEntry ds = entry("ds", "ds.worker");
+
+        assertThat(ds.metrics()).isEmpty();
+        assertThat(ds.engineEvidence()).isEmpty();
+        assertThat(ds.logStreams()).hasSize(2).allSatisfy(stream -> {
+            assertThat(stream.dataType()).isEqualTo(LogDataType.TASK);
+            assertThat(stream.supportedBackends()).singleElement().satisfies(binding -> {
+                assertThat(binding.backendType()).isEqualTo(BackendType.DS_API);
+                assertThat(binding.status()).isEqualTo(BackendStatus.IMPLEMENTED);
+            });
+            assertThat(stream.requiredAnyRefs()).containsExactlyInAnyOrder("jobId", "jobName");
+        });
     }
 
     @Test
@@ -154,6 +181,48 @@ class SeedCatalogContributorTest {
         assertThat(metric(driver, "spark_application_attempt_count").rawMetric())
                 .isEqualTo("attempts");
         assertThat(metric(driver, "spark_stage_attempts").note()).contains("attemptId");
+    }
+
+    @Test
+    @DisplayName("Doris slowquery：审计表优先，fe.audit.log 走 local-disk 退路，同组才可回退")
+    void dorisSlowQueryUsesAuditWithLocalDiskFallback() {
+        for (String componentId : List.of("doris.fe", "doris.be")) {
+            ComponentCatalogEntry doris = entry("doris", componentId);
+            LogStreamDefinition slowQuery = doris.logStreams().stream()
+                    .filter(stream -> "slowquery".equals(stream.stream()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertThat(slowQuery.dataType()).isEqualTo(LogDataType.SERVICE);
+            assertThat(slowQuery.supportedBackends())
+                    .extracting(BackendBinding::backendType)
+                    .containsExactly(BackendType.DORIS_AUDIT, BackendType.LOCAL_DISK);
+            assertThat(slowQuery.supportedBackends())
+                    .allSatisfy(binding -> {
+                        assertThat(binding.status()).isEqualTo(BackendStatus.IMPLEMENTED);
+                        assertThat(binding.equivalenceGroup()).isEqualTo("doris-slowquery");
+                    });
+            assertThat(slowQuery.supportedBackends().get(0).priority())
+                    .isLessThan(slowQuery.supportedBackends().get(1).priority());
+            assertThat(slowQuery.requirements()).isNotEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("非 Doris 的 slowquery 仍为声明未实现")
+    void otherSlowQueryStaysDeclared() {
+        for (String service : List.of("starrocks", "clickhouse")) {
+            for (ComponentCatalogEntry entry : entries) {
+                if (!service.equals(entry.serviceType())) {
+                    continue;
+                }
+                entry.logStreams().stream()
+                        .filter(stream -> "slowquery".equals(stream.stream()))
+                        .forEach(stream -> assertThat(stream.supportedBackends())
+                                .allSatisfy(binding -> assertThat(binding.status())
+                                        .isEqualTo(BackendStatus.DECLARED_NOT_IMPLEMENTED)));
+            }
+        }
     }
 
     // ------------------------------------------------------------------ 辅助
