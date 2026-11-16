@@ -193,13 +193,20 @@ telemetry:
   #   flink-rest:
   #     - id: flink-rest
   #       base-url: http://flink-jobmanager:8081
+  #       # 同时作为 metadata/query scope=version|config 的通道：
+  #       # version 读 /overview.flink-version；config 的 flink section 读 /jobmanager/config，
+  #       # resources section 读 /overview + /taskmanagers 的 CPU/内存分配，
+  #       # job section（需 ref.jobId）读 /jobs/{jobId} 与 /jobs/{jobId}/config。
   #       limits: { timeout-ms: 10000, max-response-bytes: 8388608, max-series: 2000 }
   #       # 异常摘要只走 GET /jobs/{jobId}/exceptions；2.2 无单条异常子资源。
   #       max-exceptions: 20            # 异常条数上限（Flink 服务端默认也是 20）
   #       max-concurrent-exceptions: 20 # 每条根异常保留的并发异常数
   #       max-stack-trace-chars: 20000  # 单条 stacktrace 输出字符上限，超出客户端截断并标记
-  #   spark-rest:
-  #     - id: spark-rest
+  #   # Spark SHS REST：只承载完成态 instant 快照（application attempts、stage shuffle/spill、
+  #   # taskSummary 分位、executor 内存/GC/shuffle）。不是时间序列，range / rate 会被拒绝；
+  #   # 作业配置走 metadata/query scope=config 的 spark-shs provider，不再有独立 config 端点。
+  #   spark-shs-rest:
+  #     - id: spark-shs-rest
   #       base-url: http://spark-history:18080
   #       mode: history   # history | live
   #       limits: { timeout-ms: 10000, max-response-bytes: 8388608, max-series: 2000 }
@@ -220,10 +227,10 @@ telemetry:
   #   ds-api:
   #     - id: ds-api
   #       base-url: http://dolphinscheduler:12345/dolphinscheduler
-  #       auth:
-  #         username: admin
-  #         password-ref: 'env:DS_PASSWORD'
-  #       project-codes: []   # 留空时遍历当前账号的授权项目
+  #       # DS 访问令牌（t_ds_access_token.token）：请求头 token 认证，不登录、不维护 session；
+  #       # 生产用 token-ref 引用环境变量，避免明文写在 yml 里。
+  #       token-ref: 'env:DS_TOKEN'
+  #       project-codes: []   # 留空时遍历该令牌可见的项目
   #       limits: { timeout-ms: 10000, max-bytes: 1048576, max-lines: 5000, page-size: 1000, max-pages: 20 }
   #   # Doris 慢查询：只承载 log.service 的 slowquery。走固定只读 SQL 查询
   #   # __internal_schema.audit_log（需 FE enable_audit_plugin=true），没有任意 SQL 入口。
@@ -251,7 +258,7 @@ telemetry:
   #
   # routing:
   #   metric:
-  #     default-order: [prometheus-prod, vm-prod, flink-rest, spark-rest]
+  #     default-order: [prometheus-prod, vm-prod, flink-rest, spark-shs-rest]
   #     rules:
   #       - service-type: flink
   #         metric: 'flink_checkpoint_*'
@@ -276,7 +283,8 @@ telemetry:
   #   - Flink：/jobmanager/metrics、/taskmanagers/{id}/metrics；job/vertex 级需 ref.jobId/ref.vertexId
   #   - ClickHouse：system.metrics / system.events / system.asynchronous_metrics
   #   - Doris：FE/BE 的 GET /metrics
-  #   - Spark SHS：实测无法以 Prometheus 格式暴露，保留最小手工语义表并显式标注
+  #   - Spark SHS：进程 JVM 指标由 jmx_exporter + VM 抓取；完成态指标走 spark-shs-rest 手工语义；
+  #     metadata scope=targets 读 /api/v1/applications，scope=config 读 environment
   # 默认全部关闭；未启用的 provider 不参与路由，查询返回 UNAVAILABLE + NOT_CONFIGURED。
   # 密码统一走 password-ref（env: / file: / config: / plain:），不要明文写在 yml 里。
   # Doris / StarRocks 走独立 JDBC 连接池（上限 2、connectTimeout/socketTimeout），
@@ -310,6 +318,15 @@ telemetry:
   #       # scope=metrics 走 FE/BE 的 Prometheus 文本端点；Doris 没有系统表指标目录。
   #       fe-metrics-url: http://127.0.0.1:8030/metrics
   #       be-metrics-url: http://127.0.0.1:8040/metrics
+  #     # Spark SHS 配置：读取 /api/v1/applications/{applicationId}/environment，
+  #     # 作为 metadata/query scope=config 的通道；同时用 /api/v1/applications
+  #     # 提供 scope=targets 的作业清单。ref.applicationId 在 config 查询时必填。
+  #     # version 取应用详情 attempts[].appSparkVersion（SHS 原值，不猜、不补）。
+  #     spark-shs:
+  #       enabled: false
+  #       order: 30
+  #       base-url: http://spark-history:18080
+  #       # auth: { type: basic, username: spark, password-ref: 'env:SPARK_SHS_PASSWORD' }
   #     starrocks-fe:            # 未对真实实例验证
   #       enabled: false
   #       order: 40
